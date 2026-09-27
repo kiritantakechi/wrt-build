@@ -14,7 +14,8 @@ qBittorrent 这类应用需要 Qt6 和 libtorrent，如果原生打包，自有 
   - 由 fstools 的 block-mount 按 UUID 挂载。
 - **服务等盘再启动**：依赖数据盘的服务用 procd 的挂载点触发器（`procd_add_restart_mount_trigger`）在盘挂好之后启动或重启，不用 sleep 轮询。
 - **容器**
-  - 用 podman + crun + netavark，防火墙后端是 nftables；容器存储（graphroot）放在 `@containers`。
+  - 用 podman + crun + netavark；容器存储（graphroot）放在 `@containers`。
+  - netavark 只负责建网桥和分配地址，不安装任何防火墙规则（`firewall_driver = "none"`）。容器网桥归入 fw4 的一个独立区域，出网的地址转换和 LAN 一样由 einat 完成；需要对外开放端口时，用 fw4 的端口转发。
   - 容器网桥 podman0 纳入 dae 的 LAN 绑定。
   - qBittorrent 等应用都以容器方式运行。
 - **文件共享**

@@ -34,9 +34,9 @@ R4S 要同时负责透明代理、完全锥形 NAT 和上行 QoS。这里选择�
 - **转发加速**：打开 fw4 的软件 flowtable，但要在 PPPoE 下实测能否命中；命中不了或者出问题就关掉。
 - **挂载顺序约束**：WAN 口和 LAN 口上各个 eBPF 程序的挂载顺序和返回值约束要写成规格，并提供可检查的方法（`bpftool net show`）。
 - **自有 feed 新增**
-  - dae：把 ImmortalWrt 的 2.0.0 Makefile 升级到 2.1.1；Go 依赖 vendor 下来；审查 `go.mod` 里被替换成个人 fork `olicesx/outbound` 的那个依赖。
+  - dae：把 ImmortalWrt 的 2.0.0 Makefile 升级到 2.1.1；Go 依赖按 `go.sum` 校验，并缓存在 `dl/`；审查 `go.mod` 里被替换成个人 fork `olicesx/outbound` 的那个依赖。
   - luci-app-dae。
-  - einat-ebpf：Rust 依赖 vendor 下来。
+  - einat-ebpf：Rust 依赖按 `Cargo.lock` 校验，并缓存在 `dl/`。
   - luci-app-einat：可选。
 - **注册健康检查**：向 `r4s-ab-rollback` 的健康检查注册两项——dae 和 einat 的 BPF 程序已挂载。
 
@@ -59,7 +59,7 @@ R4S 要同时负责透明代理、完全锥形 NAT 和上行 QoS。这里选择�
 
 - **依赖 `r4s-build-foundation` 提供的内核特性**：BTF、`BPF_EVENTS`、`CGROUP_BPF`；以及 kmod-sched-core、kmod-sched-bpf、kmod-veth、kmod-sched-cake。
 - **fw4 规则变化**：WAN 区域对 tcp、udp、icmp 关闭 masquerade；新增一条按 mark 放行的转发规则。
-- **构建依赖**：Go ≥ 1.26、Rust；BPF 对象用 llvm-bpf 22 提供的 clang 编译。
+- **构建依赖**：Go ≥ 1.26、Rust；BPF 对象用 flake 固定的宿主 clang 编译（`BPF_TOOLCHAIN_HOST`，与 `r4s-build-foundation` 一致）。
 - **需要上真机验证**：
   - PPPoE 重拨后 einat 和 qosify 能不能重新挂上。
   - dae 在 6.18 上创建网络命名空间时是否触发 conntrack 告警（issue #848 是在 6.6 上报的）。

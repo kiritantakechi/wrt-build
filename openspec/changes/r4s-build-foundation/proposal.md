@@ -29,7 +29,7 @@
   - 使用上游默认的 6.18。
   - 打开 BTF（同时关闭 `DEBUG_INFO_REDUCED`）、`BPF_EVENTS`、`CGROUPS`/`CGROUP_BPF`；只用 cgroup v2，不开 `MEMCG_V1`。
   - EROFS 编进内核；打开 `F2FS_FS_COMPRESSION`，支持 zstd。
-  - 默认拥塞控制用 BBRv3 + fq。BBRv3 补丁采用 sbwml 的 6.18 移植，去掉 x86 专用的那个，共 19 个。
+  - 默认拥塞控制用 BBRv3 + fq。BBRv3 补丁采用 sbwml 的 6.18 移植，20 个全部保留。其中第 19 个的标题虽然带 x86，实际修改的是通用的 `net/ipv4/bpf_tcp_ca.c`；BBRv3 改了 `tcp_congestion_ops` 的成员，缺少这个补丁，BPF struct_ops 就编译不过。
 - **根文件系统**
   - 根文件系统用 EROFS（`lz4hc,12`），不再生成 squashfs。
   - overlay 用 f2fs，在启动参数里加 `fstools_overlay_compression_type=zstd` 开启压缩。

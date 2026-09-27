@@ -17,12 +17,13 @@
   - 单槽升级镜像：带 metadata，可以被 sysupgrade 校验。
 - **U-Boot 选槽**
   - 在 U-Boot 2026.07 上通过 `UBOOT_CUSTOMIZE_CONFIG` 打开 `BOOTCOUNT_LIMIT`。
-  - 环境变量存放在 SD 卡分区前的空隙里，做法参照上游 uboot-envtools 给 orangepi-r1-plus 用的 `0x3f8000`。
+  - 环境变量存放在 SD 卡分区前的空隙里。R4S 的 U-Boot 默认配置本来就把它放在 `0x3F8000`，大小 32 KiB，和上游 uboot-envtools 给 orangepi-r1-plus 的设置一样。
   - 选槽逻辑编进 U-Boot 的启动命令，不依赖两个槽共用的启动脚本。
   - bootcount 超过 `bootlimit` 后，由 `altbootcmd` 切换到另一个槽位。
 - **硬件看门狗**
   - 启用 RK3399 的 dw_wdt，由 procd 定期喂狗。
   - 内核卡死会变成复位，并让 bootcount 加一。
+  - 内核 panic 后自动重启。rockchip 的内核配置把 `PANIC_TIMEOUT` 设成了 0，不处理的话 panic 之后会一直卡住。
 - **严格健康检查**
   - 判定启动成功的条件：系统进入用户态，br-lan 起来，dropbear 和 uhttpd 在监听，已注册的组件检查项全部通过（例如 dae、einat 的 BPF 程序已挂载）。
   - 不检查 WAN，避免运营商断网时误回滚。
