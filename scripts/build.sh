@@ -26,9 +26,12 @@ ccache_run() {
 }
 
 jobs=${WRT_JOBS:-$(nproc)}
-# Build times depend on the CPU, which differs between CI runners.
-cpu=$(lscpu | awk -F ': *' '$1 == "Vendor ID" { v = $2 } $1 == "Model name" { m = $2 }
-	END { print (m != "" && m != "-") ? m : v }')
+# Build times depend on the CPU, which differs between CI runners. lscpu names some
+# cores (Apple's) only by their vendor.
+cpu=$(lscpu | awk -F ': *' '
+	$1 == "Vendor ID" { vendor = $2 }
+	$1 == "Model name" && $2 != "-" { model = $2 }
+	END { print (model != "" ? model : vendor) }')
 info "make download"
 make -C "${TREE}" -j"${jobs}" download
 # Statistics of this build alone: the cache itself carries them from earlier builds.
