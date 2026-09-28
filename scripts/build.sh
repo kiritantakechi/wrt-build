@@ -15,11 +15,29 @@ ensure_fhs build "$@"
 
 [ -f "${TREE}/.config" ] || die "no .config; run 'just config ${profile}' first"
 
+# ccache_run <args>: the ccache that OpenWrt builds (tools/ccache), on the cache
+# directory that rules.mk gives it, $(TOPDIR)/.ccache. OpenWrt prints the cache
+# statistics after the build itself, but only into the silenced output.
+ccache_run() {
+	grep -qx 'CONFIG_CCACHE=y' "${TREE}/.config" || return 0
+	ccache="${TREE}/staging_dir/host/bin/ccache"
+	[ -x "${ccache}" ] || return 0
+	CCACHE_DIR="${TREE}/.ccache" "${ccache}" "$@"
+}
+
 jobs=${WRT_JOBS:-$(nproc)}
+# Build times depend on the CPU, which differs between CI runners.
+cpu=$(lscpu | awk -F ': *' '$1 == "Vendor ID" { v = $2 } $1 == "Model name" { m = $2 }
+	END { print (m != "" && m != "-") ? m : v }')
 info "make download"
 make -C "${TREE}" -j"${jobs}" download
-info "make -j${jobs} (${profile})"
-make -C "${TREE}" -j"${jobs}" ||
+# Statistics of this build alone: the cache itself carries them from earlier builds.
+ccache_run --zero-stats >/dev/null
+info "make -j${jobs} (${profile}) on ${cpu}"
+status=0
+make -C "${TREE}" -j"${jobs}" || status=$?
+ccache_run --show-stats --verbose
+[ "${status}" -eq 0 ] ||
 	die "build failed; rerun 'make -C ${TREE} -j1 V=s' on the failing package for details"
 
 # The kernel configuration overlay must reach the kernel unchanged: a line that
