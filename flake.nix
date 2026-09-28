@@ -72,6 +72,10 @@
                 ps.pyelftools
               ]))
               gcc
+              # The gcc wrapper finds libc headers through -isystem, but configure
+              # scripts that search the filesystem (CMake find_path for iconv.h in
+              # tools/cmake) need them in /usr/include.
+              glibc.dev
               binutils
               pkg-config
               bison
