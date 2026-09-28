@@ -50,63 +50,61 @@ total ~ 2.2 GiB  -> fits a 4 GB card
 
 ### D2. Image artifacts
 
-- **Generator script**: `scripts/gen_image_ab.sh` uses `ptgen` to create the four partitions; the boot partitions still use `make_ext4fs`.
-- **Factory image**: both slots have identical contents, and the U-Boot environment area is zero-filled, so the first boot goes to slot A.
-- **Upgrade image**: `sysupgrade.tar`, reusing `Build/sysupgrade-tar`. It contains `kernel` (the ext4 image of the boot partition), `root` (EROFS), and `CONTROL`, with metadata attached by `append-metadata`.
+```
+IMAGE/factory.img.gz    = boot-common | ab-boot | ab-disk | gzip
+IMAGE/sysupgrade.tar.gz = boot-common | ab-boot | sysupgrade-tar kernel=$$$$@.bootfs | gzip | append-metadata
+```
+
+- **Symmetric pipelines**: `ab-boot` makes the ext4 boot partition of one slot (`make_ext4fs`, the kernel FIT as `kernel.img`), and both images take it from there. Both R4S devices get them through `Device/wrt-ab`.
+- **Factory image**: `ab-disk` runs `scripts/gen_image_ab.sh`, which lays out the four partitions with `ptgen` and writes the same boot and root images into both slots; the rest reads as zeros, so neither slot carries an old overlay, and the U-Boot environment area stays empty, so the first boot goes to slot A.
+- **Upgrade image**: `sysupgrade.tar.gz`, reusing `Build/sysupgrade-tar`. It contains `kernel` (the ext4 image of the boot partition), `root` (EROFS), and `CONTROL`, gzip'd, with metadata attached by `append-metadata`.
 - **Alternative**: keep the whole-disk image and slice partitions out of it. Rejected, because the whole-disk image carries U-Boot and the partition table.
 
 ### D3. U-Boot: logic fixed in the binary, split into two layers, "shared logic + board constants"
 
 ```
-uboot/wrt-ab.env          common state machine (single source of truth)
-uboot/board-r4s.env       wrt_mmc=1  wrt_console=ttyS2,1500000
-                          wrt_earlycon=uart8250,mmio32,0xff1a0000  wrt_fdt=      (FIT dtb)
-uboot/board-qemu.env      wrt_mmc=0  wrt_console=ttyAMA0
-                          wrt_earlycon=                            wrt_fdt=${fdtcontroladdr}
+uboot/wrt-ab.env        shared state machine (single source of truth)
+uboot/wrt-ab.config     shared configuration fragment
+uboot/wrt-ab.mk         build glue both packages include (env/uboot/wrt-ab.mk in the tree)
+uboot/board-r4s.env     wrt_mmc=1  wrt_console=console=ttyS2,1500000 earlycon=uart8250,...
+                        wrt_bootos=bootm ${kernel_addr_r}
+uboot/board-r4s.config  WDT, WATCHDOG_AUTOSTART, WATCHDOG_TIMEOUT_MSECS=60000
+uboot/board-qemu.env    #include the stock qemu-arm.env;  wrt_mmc=0  wrt_console=console=ttyAMA0
+                        wrt_bootos=iminfo, unpack kernel-1 by hand, booti - ${fdtcontroladdr}
+uboot/board-qemu.config environment on MMC at 0x3F8000/0x8000, MMC_PCI, CMD_UNLZMA, CMD_FDT
 ```
 
-- **Two symmetric builds**: each U-Boot build concatenates "board constants + shared logic" into the text environment file that `ENV_SOURCE_FILE` expects.
-  - The shipped `nanopi-r4s-rk3399` variant: modify `package/boot/uboot-rockchip/Makefile`, applying it through `UBOOT_CUSTOMIZE_CONFIG` to this variant only.
-  - The test `qemu_arm64` build: lives in the `uboot-wrt-qemu` package in the in-house feed. It is a test artifact only and does not go into the firmware.
-  - Both must match the `uboot-rockchip` version exactly, enforced by the code-standard checks.
-- **Config shared by both builds**:
+- **Two symmetric builds**: each build adds the fragments `wrt-ab` and `board-<board>` after its defconfig (`UBOOT_CONFIG`, merged by U-Boot's `%.config` rule), and writes "board constants + shared logic" as the board's `wrt.env` (`ENV_SOURCE_FILE="wrt"`). `Build/Prepare/WrtAB` in `wrt-ab.mk` does both.
+  - The shipped `nanopi-r4s-rk3399` variant: `package/boot/uboot-rockchip/Makefile` includes `wrt-ab.mk` and applies it to this variant only.
+  - The test `qemu_arm64` build: the `uboot-wrt-qemu` package in the in-house feed. It takes `PKG_VERSION` and `PKG_HASH` from `uboot-rockchip/Makefile`, so the two cannot drift apart. It installs nothing; `scripts/build.sh` copies its binary into the outputs as `u-boot-qemu.bin`.
+  - `scripts/fetch.sh` links `uboot/` into the tree as `env/uboot` before any package index is built, since both Makefiles include it.
+- **Three board constants**, the same names in both files: the SD card's MMC device, the console arguments, and `wrt_bootos`, which starts the kernel in a slot's FIT. The FIT loads its kernel at an RK3399 RAM address (`0x03200000`), which is not RAM on the QEMU `virt` machine, so the emulator's `wrt_bootos` checks the FIT with `iminfo`, unpacks `kernel-1` itself and starts it with `booti` and the device tree QEMU passed to U-Boot; the R4S's is plain `bootm`.
+- **The writable list**: `ENV_WRITEABLE_LIST` takes the list only from the C define `CFG_ENV_FLAGS_LIST_STATIC`, so `wrt-ab.mk` passes `boot_slot:sw,bootcount:dw,upgrade_available:dw` through `KBUILD_CFLAGS`. The list restricts only what is imported from the stored environment; variables set at run time (`wrt_bp`, `wrt_root`, `bootargs`, ...) need no entry.
+- **Shared logic** (`wrt-ab.env`; `bootcmd` and `altbootcmd` come from `wrt-ab.config`):
 
 ```
---enable BOOTCOUNT_LIMIT --enable BOOTCOUNT_ENV --set-val BOOTCOUNT_BOOTLIMIT 3
---enable ENV_WRITEABLE_LIST
---set-str ENV_FLAGS_LIST_STATIC "boot_slot:sw,bootcount:dw,upgrade_available:dw,<runtime vars>:sw"
---enable USE_BOOTCOMMAND --set-str BOOTCOMMAND "run wrt_boot"
-r4s only:  --enable WDT --enable WATCHDOG_AUTOSTART --set-val WATCHDOG_TIMEOUT_MSECS 60000
-qemu only: --disable ENV_IS_IN_FLASH --enable ENV_IS_IN_MMC --set-val SYS_MMC_ENV_DEV 0
-           --set-hex ENV_OFFSET 0x3F8000 --set-hex ENV_SIZE 0x8000
-           --enable MMC --enable DM_MMC --enable MMC_SDHCI --enable MMC_PCI   (sdhci over PCI)
-```
+bootcmd = run wrt_boot           altbootcmd (bootcount > bootlimit=3) = run wrt_rollback
 
-- **Shared logic**:
-
-```
 wrt_boot:
-  if boot_slot != b: boot_slot=a, bp=1, rp=2   else: bp=3, rp=4
-  part uuid mmc ${wrt_mmc}:${rp} rootuuid
-  load mmc ${wrt_mmc}:${bp} ${kernel_addr_r} kernel.img || run wrt_fallback
-  bootargs = console=${wrt_console} [earlycon=${wrt_earlycon}] root=PARTUUID=${rootuuid}
-             rw rootwait panic=5 watchdog.open_timeout=90 wrt.slot=${boot_slot}
-             fstools_overlay_compression_type=zstd
-  bootm ${kernel_addr_r} [- ${wrt_fdt}]
+  if boot_slot = b: bp=3, rp=4   else: boot_slot=a, bp=1, rp=2
+  part uuid mmc ${wrt_mmc}:${rp} wrt_root
+  bootargs = ${wrt_console} root=PARTUUID=${wrt_root} rw rootwait panic=5
+             watchdog.open_timeout=90 wrt.slot=${boot_slot} fstools_overlay_compression_type=zstd
+  if load mmc ${wrt_mmc}:${bp} ${kernel_addr_r} kernel.img: run wrt_bootos
+  run wrt_fallback                 (reached only when the slot did not start)
 
-altbootcmd  (bootcount > bootlimit):
-  boot_slot = other; upgrade_available=0; bootcount=0; saveenv; run wrt_boot
+wrt_fallback (same power cycle, nothing saved):
+  if wrt_tried unset: wrt_tried=1; run wrt_other; run wrt_boot
+  else: stop at the U-Boot prompt (no loop)
 
-wrt_fallback (load failure, same power cycle):
-  if wrt_tried unset: wrt_tried=1; boot_slot = other; run wrt_boot
-  else: stop at U-Boot prompt (no loop)
+wrt_rollback: run wrt_other; upgrade_available=0; bootcount=0; saveenv; run wrt_boot
 ```
 
-- **Only three variables are opened up**: `ENV_WRITEABLE_LIST` ensures that only variables registered as writable are read from the persistent environment, so the logic always comes from the binary itself. Every temporary variable set with `setenv` during boot must also be registered as writable; the emulation tests cover each one, so there is no need to wait for a serial console check on the device.
 - **Two panic-related parameters**: `panic=5` overrides rockchip's `PANIC_TIMEOUT=0`; `watchdog.open_timeout=90` limits how long the kernel feeds the watchdog on userspace's behalf.
 - **Alternatives**:
   - Select the slot with a shared boot.scr. Rejected, because it is itself a single point of failure and can be overridden by the persistent environment.
   - Skip `ENV_WRITEABLE_LIST`. Rejected, because saved old logic would shadow newer logic later.
+  - A kernel FIT without a load address (`kernel_noload`), which both machines could boot with `bootm`. Rejected: U-Boot then assumes at most 4x compression, and the lzma kernel is already at 3.9x.
 
 ### D4. Reading and writing the environment from Linux
 
@@ -115,6 +113,7 @@ wrt_fallback (load failure, same power cycle):
   - `wrt-slot status` prints the current slot, `upgrade_available`, `bootcount`, and the result of the most recent health check.
   - `wrt-slot switch` writes the three variables with `fw_setenv -s`, then reboots.
 - **Symmetric design**: `status` and `switch` map to "read" and "write"; there are no other subcommands.
+- **One package**: the Linux side is the `wrt-ab` package of the in-house feed: `/lib/functions/wrt-ab.sh` (the running slot from `wrt.slot`, the other slot, a slot's partitions, reading and writing U-Boot variables), `wrt-slot`, `wrt-healthcheck` with its init script and `/etc/config/wrt-ab`, and the upgrade functions of D6. It is POSIX sh, checked by shfmt and shellcheck like every other script.
 
 ### D5. Health check
 
@@ -126,10 +125,13 @@ wait up to 300s, poll every 10s:
            dropbear listening on LAN addr :22; uhttpd listening on LAN addr :80
   registered: /etc/healthcheck.d/*  (executable, exit 0 = pass, 30s timeout each)
 result -> /var/run/wrt-healthcheck.json (time, pass/fail, failed items)
-trial (upgrade_available=1): pass -> fw_setenv -s {bootcount 0, upgrade_available 0}
+trial (upgrade_available=1): pass -> fw_setenv -s {boot_slot <running>, bootcount 0, upgrade_available 0}
                              fail/timeout -> logger + reboot
 confirmed: fail -> logger only
 ```
+
+- **Confirming writes the running slot**: after a fallback within one power cycle (D3), the running slot is not `boot_slot`; writing it makes the slot that passed the one that boots next.
+- **Time limits**: total, interval and per-check limits live in `/etc/config/wrt-ab`, so the emulation tests can shorten them.
 
 - **Why WAN is not checked**: an ISP outage does not mean the system is broken.
 - **Why a confirmed system does not reboot on failure**: a confirmed system has no rollback target, so rebooting would only loop in place.
@@ -142,7 +144,9 @@ confirmed: fail -> logger only
   2. `dd` kernel and root to the target slot's two partitions;
   3. starting at the end of EROFS rounded up to 64 KiB, zero the next 1 MiB;
   4. run `fw_setenv -s` to write the three variables.
-- **Config migration**: `platform_copy_config` writes the config backup to the target slot's boot partition; `79_move_config` uses `wrt.slot` to find the current slot's boot partition.
+- **Config migration**: `platform_copy_config` writes the config backup to the target slot's boot partition; `79_move_config` takes the boot partition right before the root partition on the kernel command line (1 or 3), which also holds for single-slot images.
+- **Where the code lives**: the three functions are in `/lib/upgrade/wrt-ab.sh` of the `wrt-ab` package. sysupgrade and its second stage source every `/lib/upgrade/*.sh` in name order, so they replace the whole-disk functions of the rockchip `platform.sh` without patching it; `RAMFS_COPY_BIN` takes `fw_printenv` and `fw_setenv` into the second stage. Only `79_move_config` is patched.
+- **Upgrade image**: `sysupgrade.tar.gz`, a gzip'd sysupgrade tar with fwtool metadata; `get_image` unpacks it.
 
 ### D7. Verification: the A/B chain in the emulator
 

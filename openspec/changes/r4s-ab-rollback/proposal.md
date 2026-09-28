@@ -53,6 +53,7 @@ This project tracks upstream main weekly, so a "new build won't boot" failure is
 
 - `firmware/rootfs`: the boot chain requirement moves from a boot script to the slot logic in U-Boot, with a kernel FIT in each slot.
 - `testing/emulation`: the emulator boots the factory image through `uboot-wrt-qemu` instead of passing the kernel and its command line to QEMU.
+- `firmware/kernel`: the emulator's disk becomes an SD card on sdhci-pci, which replaces virtio-blk among the emulation drivers.
 
 ## Impact
 

@@ -55,8 +55,8 @@ The hardware watchdog SHALL start before the kernel begins running and stay acti
 - **THEN** the bootloader starts the DesignWare watchdog with a 60-second timeout, the kernel has the DesignWare driver built in and keeps a watchdog that is already running fed, and the kernel command line limits that to 90 seconds (`watchdog.open_timeout=90`)
 
 ### Requirement: Same slot logic on the device and in the emulator
-The R4S bootloader and the emulator's bootloader SHALL be built from the same U-Boot source and carry the same slot selection and rollback logic, differing only in the board constants: the SD card's device number, the serial console, the early console, and the device tree handed to Linux. The R4S bootloader's device tree SHALL number the SD card slot as that device number.
+The R4S bootloader and the emulator's bootloader SHALL be built from the same U-Boot source and carry the same slot selection and rollback logic, differing only in three board constants: the SD card's device number, the console arguments, and the command that starts the kernel in a slot's FIT. The R4S bootloader's device tree SHALL number the SD card slot as that device number.
 
 #### Scenario: Compare the two bootloaders
 - **WHEN** the built-in environments of the shipped R4S bootloader and the emulator's bootloader are compared
-- **THEN** they are identical apart from the four board constants, and the R4S bootloader's device tree names the SD card controller as the MMC device its constants boot from
+- **THEN** they are identical apart from the three board constants, and the R4S bootloader's device tree names the SD card controller as the MMC device its constants boot from
