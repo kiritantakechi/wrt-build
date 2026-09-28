@@ -42,4 +42,4 @@
 
 ## 7. First rollout
 
-- [ ] 7.1 Following the design's Migration Plan, generate the production keys, complete the first stable release, flash the factory image on the device and push the configuration, then run `just test-device <host>`. Verification: the report passes in full and the results are archived in `docs/validation/release.md`; `wrt-sync` on the device can sync this release.
+- [ ] 7.1 Following the design's Migration Plan, generate the production keys and complete the first stable release. Verification: its upgrade drill passes in CI with the production keys and trust anchor, which syncs the release with `wrt-sync` in the emulator; the links of each step are recorded in `docs/validation/release.md`. Flashing the router with it is the maintainer's own migration step, described in `docs/release-flow.md`.

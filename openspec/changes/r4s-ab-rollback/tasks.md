@@ -3,9 +3,10 @@
 ## 1. Bootloader (shared logic + two board builds)
 
 - [ ] 1.1 Write `uboot/wrt-ab.env` (shared logic), plus the structurally symmetric `uboot/board-r4s.env` and `uboot/board-qemu.env` (containing only the constants listed in design D3), and register every runtime variable as writable. Verification: the code-standard checks confirm that the two board files contain exactly the same variable names, and only those variables.
-- [ ] 1.2 Modify `package/boot/uboot-rockchip/Makefile` so the change applies only to the `nanopi-r4s-rk3399` variant: concatenate the environment file, and append the shared config and the r4s-specific config. Verification: the built U-Boot `.config` contains these options; the `.config` of every other rockchip variant is unchanged.
+- [ ] 1.2 Modify `package/boot/uboot-rockchip/Makefile` so the change applies only to the `nanopi-r4s-rk3399` variant: concatenate the environment file, and append the shared config and the r4s-specific config. Verification: the static tests in 5.1 read these options from the shipped `u-boot.config`; the `.config` of every other rockchip variant is unchanged.
 - [ ] 1.3 Add the `uboot-wrt-qemu` package to the in-house feed: build `qemu_arm64` from the same U-Boot source package, concatenate the qemu board constants and the shared logic, and append the shared config and the qemu-specific config; the artifact goes only into the test directory. Verification: the code-standard checks confirm that its `PKG_VERSION` and `PKG_HASH` match `uboot-rockchip`; `printenv` in QEMU shows `wrt_boot`.
 - [ ] 1.4 Add `CONFIG_MMC_SDHCI_PCI=y` to the virt driver group in `config/kernel.config`, and fill in the sub-options with `listnewconfig`. Verification: the kernel config check passes after the build.
+- [ ] 1.5 Make `scripts/build.sh` copy the final kernel `.config`, the R4S U-Boot `.config` and the `uboot-wrt-qemu` binary into the outputs (`kernel.config`, `u-boot.config`, `emulator/u-boot.bin`), each listed in `manifest.json`. Verification: the `firmware-unsigned` artifact carries all three, and `system-test` reads them from it.
 
 ## 2. Images
 
@@ -21,16 +22,16 @@
 
 ## 4. Emulator tests (all run in `just test`)
 
-- [ ] 4.1 Extend the emulation environment to support A/B mode: load `uboot-wrt-qemu` with `-bios`, attach the factory image as the SD card through `sdhci-pci`, and allow disk writes to be throttled (for power-loss tests). Verification: the emulator self-tests cover boot, power loss, and reboot in A/B mode.
+- [ ] 4.1 Switch the emulation environment to the bootloader chain: load `uboot-wrt-qemu` with `-bios`, attach the factory image as the SD card through `sdhci-pci`, drop the kernel extraction and bootargs derivation from `emu-prepare`, and allow disk writes to be throttled (for power-loss tests). Verification: the emulator self-tests (testing/emulation, as modified here) cover provenance, boot, power loss and reboot; the whole foundation suite passes on the factory image.
 - [ ] 4.2 Write `tests/firmware/test_ab_layout.py`, covering every scenario in the ab-layout spec (the 4 GB scenario is judged by image size). Verification: all tests pass.
-- [ ] 4.3 Write `tests/firmware/test_boot_rollback.py`, covering these scenarios: slot selection for a, b, and an invalid value; the persistent environment cannot override boot logic; rollback after three failed trial boots; no counting during normal operation; switching slots within the same power cycle on a load failure; stopping at the prompt when both slots fail; reboot and count within 10 seconds after a kernel panic. Verification: all tests pass.
+- [ ] 4.3 Write `tests/firmware/test_boot_rollback.py`, covering these scenarios: slot selection for a, b, and an invalid value; the persistent environment cannot override boot logic; rollback after three failed trial boots; no counting during normal operation; switching slots within the same power cycle on a load failure; stopping at the prompt when both slots fail; reboot and count within 10 seconds after a kernel panic; reset and count when procd stops feeding the watchdog during a trial boot. Verification: all tests pass.
 - [ ] 4.4 Write `tests/firmware/test_health_check.py`: passes with WAN down, fails when uhttpd is not listening, a registered check fails or times out, handling for the trial boot and confirmed states, and the status query. Verification: all tests pass.
-- [ ] 4.5 Write `tests/firmware/test_ab_upgrade.py`: writes only the inactive slot (checksums unchanged), power loss mid-upgrade, fresh overlay, config-preserving upgrade and upgrade without preserving config, entering trial boot, rejecting mismatched images, manual slot switch. Verification: all tests pass; `spec-coverage` shows no uncovered scenarios in this change other than the device-only ones.
+- [ ] 4.5 Write `tests/firmware/test_ab_upgrade.py`: writes only the inactive slot (checksums unchanged), power loss mid-upgrade, fresh overlay, config-preserving upgrade and upgrade without preserving config, entering trial boot, rejecting mismatched images, manual slot switch. Verification: all tests pass; `spec-coverage` shows no uncovered scenario in this change.
 
-## 5. Device smoke test
+## 5. Static checks of what only the RK3399 runs
 
-- [ ] 5.1 Write `@target("device")` tests: U-Boot boots from the SD card and enters the slot named by `boot_slot`; the watchdog resets the device on an early hang; the device resets when userspace does not take over. When a power cut or a simulated hang is needed, the test prompts for the manual step. Verification: when run on the emulator, these tests are skipped and show the reason.
-- [ ] 5.2 Flash the factory image to the SD card and run `just test-device <host>`. Verification: the report shows everything passing, and the results are archived to `docs/validation/ab-rollback-device.md`.
+- [ ] 5.1 Add the static tests to `tests/firmware/test_boot_rollback.py` (design D7): the built-in environments of the shipped U-Boot and `uboot-wrt-qemu` are identical apart from the board constants, and the R4S control device tree aliases `mmc1` to the SD card controller ("Compare the two bootloaders"); the U-Boot and kernel `.config` files and the built-in environment arm the watchdog chain ("Watchdog armed before the kernel"). Verification: both pass in `just test`; each fails when one of its options or constants is changed.
+- [ ] 5.2 Update the foundation's boot chain test in `tests/firmware/test_rootfs.py` for the factory image (firmware/rootfs, as modified here): the loader, the U-Boot FIT that boots with `run wrt_boot`, and the R4S device tree in the kernel FIT of both slots. Verification: the test passes on the factory image.
 
 ## 6. Documentation and migration
 

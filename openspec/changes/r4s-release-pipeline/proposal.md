@@ -52,7 +52,7 @@ This release pipeline addresses five problems:
 
 - **GitHub**: Actions, protected environments, Releases, scheduled workflows, and a bot that opens PRs.
 - **New**: The private config repository, plus the corresponding `just config-init` and `just config-push`.
-- **Verification**: Signing, release assembly, and the upstream bump are covered by host tests; device sync, upgrade, and config push run in the emulator against the shipped image, with the Releases service mocked in the sandbox. This change has no device-only scenarios; a single `just test-device` run is done at first rollout.
+- **Verification**: Signing, release assembly, and the upstream bump are covered by host tests; device sync, upgrade, and config push run in the emulator against the shipped image, with the Releases service mocked in the sandbox. No step needs the device.
 - **Device side**: The sync container, the local apk repository configuration, and the preinstalled signing public key.
 - **Depends on other changes**:
   - `r4s-build-foundation`: CI and build artifacts.

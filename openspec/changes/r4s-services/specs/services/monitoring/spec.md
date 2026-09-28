@@ -14,8 +14,8 @@ The router SHALL serve metrics in Prometheus text format on port 9101 of its LAN
 - **THEN** Prometheus-format metrics are returned, including CPU, memory, network interfaces, and filesystems
 
 #### Scenario: Temperature metrics
-- **WHEN** metrics are requested from the LAN on the R4S
-- **THEN** they include the SoC temperature
+- **WHEN** metrics are requested from the LAN
+- **THEN** the hwmon collector reports success, and the kernel has registered the RK3399 temperature sensor driver (`rockchip-thermal`), which exports the SoC temperature through hwmon on the R4S
 
 #### Scenario: Access from the WAN
 - **WHEN** the router's port 9101 is accessed from the WAN side

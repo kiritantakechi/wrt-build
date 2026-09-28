@@ -116,7 +116,7 @@ options: compress=zstd:3,noatime,space_cache=v2
 ### D8. Monitoring
 
 - **Configuration**: `prometheus-node-exporter-ucode` with `listen_interface 'lan'`; port 9101 is open only to the lan zone.
-- **Collectors**: cpu, meminfo, netdev, filesystem, and hwmon (temperature).
+- **Collectors**: cpu, meminfo, netdev, filesystem, and hwmon (temperature). On the R4S, `rockchip-thermal` registers the SoC's thermal zones with hwmon; the emulator has no sensor, so the test checks the driver and the collector instead of a reading.
 
 ### D9. New packages and kernel modules
 
@@ -153,15 +153,15 @@ test image: busybox + musl taken from the shipped rootfs -> OCI image -> skopeo 
 - **Credentials**: the SMB user, WireGuard keys, and Tailscale auth key are all written by the fixture the same way the config push tool writes them, which also verifies "no credentials preset in the image".
 - **Tests map one-to-one to specs**: `tests/storage/test_data_disk.py`, plus `test_containers`, `test_file_sharing`, `test_vpn`, and `test_monitoring` under `tests/services/`.
 - **Snapshot expiry**: the test advances the system clock one day at a time and runs the cron job once per day, with no real-time waiting.
-- **Device-only** (written as `@target("device")` tests):
-  1. Temperature metrics (the emulator has no temperature sensor);
-  2. 1-hour full-load stability of the selected SSD and enclosure in UAS mode;
-  3. macOS Finder read/write to shares and large-file copy throughput (the test prompts for manual steps and records the results).
+- **What only real hardware shows** (no step needs the device):
+  1. A temperature reading: the test checks that `rockchip-thermal` is registered and that the hwmon collector succeeds (D8).
+  2. The stability of an SSD and enclosure in UAS mode under load, and USB power: not verified; they depend on the hardware chosen, not on the firmware (see Risks).
+  3. macOS Finder: `smbclient` speaks SMB 3 to ksmbd the way Finder does, so the file-sharing scenarios cover the protocol; copy throughput is not measured.
 
 ## Risks / Trade-offs
 
-- **[Insufficient USB3 power, or bridge chips unstable in UAS mode]** → Prefer low-power SATA SSDs and stable bridge chips such as ASM1153 and JMS578. If problems occur, add the device to the `usb-storage` quirks to fall back to BOT mode. Device tests record the measured results.
-- **[The emulator only covers behavior above the driver]** Bridge chip, power, and USB link reset issues do not appear in the emulator. → Covered by the full-load device test.
+- **[Insufficient USB3 power, or bridge chips unstable in UAS mode]** → Prefer low-power SATA SSDs and stable bridge chips such as ASM1153 and JMS578. If problems occur, add the device to the `usb-storage` quirks to fall back to BOT mode; `docs/services.md` says how.
+- **[The emulator only covers behavior above the driver]** Bridge chip, power, and USB link reset issues do not appear in the emulator, and nothing tests them before release. → The data disk is optional to the router's function: without it, routing and the other services keep working (data-disk spec, "Degraded mode without the data disk"), so a flaky enclosure degrades storage only.
 - **[`podman run -p` stops working with `firewall_driver = "none"`]** This is a deliberate trade-off; all port exposure goes through fw4 redirects, and this is documented.
 - **[einat's internal network setting does not include the container subnet]** → `test_containers.py` uses `netprobe` to check the mapping behavior of container traffic.
 - **[btrfs problems after an unexpected power loss]** btrfs is copy-on-write and usually stays consistent; regular read-only snapshots serve as recovery points.

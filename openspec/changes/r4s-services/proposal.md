@@ -50,6 +50,6 @@ Apps such as qBittorrent need Qt6 and libtorrent, and packaging them natively wo
   - `r4s-build-foundation`: cgroup v2 and kernel features.
   - `r4s-ebpf-datapath`: binding podman0 and tailscale0 to dae.
 - **Kernel**: add `USB_PCI` and `USB_XHCI_PCI` to the virt driver group in `config/kernel.config` so the emulator can attach a USB data disk.
-- **Verification**: in the emulator, a `usb-uas` device stands in for the SSD, and plugging and unplugging go through QEMU's control interface; the sandbox gains a container registry, headscale, a WireGuard peer, and a tailnet peer. Every scenario in the five specs except temperature is written as an automated test in `just test`.
-- **Hardware risk**: the R4S's USB3 port has limited power, and some USB-to-SATA/NVMe bridge chips are unstable in UAS mode. The hardware must be selected carefully and measured under full load with device tests.
+- **Verification**: in the emulator, a `usb-uas` device stands in for the SSD, and plugging and unplugging go through QEMU's control interface; the sandbox gains a container registry, headscale, a WireGuard peer, and a tailnet peer. Every scenario in the five specs is an automated test in `just test`; since the emulator has no temperature sensor, the temperature scenario checks the RK3399 sensor driver and the hwmon collector.
+- **Hardware risk**: the R4S's USB3 port has limited power, and some USB-to-SATA/NVMe bridge chips are unstable in UAS mode. The hardware must be selected carefully; no step measures it before release, and the router keeps working without the data disk.
 - **Security**: ksmbd has a history of serious vulnerabilities. This relies on picking up kernel fixes weekly and exposing the service only on the LAN.

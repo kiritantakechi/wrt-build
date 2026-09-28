@@ -163,9 +163,9 @@ wrt-config (private repo)
 - **Ephemeral key fixtures**: `wrt_tests/keys.py` generates a one-time apk EC key and usign key and provides two fixtures:
   - `signed_repo`: re-signs the current build's artifacts with `release-sign.sh`;
   - `trust`: writes the matching public keys into the router's test overlay, replacing the existing public keys in `/etc/apk/keys`.
-- **Drill tests**: The tests run by the `upgrade-drill` job carry `@target("emulation")` and are selected separately with pytest's `-m drill`. `system-test` runs the same tests with ephemeral keys, so the drill logic itself is tested on every commit; after signing, the same tests simply run again with the production keys and the production trust anchor.
+- **Drill tests**: The tests run by the `upgrade-drill` job carry a `drill` marker and are selected separately with pytest's `-m drill`. `system-test` runs the same tests with ephemeral keys, so the drill logic itself is tested on every commit; after signing, the same tests simply run again with the production keys and the production trust anchor.
 - **GitHub-side settings**: The environment reviewers and the branch protection required checks are GitHub repository settings, not code. `scripts/github-audit.sh` reads and checks them with `gh api`, and runs periodically in the check workflow.
-- **Device**: This change has no device-only scenarios.
+- **Device**: no step needs the device; every scenario runs in the emulator or on the host.
 
 ## Risks / Trade-offs
 
@@ -182,7 +182,7 @@ wrt-config (private repo)
 
 1. Generate the release apk EC key pair and usign key pair. Store the private keys as secrets of the `release-signing` environment, and put the public keys into `wrt-keyring`.
 2. Set up the private config repository and the age key, and migrate the existing configuration into it.
-3. After the first stable release, flash the factory image (which already includes `wrt-keyring`) and run `just test-device` once. All later updates go through sync plus `wrt-update`.
+3. After the first stable release passes its upgrade drill, flash its factory image (which already includes `wrt-keyring`) and push the configuration. All later updates go through sync plus `wrt-update`.
 4. Rollback: `wrt-slot switch` returns to the previous slot; the local repository keeps the latest 3 releases, so you can also upgrade again to a specific older release.
 
 ## Open Questions

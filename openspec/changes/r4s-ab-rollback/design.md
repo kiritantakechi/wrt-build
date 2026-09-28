@@ -160,12 +160,12 @@ qemu-system-aarch64 -machine virt,gic-version=3 -cpu cortex-a72 -m 4G
   - Bad kernel: put a corrupted FIT in the upgrade tar.
   - WAN down: do not start the PPPoE server in the `isp` namespace.
 - **Kernel addition**: the emulated SD card controller needs `CONFIG_MMC_SDHCI_PCI=y`, which this change adds to the virt driver group in `config/kernel.config`.
-- **Device-only** (written as `@target("device")` tests):
-  1. The RK3399 BootROM and TPL/SPL load this U-Boot build from the SD card and boot according to `boot_slot`;
-  2. The DesignWare watchdog starts counting before the kernel boots, and resets the device if the kernel hangs early;
-  3. The device resets if userspace does not take over within `open_timeout`.
-
-  Items 2 and 3 need a power cut or a simulated hang; the tests prompt for the manual step.
+- **The emulator boots through U-Boot from now on**: `emu-prepare` no longer extracts the kernel or derives bootargs; QEMU gets `-bios u-boot.bin` and the factory image as the SD card, so every emulation test, including the foundation's, runs U-Boot's slot logic and the slot's own kernel FIT. `-dtb r4s.dtb` becomes U-Boot's control device tree, which `wrt_fdt` hands on to Linux.
+- **Watchdog in the emulator**: procd opens the i6300esb and feeds it, as it feeds the DesignWare watchdog on the R4S. `ubus call system watchdog '{"stop": true}'` stops the feeding without closing the device, so the i6300esb resets the machine and U-Boot counts the boot. QEMU's U-Boot has no i6300esb driver, so the part before userspace (U-Boot starts the watchdog, the kernel feeds it until userspace opens it) is checked statically, below.
+- **Checked statically, in the build outputs** (what only the RK3399 runs; no step needs the device):
+  1. **Same logic**: the test reads the built-in environment of the shipped U-Boot (inside `u-boot.itb`) and of `uboot-wrt-qemu`, and requires them to be identical apart from the four board constants of D3. The R4S U-Boot's control device tree must alias `mmc1` to the SD card controller (`mmc@fe320000`), matching `wrt_mmc=1`.
+  2. **Watchdog chain**: the R4S U-Boot `.config` has `WDT`, `WATCHDOG_AUTOSTART` and `WATCHDOG_TIMEOUT_MSECS=60000`; the kernel `.config` has `DW_WATCHDOG=y` and `WATCHDOG_HANDLE_BOOT_ENABLED=y`; the built-in environment passes `watchdog.open_timeout=90`. `scripts/build.sh` copies both `.config` files into the outputs as `kernel.config` and `u-boot.config`, listed in `manifest.json`, so `system-test` reads them from the artifact.
+  3. **Boot chain**: the foundation's boot chain test, updated for the factory image (firmware/rootfs, modified here): the loader, the U-Boot FIT, and a kernel FIT with the R4S device tree in each slot.
 
 ## Risks / Trade-offs
 
@@ -174,7 +174,8 @@ qemu-system-aarch64 -machine virt,gic-version=3 -cpu cortex-a72 -m 4G
 - **[There is only one U-Boot]** It is updated only when the factory image is flashed; U-Boot version changes do not reach devices with each weekly bump.
 - **[A health check that is too strict causes false rollbacks]** 300 seconds total, 30 seconds per check, and only LAN-side and local state are checked.
 - **[fstools misreads leftover overlay data]** The upgrade zeroes the 1 MiB after EROFS.
-- **[SD card index on the device]** Set to 1 per RK3399 convention; item 1 of the device smoke test confirms it.
+- **[SD card index on the device]** `wrt_mmc=1`, following the `mmc1` alias of the R4S device tree; the static check in D7 ties the constant to the alias.
+- **[The part before userspace never runs before release]** The emulator cannot start a watchdog from U-Boot, so an early kernel hang is only covered by the configuration checks in D7. A panic and a userspace hang both run in the emulator, and both count toward rollback.
 
 ## Migration Plan
 

@@ -62,5 +62,5 @@ Research surfaced two problems that the design must avoid:
 - **Build dependencies**: Go ≥ 1.26, Rust; BPF objects are compiled with the flake-pinned host clang (`BPF_TOOLCHAIN_HOST`, same as `r4s-build-foundation`).
 - **Verification**: the foundation's emulation environment gains an ISP (PPPoE, DHCPv6-PD), an internet (probe services, DNS, iperf3), and a proxy node. Every scenario in the six specs becomes an automated test in `just test`, including redial recovery, spoofed inbound, cake fairness, flowtable hits, and dae's conntrack warning.
 - **Host requirements**: the host kernel must have `ppp_generic` and `ppp_async`, and `/dev/ppp` must be readable and writable by regular users; the CI preparation script and the developer docs take care of this.
-- **Device-only**: throughput on the RK3399 and the effect of A72 pinning; one dial-up and NAT-type smoke test on the real line.
+- **Not verified**: throughput on the RK3399 and a real ISP line; no step needs the device. The emulator runs the same datapath against an emulated ISP.
 - **Known limitation**: Tailscale's control plane and DERP relay traffic is router-originated traffic, goes direct, and may be unstable in China.

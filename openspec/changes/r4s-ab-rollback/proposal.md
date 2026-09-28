@@ -37,7 +37,8 @@ This project tracks upstream main weekly, so a "new build won't boot" failure is
   - Build a second `qemu_arm64` variant from the same U-Boot source, using the same slot selection logic and swapping only the board constants (MMC index, serial console, device tree source).
   - The emulator attaches the SD card through `sdhci-pci`, uses the factory image unmodified as the SD card, and keeps the environment at `0x3F8000` as well.
   - The spec scenarios for slot selection, counting, rollback, upgrade, power loss, and health check all become automated tests in `just test`.
-  - Only two paths are left for the device smoke test: RK3399 booting from the SD card, and the DesignWare watchdog.
+  - The emulator now boots the factory image through this U-Boot, so every emulation test runs the real boot chain from U-Boot onward.
+  - What only the RK3399 runs is checked statically in the build outputs: the shipped U-Boot carries the same slot logic as the emulated one, and the U-Boot and kernel configurations arm the DesignWare watchdog.
 
 ## Capabilities
 
@@ -50,7 +51,8 @@ This project tracks upstream main weekly, so a "new build won't boot" failure is
 
 ### Modified Capabilities
 
-(None.)
+- `firmware/rootfs`: the boot chain requirement moves from a boot script to the slot logic in U-Boot, with a kernel FIT in each slot.
+- `testing/emulation`: the emulator boots the factory image through `uboot-wrt-qemu` instead of passing the kernel and its command line to QEMU.
 
 ## Impact
 
@@ -66,4 +68,4 @@ This project tracks upstream main weekly, so a "new build won't boot" failure is
   - four test modules under `tests/firmware/`, one per spec.
 - **Dependencies**: `r4s-build-foundation`, including the EROFS root filesystem, the patch workflow, the test framework, and the emulation environment. The datapath checks in the health check are registered by `r4s-ebpf-datapath`.
 - **U-Boot is outside the A/B scope**: U-Boot is shared by both slots, and the single-slot upgrade image does not rewrite it. Updating U-Boot is a separate, infrequent operation and remains a single point of risk.
-- **Device workload**: only one smoke test remains: flash the factory image and run `just test-device`. Two of its items need a manual power cut or an induced hang. The rollback drill itself runs in CI.
+- **Device workload**: none. Every scenario runs in the emulator in CI or is checked statically in the build outputs.

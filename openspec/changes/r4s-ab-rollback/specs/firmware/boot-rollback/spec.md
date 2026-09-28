@@ -40,16 +40,23 @@ When `upgrade_available` is 1, every boot SHALL increment `bootcount`. When `boo
 - **THEN** the bootloader tries the other slot within the same power cycle; if both slots fail, it stops in the bootloader instead of looping forever
 
 ### Requirement: Hangs and panics become reboots
-The hardware watchdog SHALL start before the kernel begins running and stay active until userspace takes over. If userspace does not take over within the set time, the watchdog SHALL reset the device. After a kernel panic, the device SHALL reboot automatically within 10 seconds.
+The hardware watchdog SHALL start before the kernel begins running and stay active until userspace takes over: the bootloader SHALL start it with a 60-second timeout, and the kernel SHALL keep a running watchdog fed for at most 90 seconds until userspace opens it. Once userspace feeds the watchdog, a hang that stops the feeding SHALL reset the device. After a kernel panic, the device SHALL reboot automatically within 10 seconds. Every such reboot during a trial boot SHALL count toward rollback.
 
 #### Scenario: Kernel panic
 - **WHEN** a kernel panic occurs while the system is running
 - **THEN** the device reboots within 10 seconds, and `bootcount` is incremented if it was in the trial boot state
 
-#### Scenario: Early boot hang
-- **WHEN** the kernel hangs before userspace starts
-- **THEN** the device resets after the watchdog times out
+#### Scenario: Userspace stops feeding the watchdog
+- **WHEN** the process that feeds the watchdog stops feeding it during a trial boot
+- **THEN** the device resets after the watchdog times out, and `bootcount` is incremented
 
-#### Scenario: Userspace never takes over
-- **WHEN** the kernel has booted, but userspace does not open the watchdog within the set time
-- **THEN** the device resets
+#### Scenario: Watchdog armed before the kernel
+- **WHEN** the configuration of the shipped bootloader and kernel is inspected
+- **THEN** the bootloader starts the DesignWare watchdog with a 60-second timeout, the kernel has the DesignWare driver built in and keeps a watchdog that is already running fed, and the kernel command line limits that to 90 seconds (`watchdog.open_timeout=90`)
+
+### Requirement: Same slot logic on the device and in the emulator
+The R4S bootloader and the emulator's bootloader SHALL be built from the same U-Boot source and carry the same slot selection and rollback logic, differing only in the board constants: the SD card's device number, the serial console, the early console, and the device tree handed to Linux. The R4S bootloader's device tree SHALL number the SD card slot as that device number.
+
+#### Scenario: Compare the two bootloaders
+- **WHEN** the built-in environments of the shipped R4S bootloader and the emulator's bootloader are compared
+- **THEN** they are identical apart from the four board constants, and the R4S bootloader's device tree names the SD card controller as the MMC device its constants boot from

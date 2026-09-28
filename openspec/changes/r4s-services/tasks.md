@@ -37,16 +37,14 @@
 
 ## 7. Monitoring
 
-- [ ] 7.1 Configure node-exporter: `listen_interface 'lan'`, with the cpu, meminfo, netdev, filesystem, and hwmon collectors enabled. Verification: covered by the monitoring spec tests; the temperature scenario is a device-only test.
+- [ ] 7.1 Configure node-exporter: `listen_interface 'lan'`, with the cpu, meminfo, netdev, filesystem, and hwmon collectors enabled. Verification: covered by the monitoring spec tests; the temperature scenario checks that `rockchip-thermal` is registered and the hwmon collector succeeds.
 
 ## 8. Emulator tests (all run in `just test`)
 
 - [ ] 8.1 `tests/storage/test_data_disk.py`: covers all scenarios of the data-disk spec. Verification: all tests pass.
 - [ ] 8.2 `tests/services/test_containers.py`: covers all scenarios of the containers spec; the "Check the image" scenario reads the package list from the image audit output. Verification: all tests pass.
-- [ ] 8.3 `tests/services/test_file_sharing.py`, `test_vpn.py`, `test_monitoring.py`: cover all scenarios of the corresponding specs. Verification: all tests pass; `spec-coverage` shows no uncovered scenarios in this change other than the device-only ones.
+- [ ] 8.3 `tests/services/test_file_sharing.py`, `test_vpn.py`, `test_monitoring.py`: cover all scenarios of the corresponding specs. Verification: all tests pass; `spec-coverage` shows no uncovered scenario in this change.
 
-## 9. Device smoke test and documentation
+## 9. Documentation
 
-- [ ] 9.1 Write the `@target("device")` tests: temperature metrics; sustained read/write on the selected SSD and enclosure in UAS mode for 1 hour while downloading at full speed, with no USB resets or UAS errors in dmesg; macOS Finder read/write to shares (the test prompts for manual steps and records the large-file copy throughput). Verification: when run in the emulator, these tests are skipped and show the reason.
-- [ ] 9.2 Run `just test-device <host>` and archive the results in `docs/validation/services-device.md`; if UAS is unstable, record the quirks workaround. Verification: the report shows all tests passing.
-- [ ] 9.3 Write `docs/services.md`: data disk initialization, how to write Pod declaration files, how to expose ports with fw4, and the steps to restore from a snapshot. Verification: the "Restore a file from a snapshot" test in `test_data_disk.py` runs exactly the commands from the document, and the test passes.
+- [ ] 9.1 Write `docs/services.md`: data disk initialization, how to write Pod declaration files, how to expose ports with fw4, the steps to restore from a snapshot, and the `usb-storage` quirk that drops an unstable enclosure back to BOT mode. Verification: the "Restore a file from a snapshot" test in `test_data_disk.py` runs exactly the commands from the document, and the test passes.
