@@ -28,21 +28,25 @@ Every symbol listed must be given a value in the kernel config overlay. Also wat
 
 ## Cost of the virt driver group
 
-So that the shipped kernel can boot directly in the QEMU `virt` machine, the kernel config overlay builds in the generic PCIe host controller, virtio-pci, virtio-blk, virtio-net and the i6300esb watchdog. The PL011 serial console is already built in by the rockchip config. Only modern virtio is enabled, not legacy, and all other virtio devices are off.
+So that the shipped kernel can boot unchanged in the QEMU `virt` machine, the kernel config overlay builds in the generic PCIe host controller, the SD host controller on PCI (sdhci-pci, for the factory image as the emulator's SD card; r4s-ab-rollback), virtio-pci, virtio-net and the i6300esb watchdog. The PL011 serial console is already built in by the rockchip config. Only modern virtio is enabled, not legacy, and all other virtio devices are off, virtio-blk included since the emulator boots from the SD card.
 
-Measured (2026-09-28, kernel 6.18.52): the added object files total 141,430 bytes (text + data + bss), about 138 KiB; the `Image` with BTF is 26,867,720 bytes. The R4S has none of these devices, so these drivers are never probed; they only take up this space.
+Measured (2026-09-29, kernel 6.18.52): the added object files total 173,008 bytes (text + data + bss), about 169 KiB; the `Image` with BTF is 26,867,720 bytes. The R4S has none of these devices, so these drivers are never probed; they only take up this space.
 
 | Object file | Bytes |
 |---|---|
 | `drivers/net/virtio_net.o` | 57,861 |
 | `drivers/virtio/virtio_ring.o` | 23,332 |
-| `drivers/block/virtio_blk.o` | 11,463 |
+| `drivers/mmc/host/sdhci-pci-gli.o` | 20,929 |
+| `drivers/mmc/host/sdhci-pci-core.o` | 20,007 |
+| `drivers/mmc/host/sdhci-pci-o2micro.o` | 9,832 |
 | `drivers/net/net_failover.o` | 7,019 |
 | `drivers/virtio/virtio_pci_modern.o` | 6,788 |
 | `drivers/virtio/virtio.o` | 5,908 |
 | `drivers/virtio/virtio_pci_common.o` | 5,572 |
 | `drivers/virtio/virtio_pci_modern_dev.o` | 4,944 |
 | `net/core/failover.o` | 2,819 |
+| `drivers/mmc/host/sdhci-pci-arasan.o` | 2,500 |
 | `drivers/watchdog/i6300esb.o` | 2,366 |
 | `drivers/pci/controller/pci-host-generic.o` | 1,783 |
+| `drivers/mmc/host/sdhci-pci-dwc-mshc.o` | 1,236 |
 | `drivers/virtio/virtio_anchor.o` | 112 |

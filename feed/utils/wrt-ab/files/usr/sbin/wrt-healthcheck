@@ -1,0 +1,112 @@
+#!/bin/sh
+# wrt-healthcheck: decide whether this boot of the slot is healthy (r4s-ab-rollback D5).
+# Usage: wrt-healthcheck   (once per boot, from /etc/init.d/wrt-healthcheck)
+# Checks until all pass or the total time is up, then records the result. During
+# a trial boot a pass confirms the slot, and a failure reboots so that U-Boot
+# counts the boot; on a confirmed slot a failure is only recorded. WAN state is
+# never a criterion: an ISP outage says nothing about the system. No set -eu:
+# jshn is not written for it.
+# shellcheck source=../../lib/functions/wrt-ab.sh
+. /lib/functions/wrt-ab.sh
+# shellcheck source=/dev/null # part of libubox on the router
+. /usr/share/libubox/jshn.sh
+
+RESULT=/var/run/wrt-healthcheck.json
+CHECKS=/etc/healthcheck.d
+
+# setting <name> <default>: a time limit from /etc/config/wrt-ab, in seconds.
+setting() {
+	uci -q get "wrt-ab.healthcheck.$1" || echo "$2"
+}
+
+log() {
+	logger -t wrt-healthcheck -p "daemon.$1" "$2"
+}
+
+# listening <port> <IPv4 address>: a TCP socket listens on the port, on that
+# address or on every address (IPv4 or IPv6).
+listening() {
+	port=$(printf '%04X' "$1")
+	octets=$(echo "$2" | tr . ' ')
+	# shellcheck disable=SC2086 # the four octets
+	set -- ${octets}
+	hex=$(printf '%02X%02X%02X%02X' "$4" "$3" "$2" "$1")
+	awk -v port="${port}" -v address="${hex}" '
+		$4 == "0A" && split($2, local, ":") == 2 && local[2] == port &&
+			(local[1] == address || local[1] ~ /^0+$/) { found = 1 }
+		END { exit !found }' /proc/net/tcp /proc/net/tcp6
+}
+
+# The built-in checks, then every executable in /etc/healthcheck.d, which gets
+# the per-check time limit and passes by exiting 0.
+check_ready() {
+	ubus -t 5 call system board >/dev/null
+}
+check_lan() {
+	lan=$(ifstatus lan) || return 1
+	up=$(echo "${lan}" | jsonfilter -e '@.up')
+	address=$(echo "${lan}" | jsonfilter -e '@["ipv4-address"][0].address')
+	[ "${up}" = true ] && [ -n "${address}" ]
+}
+check_ssh() {
+	listening 22 "${address:-0.0.0.0}"
+}
+check_web() {
+	listening 80 "${address:-0.0.0.0}"
+}
+
+run_checks() {
+	failed=
+	address=
+	for name in ready lan ssh web; do
+		"check_${name}" || failed="${failed} ${name}"
+	done
+	for check in "${CHECKS}"/*; do
+		[ -x "${check}" ] || continue
+		timeout "${timeout}" "${check}" >/dev/null 2>&1 || failed="${failed} ${check##*/}"
+	done
+}
+
+record() {
+	now=$(date +%s)
+	json_init
+	json_add_int time "${now}"
+	json_add_string slot "${slot}"
+	json_add_string result "$1"
+	json_add_array failed
+	for name in ${failed}; do
+		json_add_string "" "${name}"
+	done
+	json_close_array
+	json_dump >"${RESULT}"
+}
+
+total=$(setting total 300)
+interval=$(setting interval 10)
+timeout=$(setting timeout 30)
+slot=$(wrt_ab_slot)
+trial=$(wrt_ab_getenv upgrade_available 0)
+
+start=$(date +%s)
+while :; do
+	run_checks
+	[ -n "${failed}" ] || break
+	now=$(date +%s)
+	[ "$((now - start))" -lt "${total}" ] || break
+	sleep "${interval}"
+done
+
+if [ -z "${failed}" ]; then
+	record pass
+	if [ "${trial}" = 1 ]; then
+		wrt_ab_setenv boot_slot "${slot}" upgrade_available 0 bootcount 0
+		log notice "slot ${slot} passed its trial boot and is confirmed"
+	fi
+elif [ "${trial}" = 1 ]; then
+	record fail
+	log err "slot ${slot} failed its trial boot:${failed}; rebooting"
+	reboot
+else
+	record fail
+	log err "slot ${slot} is unhealthy:${failed}"
+fi

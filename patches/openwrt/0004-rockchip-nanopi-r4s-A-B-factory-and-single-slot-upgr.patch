@@ -1,0 +1,124 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 28 Sep 2026 23:55:25 +0800
+Subject: [PATCH] rockchip: nanopi-r4s: A/B factory and single-slot upgrade
+ images
+
+Give the NanoPi R4S two slots: boot-A, root-A, boot-B and root-B on an
+MBR after the 32 MiB that hold u-boot-rockchip.bin. The factory image
+carries the same system in both slots and an empty U-Boot environment,
+so the first boot takes slot A. The upgrade image is a sysupgrade tar
+whose kernel member is the ext4 boot partition of one slot and whose
+root member is the root image; sysupgrade writes it to the slot that is
+not running.
+
+gen_image_ab.sh writes the disk. Both images build the boot partition
+the same way (ab-boot).
+---
+ scripts/gen_image_ab.sh              | 32 ++++++++++++++++++++++++++++
+ target/linux/rockchip/image/Makefile | 25 ++++++++++++++++++++++
+ target/linux/rockchip/image/armv8.mk |  2 ++
+ 3 files changed, 59 insertions(+)
+ create mode 100755 scripts/gen_image_ab.sh
+
+diff --git a/scripts/gen_image_ab.sh b/scripts/gen_image_ab.sh
+new file mode 100755
+index 0000000..3010fb9
+--- /dev/null
++++ b/scripts/gen_image_ab.sh
+@@ -0,0 +1,32 @@
++#!/bin/sh
++# Copyright (C) 2026 OpenWrt.org
++#
++# A/B disk image: boot-A, root-A, boot-B, root-B on an MBR, with the same boot
++# filesystem and root image in both slots. Everything not written reads as
++# zeros, so no slot carries an old overlay after its root image.
++set -e -x
++if [ $# -ne 6 ]; then
++    echo "SYNTAX: $0 <file> <boot size> <boot image> <root size> <root image> <align>"
++    exit 1
++fi
++
++OUTPUT="$1"
++BOOTSIZE="$2"
++BOOTIMAGE="$3"
++ROOTSIZE="$4"
++ROOTIMAGE="$5"
++ALIGN="$6"
++
++rm -f "$OUTPUT"
++
++# ptgen prints the start and size in bytes of every partition
++set $(ptgen -o "$OUTPUT" -h 16 -s 63 -l "$ALIGN" ${SIGNATURE:+-S 0x$SIGNATURE} \
++	-t 83 -p "${BOOTSIZE}m" -t 83 -p "${ROOTSIZE}m" \
++	-t 83 -p "${BOOTSIZE}m" -t 83 -p "${ROOTSIZE}m")
++
++truncate -s "$(($7 + $8))" "$OUTPUT"
++for slot in A B; do
++	dd if="$BOOTIMAGE" of="$OUTPUT" bs=512 seek="$(($1 / 512))" conv=notrunc
++	dd if="$ROOTIMAGE" of="$OUTPUT" bs=512 seek="$(($3 / 512))" conv=notrunc
++	shift 4
++done
+diff --git a/target/linux/rockchip/image/Makefile b/target/linux/rockchip/image/Makefile
+index d46d192..18338bc 100644
+--- a/target/linux/rockchip/image/Makefile
++++ b/target/linux/rockchip/image/Makefile
+@@ -43,6 +43,23 @@ define Build/pine64-img
+ 	dd if="$(STAGING_DIR_IMAGE)"/$(UBOOT_DEVICE_NAME)-u-boot-rockchip.bin of="$@" seek=64 conv=notrunc
+ endef
+ 
++define Build/ab-boot
++	# The boot partition of one A/B slot: an ext4 filesystem with kernel.img
++	make_ext4fs -J -L boot -l $(CONFIG_TARGET_KERNEL_PARTSIZE)M \
++		$(if $(SOURCE_DATE_EPOCH),-T $(SOURCE_DATE_EPOCH)) $@.bootfs $@.boot
++endef
++
++define Build/ab-disk
++	# A/B factory image: both slots with this system, 32 MiB of padding for the
++	# u-boot-rockchip.bin (idbloader + u-boot) before them. The U-Boot environment
++	# area stays zero, so the first boot takes slot A.
++	$(SCRIPT_DIR)/gen_image_ab.sh $@ \
++		$(CONFIG_TARGET_KERNEL_PARTSIZE) $@.bootfs \
++		$(CONFIG_TARGET_ROOTFS_PARTSIZE) $(IMAGE_ROOTFS) \
++		32768
++	dd if="$(STAGING_DIR_IMAGE)"/$(UBOOT_DEVICE_NAME)-u-boot-rockchip.bin of="$@" seek=64 conv=notrunc
++endef
++
+ ### Devices ###
+ define Device/Default
+   PROFILES := Default
+@@ -56,6 +73,14 @@ define Device/Default
+   UBOOT_DEVICE_NAME = $(lastword $(subst _, ,$(1)))-$$(SOC)
+ endef
+ 
++# A/B slots of wrt-build: a factory image with both slots and a single-slot
++# upgrade image, whose kernel member is the boot partition of the slot.
++define Device/wrt-ab
++  IMAGES := factory.img.gz sysupgrade.tar.gz
++  IMAGE/factory.img.gz = boot-common | ab-boot | ab-disk | gzip
++  IMAGE/sysupgrade.tar.gz = boot-common | ab-boot | sysupgrade-tar kernel=$$$$@.bootfs | gzip | append-metadata
++endef
++
+ include $(SUBTARGET).mk
+ 
+ $(eval $(call BuildImage))
+diff --git a/target/linux/rockchip/image/armv8.mk b/target/linux/rockchip/image/armv8.mk
+index 3e973b8..b888cce 100644
+--- a/target/linux/rockchip/image/armv8.mk
++++ b/target/linux/rockchip/image/armv8.mk
+@@ -138,6 +138,7 @@ TARGET_DEVICES += friendlyarm_nanopi-r3s
+ 
+ define Device/friendlyarm_nanopi-r4s
+   $(Device/rk3399)
++  $(Device/wrt-ab)
+   DEVICE_VENDOR := FriendlyARM
+   DEVICE_MODEL := NanoPi R4S
+   DEVICE_VARIANT := 4GB LPDDR4
+@@ -147,6 +148,7 @@ TARGET_DEVICES += friendlyarm_nanopi-r4s
+ 
+ define Device/friendlyarm_nanopi-r4s-enterprise
+   $(Device/rk3399)
++  $(Device/wrt-ab)
+   DEVICE_VENDOR := FriendlyARM
+   DEVICE_MODEL := NanoPi R4S Enterprise Edition
+   DEVICE_VARIANT := 4GB LPDDR4

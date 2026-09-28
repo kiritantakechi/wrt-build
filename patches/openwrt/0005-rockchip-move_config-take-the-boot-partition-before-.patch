@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 28 Sep 2026 23:55:25 +0800
+Subject: [PATCH] rockchip: move_config: take the boot partition before the
+ root
+
+The configuration backup of an upgrade waits on the boot partition of
+the system that boots next. With A/B slots that is partition 3 when the
+root is partition 4, so take the partition right before the root
+partition named on the kernel command line instead of partition 1.
+Single-slot images keep using partition 1.
+---
+ .../rockchip/armv8/base-files/lib/preinit/79_move_config | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/target/linux/rockchip/armv8/base-files/lib/preinit/79_move_config b/target/linux/rockchip/armv8/base-files/lib/preinit/79_move_config
+index 96e636e..cf7ceb3 100644
+--- a/target/linux/rockchip/armv8/base-files/lib/preinit/79_move_config
++++ b/target/linux/rockchip/armv8/base-files/lib/preinit/79_move_config
+@@ -1,9 +1,14 @@
+ move_config() {
+-	local partdev
++	local partdev rootpart
+ 
+ 	. /lib/upgrade/common.sh
+ 
+-	if export_bootdevice && export_partdevice partdev 1; then
++	# The boot partition sits right before the root partition: 1 on single-slot
++	# images, 1 or 3 on A/B images.
++	rootpart="$(cmdline_get_var root)"
++	rootpart="${rootpart##*-}"
++
++	if export_bootdevice && export_partdevice partdev $((0x${rootpart:-02} - 1)); then
+ 		if mount -o rw,noatime "/dev/$partdev" /mnt; then
+ 			if [ -f "/mnt/$BACKUP_FILE" ]; then
+ 				mv -f "/mnt/$BACKUP_FILE" /

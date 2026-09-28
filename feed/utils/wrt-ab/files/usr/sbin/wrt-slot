@@ -1,0 +1,54 @@
+#!/bin/sh
+# wrt-slot: show the A/B state, or switch to the other slot (r4s-ab-rollback D4).
+# Usage: wrt-slot status | wrt-slot switch
+# switch makes the other slot the trial slot and reboots into it; the health
+# check confirms it, or U-Boot rolls back after three unconfirmed boots.
+set -eu
+# shellcheck source=../../lib/functions/wrt-ab.sh
+. /lib/functions/wrt-ab.sh
+
+RESULT=/var/run/wrt-healthcheck.json
+
+# health: the most recent health check, as one line.
+health() {
+	if [ ! -s "${RESULT}" ]; then
+		echo pending
+		return
+	fi
+	result=$(jsonfilter -i "${RESULT}" -e '@.result')
+	epoch=$(jsonfilter -i "${RESULT}" -e '@.time')
+	at=$(date -d "@${epoch}" '+%F %T')
+	failed=$(jsonfilter -i "${RESULT}" -e '@.failed[*]' | tr '\n' ' ')
+	echo "${result} at ${at}${failed:+ (failed: ${failed% })}"
+}
+
+status() {
+	slot=$(wrt_ab_slot)
+	trial=$(wrt_ab_getenv upgrade_available 0)
+	if [ "${trial}" = 1 ]; then
+		count=$(wrt_ab_getenv bootcount 0)
+		limit=$(wrt_ab_getenv bootlimit 3)
+		state="trial, boot ${count} of ${limit}"
+	else
+		state=confirmed
+	fi
+	checked=$(health)
+	printf 'slot: %s\nstate: %s\nhealth: %s\n' "${slot}" "${state}" "${checked}"
+}
+
+switch() {
+	slot=$(wrt_ab_slot)
+	target=$(wrt_ab_other "${slot}")
+	wrt_ab_setenv boot_slot "${target}" upgrade_available 1 bootcount 0
+	echo "slot ${target} is the trial slot now; rebooting"
+	reboot
+}
+
+case "${1:-}" in
+	status) status ;;
+	switch) switch ;;
+	*)
+		echo "usage: wrt-slot status | wrt-slot switch" >&2
+		exit 2
+		;;
+esac

@@ -60,14 +60,29 @@ cp -a "${TREE}"/bin/targets/rockchip/armv8/. "${out}/targets/"
 cp -a "${TREE}"/bin/packages/. "${out}/packages/"
 cp "${WRT_WORKDIR}/out/diffconfig-${profile}" "${out}/diffconfig"
 
-# manifest.json: what was built from what, and the hash of every image and index.
+# The configuration of what only the RK3399 runs, for the tests that check it
+# statically, and the emulator's U-Boot (r4s-ab-rollback design D7).
+uboot_build() {
+	set -- "${TREE}"/build_dir/target-*/"u-boot-$1"/u-boot-*
+	[ "$#" -eq 1 ] && [ -d "$1" ] || die "expected one build of u-boot-$1, found: $*"
+	printf '%s\n' "$1"
+}
+r4s_uboot=$(uboot_build nanopi-r4s-rk3399)
+qemu_uboot=$(uboot_build wrt-qemu)
+cp "${kernel}/.config" "${out}/kernel.config"
+cp "${r4s_uboot}/.config" "${out}/u-boot-r4s.config"
+cp "${qemu_uboot}/.config" "${out}/u-boot-qemu.config"
+cp "${TREE}"/staging_dir/target-*/image/wrt-qemu-u-boot.bin "${out}/u-boot-qemu.bin"
+
+# manifest.json: what was built from what, and the hash of every image, index,
+# configuration and firmware above.
 run="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}"
 lock_sha256=$(sha256sum "${LOCK_FILE}")
 patches_sha256=$(cat "${REPO_DIR}"/patches/*/*.patch | sha256sum)
 openwrt_head=$(git -C "${TREE}" rev-parse HEAD)
 kernel_version=$(cat "${TREE}"/staging_dir/target-*/kernel.version 2>/dev/null || true)
 vermagic=$(cat "${kernel}/.vermagic")
-files=$(cd "${out}" && find targets packages -type f \( -name '*.img.gz' -o -name 'packages.adb' \) | sort)
+files=$(cd "${out}" && find . -type f \( -name '*.gz' -o -name 'packages.adb' -o -name 'u-boot-*' -o -name 'kernel.config' \) | sed 's|^\./||' | sort)
 hashes=$(cd "${out}" && printf '%s\n' "${files}" | xargs sha256sum)
 printf '%s\n' "${hashes}" | jq -R -n \
 	--arg run "${run}" \

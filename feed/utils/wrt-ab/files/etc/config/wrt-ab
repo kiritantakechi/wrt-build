@@ -1,0 +1,5 @@
+# Time limits of the health check, in seconds (r4s-ab-rollback design D5).
+config healthcheck 'healthcheck'
+	option total '300'
+	option interval '10'
+	option timeout '30'
