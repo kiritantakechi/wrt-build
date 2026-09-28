@@ -179,4 +179,5 @@ jobs:
         with:
           name: system-test-report
           path: tests/.reports
-          if-no-files-found: warn
+          include-hidden-files: true
+          if-no-files-found: error

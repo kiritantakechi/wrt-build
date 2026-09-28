@@ -148,6 +148,7 @@
           # boot partition reading (debugfs) and the network sandbox
           e2fsprogs
           iproute2
+          iputils
           dnsmasq
           # LAN clients take their address over DHCP; only this applet of
           # busybox, which would otherwise shadow coreutils in the FHS.

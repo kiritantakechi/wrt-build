@@ -13,7 +13,7 @@ There are two workflows, both on GitHub-hosted ubuntu-24.04 runners (4-core x86_
 
 The toolchain cache key depends only on these inputs: the runner architecture, the tree SHAs of openwrt's `tools/` and `toolchain/` directories, the tree SHAs of the packages feed's `lang/golang` and `lang/rust` directories, `config/toolchain.seed`, and the build environment fingerprint `WRT_BUILD_INPUTS` (the store paths of the build packages plus the build profile; see `buildInputsId` in `flake.nix`). So changing only the packages or luci SHA, or adding tools to the test environment, still hits the toolchain cache.
 
-The workflows reference no secrets.
+The workflows reference no secrets, and the repository has none configured, so every run is also the run of a fork without secrets. `just env-report` prints the same 28 lines in CI (x86_64) and in the local VM (aarch64), checked on run 36388876907.
 
 ## Timings
 
@@ -23,6 +23,9 @@ The workflows reference no secrets.
 | 2026-09-28 | early trial run | cross toolchain GCC 15.3.0 (cold cache) | about 35 min | |
 | 2026-09-28 | 36371318405 | host-toolchain job total | 83 min | Building the tools and the toolchain: 79 min 49 s; packing and saving the cache: 6 s |
 | 2026-09-28 | 36371318405 | firmware job total | 103 min | Build: 98 min 04 s (empty ccache, empty dl cache, all kmods) |
+| 2026-09-28 | 36388876907 | host-toolchain job total | 81 min | New key scheme (`toolchain-v2`), so a cold rebuild: tools and toolchain 77 min 01 s |
+| 2026-09-28 | 36388876907 | firmware job total | 138 min | Build: 131 min 45 s; ccache from the previous run, but the kernel configuration changed, so every kmod was rebuilt |
+| 2026-09-28 | 36388876907 | system-test job total | 13 min | Tests: 10 min 32 s (64 tests under TCG on x86_64); failed only because `ping` was missing from the test environment |
 
 The first full pipeline on a cold cache took about 3 hours 6 minutes; both build jobs are well within the 6-hour limit.
 

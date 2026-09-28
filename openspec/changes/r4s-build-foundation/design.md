@@ -50,7 +50,7 @@ See the Why section of proposal.md for motivation. This design depends on the fo
 ```
 wrt-build/
   flake.nix  flake.lock           host environment (build FHS + tooling)
-  justfile                        entry points, grouped: build / test / quality / workdir
+  justfile                        entry points, grouped: build / image / test / quality / ci / workdir
   upstream.lock                   openwrt / packages / luci: url, sha, commit epoch
   patches/<repo>/*.patch          git format-patch series, applied with git am
   feed/                           own packages (src-link)
@@ -214,7 +214,7 @@ require_linux; require_workdir; ensure_fhs "$@"   # only the guards the script n
 
 - **Naming rules**:
   - Pipeline stages are single verbs: `fetch`, `patch`, `config`, `build`, `test`, `check`, `fmt`.
-  - Operations on a specific object use "object-verb": `workdir-mount`/`workdir-unmount`, `toolchain-key`/`toolchain-build`/`toolchain-pack`/`toolchain-unpack`, `image-audit`, `env-report`.
+  - Operations on a specific object use "object-verb": `workdir-mount`/`workdir-unmount`, `toolchain-key`/`toolchain-build`/`toolchain-pack`/`toolchain-unpack`, `image-audit`, `env-report`, `runner-prepare`; `test-device` is the device counterpart of `test`.
   - just recipe names match script names and are grouped with `[group(...)]`.
   - Environment variables all use the `WRT_` prefix.
 - **One command to check**: `just check` only checks and never modifies; `just fmt` formats. Both run on macOS, with their tools provided by the platform's devShell.
