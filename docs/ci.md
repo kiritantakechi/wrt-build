@@ -26,6 +26,9 @@ The workflows reference no secrets, and the repository has none configured, so e
 | 2026-09-28 | 36388876907 | host-toolchain job total | 81 min | New key scheme (`toolchain-v2`), so a cold rebuild: tools and toolchain 77 min 01 s |
 | 2026-09-28 | 36388876907 | firmware job total | 138 min | Build: 131 min 45 s; ccache from the previous run, but the kernel configuration changed, so every kmod was rebuilt |
 | 2026-09-28 | 36388876907 | system-test job total | 13 min | Tests: 10 min 32 s (64 tests under TCG on x86_64); failed only because `ping` was missing from the test environment |
+| 2026-09-28 | 36412223299 | host-toolchain job total | 4 min 22 s | Toolchain cache hit, although `flake.nix` changed: only test packages were added, so `WRT_BUILD_INPUTS` stayed the same |
+| 2026-09-28 | 36412223299 | firmware job total | 141 min | ccache from the previous run |
+| 2026-09-28 | 36412223299 | system-test job total | 13 min | Tests: 8 min 04 s, 64 passed and 1 device-only skipped; spec coverage and the JUnit report (65 tests) published |
 
 The first full pipeline on a cold cache took about 3 hours 6 minutes; both build jobs are well within the 6-hour limit.
 

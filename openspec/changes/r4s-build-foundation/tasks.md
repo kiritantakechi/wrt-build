@@ -74,12 +74,12 @@
 
 ## 11. CI
 
-- [ ] 11.1 Write the `host-toolchain` job: install Nix, prepare the runner, and compute the cache key per design D11; on a cache miss, build the tools and toolchain, pack only the paths that actually exist, and save them. Verification: a cold-cache run finishes within 6 hours, with the duration of each stage recorded in `docs/ci.md`; a second run hits the cache and finishes within minutes.
+- [x] 11.1 Write the `host-toolchain` job: install Nix, prepare the runner, and compute the cache key per design D11; on a cache miss, build the tools and toolchain, pack only the paths that actually exist, and save them. Verification: a cold-cache run finishes within 6 hours, with the duration of each stage recorded in `docs/ci.md`; a second run hits the cache and finishes within minutes.
 - [x] 11.2 Write the `firmware` job: refresh file timestamps when restoring the toolchain, and restore the ccache and dl caches; build with the `ci` profile; generate `manifest.json`; upload unsigned artifacts. Verification: the job finishes within 6 hours; the vermagic in the manifest matches the kernel version identifier that the `kmod-*` dependencies in the image refer to.
 - [x] 11.3 Check the environment and permissions. Verification: the output of `just env-report` in CI is identical to the local one; the workflows reference no secrets; a run in a fork with no secrets configured succeeds.
 - [x] 11.4 Check cache usage. Verification: the total size of the toolchain cache and ccache is recorded in `docs/ci.md`; if it exceeds 10 GB, store the toolchain as a Release asset instead per design D11, and confirm that the next run restores it correctly.
 - [x] 11.5 Split the code-standard checks into a separate `check.yml` that runs `just check` on every push, with no path filter. Verification: a docs-only push triggers only `check.yml`, not `build.yml`; pushing a deliberate formatting problem makes `check` fail.
-- [ ] 11.6 Add a `system-test` job to `build.yml`: it depends on the `firmware` artifacts, runs `just test`, and publishes the JUnit report. Verification: the job finishes within 30 minutes; after deliberately making a test fail, the job fails and the report includes that test.
+- [x] 11.6 Add a `system-test` job to `build.yml`: it depends on the `firmware` artifacts, runs `just test`, and publishes the JUnit report. Verification: the job finishes within 30 minutes; after deliberately making a test fail, the job fails and the report includes that test.
 
 ## 12. Device smoke test and upstream contributions
 
