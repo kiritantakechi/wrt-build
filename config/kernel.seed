@@ -1,0 +1,14 @@
+# BTF and BPF for the eBPF datapath; cgroup v2 only.
+CONFIG_KERNEL_DEBUG_INFO=y
+# CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set
+CONFIG_KERNEL_DEBUG_INFO_BTF=y
+CONFIG_KERNEL_BPF_EVENTS=y
+CONFIG_KERNEL_CGROUPS=y
+CONFIG_KERNEL_CGROUP_BPF=y
+# CONFIG_KERNEL_MEMCG_V1 is not set
+# F2FS compression for the zstd overlay (options added by patches/openwrt/0001).
+CONFIG_KERNEL_F2FS_FS_COMPRESSION=y
+CONFIG_KERNEL_F2FS_FS_ZSTD=y
+# BBRv3 (patches/openwrt/0002) as default congestion control; sch_fq comes from kmod-sched.
+CONFIG_PACKAGE_kmod-tcp-bbr=y
+CONFIG_PACKAGE_kmod-sched=y

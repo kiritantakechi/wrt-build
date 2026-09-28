@@ -1,0 +1,9 @@
+#!/bin/sh
+# Default zram swap: 1 GiB compressed with zstd. Only fills in options that are
+# not set, so a config-preserving upgrade keeps the administrator's values.
+uci -q get system.@system[0].zram_size_mb >/dev/null ||
+	uci -q set system.@system[0].zram_size_mb=1024
+uci -q get system.@system[0].zram_comp_algo >/dev/null ||
+	uci -q set system.@system[0].zram_comp_algo=zstd
+uci -q commit system
+exit 0

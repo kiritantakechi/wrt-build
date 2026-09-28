@@ -1,0 +1,12 @@
+# GCC 15 + LTO + mold + gc-sections for all target packages.
+# -O2 and the big.LITTLE tuning come after the default -Os/-mcpu in TARGET_CFLAGS
+# (rules.mk: TARGET_CFLAGS = TARGET_OPTIMIZATION + EXTRA_OPTIMIZATION), so they win.
+CONFIG_DEVEL=y
+CONFIG_TOOLCHAINOPTS=y
+CONFIG_GCC_USE_VERSION_15=y
+CONFIG_USE_LTO=y
+CONFIG_USE_GC_SECTIONS=y
+CONFIG_USE_MOLD=y
+CONFIG_EXTRA_OPTIMIZATION="-fno-caller-saves -fno-plt -O2 -mcpu=cortex-a72.cortex-a53+crypto"
+# BPF objects are compiled with the clang pinned by flake.nix instead of building llvm-bpf.
+CONFIG_BPF_TOOLCHAIN_HOST=y

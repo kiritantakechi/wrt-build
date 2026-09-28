@@ -46,7 +46,7 @@
   - 构建按 toolchain → packages（`ALL_KMODS`）→ images 三个阶段拆开，每个阶段控制在 6 小时以内。工具链和 ccache 以 lock 文件的哈希作为缓存键。
   - 正式镜像和 kmod 仓库必须出自同一次构建，保证 vermagic 一致。
   - 签名和发布由 `r4s-release-pipeline` 负责。
-- **上游贡献**：向上游提交 `include/image.mk:110` 的修正。那里判断的是 `CONFIG_EROFS_FS_ZIP_LZMA`，但实际的配置项名是 `KERNEL_EROFS_FS_ZIP_LZMA`，导致 LZMA 分支永远不会被用到。
+- **上游贡献**：向上游提交 `include/image.mk:110` 的修正。那里判断的是 `CONFIG_EROFS_FS_ZIP_LZMA`，但实际的配置项名是 `KERNEL_EROFS_FS_ZIP_LZMA`，导致 LZMA 分支永远不会被用到。修正时不能只改名（那样所有 EROFS 构建都会静默改用 LZMA），而是新增一个默认 lz4hc 的压缩算法选择项。
 
 ## Capabilities
 

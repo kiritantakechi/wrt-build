@@ -1,0 +1,2 @@
+# Local development builds: only the selected packages and kmods.
+CONFIG_CCACHE=y

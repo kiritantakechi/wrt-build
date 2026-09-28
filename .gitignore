@@ -1,0 +1,11 @@
+# Build working tree lives outside the repo ($WRT_WORKDIR); never commit build output.
+/work/
+/out/
+/result
+/result-*
+/.direnv/
+*.ext4
+*.img
+*.img.gz
+*.apk
+.DS_Store

@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 28 Sep 2026 08:14:22 +0800
+Subject: [PATCH] build: make the EROFS compression selectable
+
+include/image.mk switches mkfs.erofs to LZMA when CONFIG_EROFS_FS_ZIP_LZMA
+is set, but that symbol does not exist: the Kconfig option is called
+KERNEL_EROFS_FS_ZIP_LZMA. The LZMA branch is therefore never taken and
+every EROFS image is compressed with lz4hc.
+
+Simply correcting the name would silently switch all EROFS builds to
+LZMA, because KERNEL_EROFS_FS_ZIP_LZMA has no prompt and defaults to y
+whenever EROFS is enabled. Add an explicit compression choice instead:
+lz4hc stays the default, so existing builds are unchanged, and LZMA
+becomes available on request (it selects the kernel LZMA support).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ config/Config-images.in | 15 +++++++++++++++
+ include/image.mk        |  2 +-
+ 2 files changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/config/Config-images.in b/config/Config-images.in
+index a62e351..2f7a5b9 100644
+--- a/config/Config-images.in
++++ b/config/Config-images.in
+@@ -105,6 +105,21 @@ menu "Target Images"
+ 			  Specify the EROFS physical cluster size (must be equal
+ 			  to or a multiple of the filesystem block size).
+ 
++		choice
++			prompt "compression"
++			depends on TARGET_ROOTFS_EROFS
++			default TARGET_EROFS_COMPRESSION_LZ4HC
++			help
++			  Compression algorithm for the EROFS root filesystem.
++
++			config TARGET_EROFS_COMPRESSION_LZ4HC
++				bool "lz4hc (fast decompression)"
++
++			config TARGET_EROFS_COMPRESSION_LZMA
++				bool "lzma (smaller image)"
++				select KERNEL_EROFS_FS_ZIP_LZMA
++		endchoice
++
+ 	menuconfig TARGET_ROOTFS_EXT4FS
+ 		bool "ext4"
+ 		default y if USES_EXT4
+diff --git a/include/image.mk b/include/image.mk
+index f65a835..29ee8f2 100644
+--- a/include/image.mk
++++ b/include/image.mk
+@@ -107,7 +107,7 @@ EROFSOPT := -Efragments,dedupe,ztailpacking -Uclear --all-root
+ EROFSOPT += $(if $(SOURCE_DATE_EPOCH),-T$(SOURCE_DATE_EPOCH) --ignore-mtime)
+ EROFSOPT += $(if $(CONFIG_SELINUX),,-x-1)
+ EROFSCOMP := lz4hc,12
+-ifeq ($(CONFIG_EROFS_FS_ZIP_LZMA),y)
++ifeq ($(CONFIG_TARGET_EROFS_COMPRESSION_LZMA),y)
+ EROFSCOMP := lzma,109
+ endif
+ 

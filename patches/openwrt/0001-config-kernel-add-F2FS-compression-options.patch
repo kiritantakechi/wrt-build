@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 28 Sep 2026 07:56:54 +0800
+Subject: [PATCH] config: kernel: add F2FS compression options
+
+fstools can format and mount an f2fs overlay with transparent compression
+(fstools_overlay_compression_type= on the kernel command line), but the
+kernel options it needs cannot be selected from the build configuration.
+
+Add KERNEL_F2FS_FS_COMPRESSION and the LZ4/ZSTD algorithm options so a
+build can enable them through the usual CONFIG_KERNEL_* passthrough.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ config/Config-kernel.in | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/config/Config-kernel.in b/config/Config-kernel.in
+index 0c9dd4f..f0e6935 100644
+--- a/config/Config-kernel.in
++++ b/config/Config-kernel.in
+@@ -1458,6 +1458,23 @@ config KERNEL_EROFS_FS_ZIP_LZMA
+ 	bool
+ 	default y if KERNEL_EROFS_FS
+ 
++config KERNEL_F2FS_FS_COMPRESSION
++	bool "F2FS compression support"
++	help
++	  Enable transparent file compression in F2FS. fstools formats and
++	  mounts an f2fs overlay with compression when the kernel command line
++	  contains fstools_overlay_compression_type=<algorithm>.
++
++config KERNEL_F2FS_FS_LZ4
++	bool "F2FS LZ4 compression support"
++	depends on KERNEL_F2FS_FS_COMPRESSION
++	default y
++
++config KERNEL_F2FS_FS_ZSTD
++	bool "F2FS ZSTD compression support"
++	depends on KERNEL_F2FS_FS_COMPRESSION
++	default y
++
+ menu "Filesystem ACL and attr support options"
+ 	config USE_FS_ACL_ATTR
+ 		bool "Use filesystem ACL and attr support by default"

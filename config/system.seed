@@ -1,0 +1,18 @@
+# LAN and failsafe address 10.0.0.1. PREINIT_IP only takes a custom value with
+# PREINITOPT, and DEFAULT_LAN_IP_FROM_PREINIT only with IMAGEOPT.
+CONFIG_IMAGEOPT=y
+CONFIG_PREINITOPT=y
+CONFIG_TARGET_PREINIT_IP="10.0.0.1"
+CONFIG_TARGET_PREINIT_BROADCAST="10.0.0.255"
+CONFIG_TARGET_DEFAULT_LAN_IP_FROM_PREINIT=y
+# LuCI on uhttpd + ucode, Simplified Chinese.
+CONFIG_PACKAGE_luci=y
+CONFIG_LUCI_LANG_zh_Hans=y
+# The kernel RNG makes urngd unnecessary.
+# CONFIG_PACKAGE_urngd is not set
+CONFIG_PACKAGE_zram-swap=y
+# zram only offers lzo unless a backend is enabled; make zstd the kernel default.
+CONFIG_KERNEL_ZRAM_BACKEND_ZSTD=y
+CONFIG_KERNEL_ZRAM_DEF_COMP_ZSTD=y
+CONFIG_PACKAGE_zsh=y
+CONFIG_PACKAGE_zsh-plugins=y

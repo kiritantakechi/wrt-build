@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 28 Sep 2026 07:58:21 +0800
+Subject: [PATCH] rockchip: enable zstd compression for the f2fs overlay
+
+fstools formats the overlay with the f2fs compression feature and mounts
+it with compress_algorithm=zstd when the kernel command line contains
+fstools_overlay_compression_type=zstd. Pass it from the default boot
+script so writes to the SD card are compressed.
+
+Requires CONFIG_KERNEL_F2FS_FS_COMPRESSION and CONFIG_KERNEL_F2FS_FS_ZSTD.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ target/linux/rockchip/image/default.bootscript | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/target/linux/rockchip/image/default.bootscript b/target/linux/rockchip/image/default.bootscript
+index 77d2275..b847f46 100644
+--- a/target/linux/rockchip/image/default.bootscript
++++ b/target/linux/rockchip/image/default.bootscript
+@@ -16,7 +16,7 @@ elif test $soc = 'rk3588'; then
+ 	serial_addr=',0xfeb50000'; serial_port='ttyS2';
+ fi
+ 
+-setenv bootargs "console=${serial_port},1500000 earlycon=uart8250,mmio32${serial_addr} root=PARTUUID=${uuid} rw rootwait";
++setenv bootargs "console=${serial_port},1500000 earlycon=uart8250,mmio32${serial_addr} root=PARTUUID=${uuid} rw rootwait fstools_overlay_compression_type=zstd";
+ 
+ load ${devtype} ${devnum}:1 ${kernel_addr_r} kernel.img
+ 

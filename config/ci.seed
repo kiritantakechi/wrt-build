@@ -1,0 +1,4 @@
+# CI builds: every kmod goes into the package repository of the same build.
+CONFIG_ALL_KMODS=y
+CONFIG_CCACHE=y
+CONFIG_BUILD_LOG=y

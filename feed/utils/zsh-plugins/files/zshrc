@@ -1,0 +1,16 @@
+# Global zshrc for interactive shells, installed by the zsh-plugins package.
+
+HISTFILE=${HOME}/.zsh_history
+HISTSIZE=5000
+SAVEHIST=5000
+setopt hist_ignore_all_dups share_history interactive_comments
+
+# Keep the completion dump off the overlay (SD card).
+autoload -Uz compinit && compinit -d /tmp/.zcompdump-${USER:-root}
+
+bindkey -e
+PROMPT='%F{green}%n@%m%f:%F{blue}%~%f%# '
+
+source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
+# zsh-syntax-highlighting must be sourced last.
+source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh

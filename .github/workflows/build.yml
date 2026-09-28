@@ -1,0 +1,139 @@
+# Build the R4S firmware in two stages that each fit in the 6-hour job limit:
+#   host-toolchain: tools + cross toolchain, cached by the inputs that affect them
+#   firmware:       everything else (ci profile: all kmods), unsigned artifacts
+# No job here uses any secret; signing happens elsewhere (r4s-release-pipeline).
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  WRT_WORKDIR: /mnt/wrt
+  NIX_CONFIG: experimental-features = nix-command flakes
+
+jobs:
+  host-toolchain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Free disk space
+        run: .github/scripts/free-disk.sh
+
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+
+      - name: Host environment
+        run: |
+          nix develop -c just env-report | tee env-report.txt
+          { echo '### Host environment'; echo '```'; cat env-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fetch and patch sources
+        run: nix develop -c sh -c 'just fetch && just patch'
+
+      - name: Toolchain cache key
+        id: key
+        run: nix develop -c scripts/toolchain-key.sh >> "$GITHUB_OUTPUT"
+
+      - name: Restore toolchain
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.key.outputs.key }}
+          path: ${{ env.WRT_WORKDIR }}/toolchain-cache.tar.zst
+
+      - name: Build tools and toolchain
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          nix develop -c sh -c 'just config ci && scripts/toolchain-build.sh'
+          nix develop -c scripts/toolchain-pack.sh "$WRT_WORKDIR/toolchain-cache.tar.zst"
+
+      - name: Save toolchain
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.key.outputs.key }}
+          path: ${{ env.WRT_WORKDIR }}/toolchain-cache.tar.zst
+
+  firmware:
+    needs: host-toolchain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Free disk space
+        run: .github/scripts/free-disk.sh
+
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+
+      - name: Fetch, patch and configure
+        run: nix develop -c sh -c 'just fetch && just patch && just config ci'
+
+      - name: Restore toolchain
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ needs.host-toolchain.outputs.key }}
+          path: ${{ env.WRT_WORKDIR }}/toolchain-cache.tar.zst
+          fail-on-cache-miss: true
+
+      - name: Unpack toolchain
+        run: nix develop -c scripts/toolchain-unpack.sh "$WRT_WORKDIR/toolchain-cache.tar.zst"
+
+      - name: Restore download cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: dl-${{ hashFiles('upstream.lock', 'feed/**/Makefile') }}
+          restore-keys: dl-
+          path: ${{ env.WRT_WORKDIR }}/dl
+
+      - name: Restore compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ccache-${{ github.run_id }}
+          restore-keys: ccache-
+          path: ${{ env.WRT_WORKDIR }}/ccache
+
+      - name: Build firmware
+        run: nix develop -c scripts/build.sh ci
+
+      - name: Save download cache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: dl-${{ hashFiles('upstream.lock', 'feed/**/Makefile') }}
+          path: ${{ env.WRT_WORKDIR }}/dl
+
+      - name: Save compiler cache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ccache-${{ github.run_id }}
+          path: ${{ env.WRT_WORKDIR }}/ccache
+
+      - name: Build logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: logs
+          path: ${{ env.WRT_WORKDIR }}/openwrt/logs
+          if-no-files-found: ignore
+
+      - name: Upload unsigned firmware
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: firmware-unsigned
+          path: ${{ env.WRT_WORKDIR }}/out/ci
+          if-no-files-found: error

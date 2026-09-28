@@ -1,0 +1,3 @@
+# <profile>: <seed files in config/, applied in order>
+dev: target toolchain kernel rootfs system dev
+ci: target toolchain kernel rootfs system ci

@@ -142,6 +142,8 @@ CONFIG_TARGET_ROOTFS_PARTSIZE=1024
 **system.seed**（依据：`package/base-files/Makefile:96-103`）
 
 ```
+CONFIG_IMAGEOPT=y
+CONFIG_PREINITOPT=y
 CONFIG_TARGET_PREINIT_IP="10.0.0.1"
 CONFIG_TARGET_PREINIT_BROADCAST="10.0.0.255"
 CONFIG_TARGET_DEFAULT_LAN_IP_FROM_PREINIT=y
@@ -153,7 +155,7 @@ CONFIG_PACKAGE_zsh=y
 CONFIG_PACKAGE_zsh-plugins=y
 ```
 
-`DEFAULT_LAN_IP_FROM_PREINIT` 会生成 `board.d/99-lan-ip`。这个文件只在生成默认配置时起作用，所以保留配置升级时不会覆盖用户设置的地址，满足 base-system 规格；同时故障安全模式的地址也会变成 10.0.0.1。
+`TARGET_PREINIT_IP` 只有在打开 `PREINITOPT` 时才会采用自定义值，`DEFAULT_LAN_IP_FROM_PREINIT` 只有在打开 `IMAGEOPT` 时才生效（`package/base-files/image-config.in`）。所以这两个开关必须写进 seed，否则 defconfig 会静默退回默认值 192.168.1.1。`DEFAULT_LAN_IP_FROM_PREINIT` 会生成 `board.d/99-lan-ip`。这个文件只在生成默认配置时起作用，所以保留配置升级时不会覆盖用户设置的地址，满足 base-system 规格；同时故障安全模式的地址也会变成 10.0.0.1。
 
 ### D6. 工具链只靠配置，不改 include/target.mk
 
