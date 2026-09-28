@@ -14,6 +14,9 @@ ensure_fhs build "$@"
 
 # staging_dir/hostpkg only exists once host packages (golang, rust, ...) are built.
 cd "${TREE}"
+# Without the compile stamp, make world rebuilds the toolchain (toolchain-build).
+set -- staging_dir/toolchain-*/stamp/.toolchain_compile
+[ -f "$1" ] || die "the toolchain has no compile stamp; build it with toolchain-build"
 set --
 for path in staging_dir/host staging_dir/hostpkg staging_dir/toolchain-* build_dir/host; do
 	if [ -e "${path}" ]; then
