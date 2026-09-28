@@ -18,7 +18,7 @@ CI SHALL 把构建拆成“宿主工具与工具链”和“固件”两个阶�
 - **THEN** 工具链阶段直接复用缓存，固件阶段在缓存的工具链上继续构建
 
 ### Requirement: 按实际输入确定缓存
-工具链阶段的缓存键 SHALL 只由会影响它的输入决定：openwrt 仓库里工具和工具链相关的目录内容、工具链相关的配置、`flake.lock`。固件阶段 SHALL 使用编译缓存加速重复编译。
+工具链阶段的缓存键 SHALL 只由会影响它的输入决定：openwrt 仓库里工具和工具链相关的目录内容、工具链相关的配置、定义构建环境的 `flake.nix` 和 `flake.lock`。固件阶段 SHALL 使用编译缓存加速重复编译。
 
 #### Scenario: 只更新 packages feed
 - **WHEN** 只修改了 `upstream.lock` 里 packages feed 的 SHA

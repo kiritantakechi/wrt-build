@@ -51,4 +51,4 @@
 
 - [ ] 8.1 把单槽镜像写入 microSD 卡，在 R4S 上启动，逐条核对以下规格场景：`/rom` 是 erofs；`/overlay` 是 f2fs 且带 zstd；LAN 是 10.0.0.1；故障安全模式可以访问；LuCI 为简体中文；`/sys/kernel/btf/vmlinux` 存在；只有 cgroup2；BBR 和 fq 生效且版本为 3；有 1 GiB 的 zram；恢复出厂只清空 overlay；三种 shell 场景。验证：每条场景的结果记录在 `docs/validation/foundation.md`，全部通过。
 - [ ] 8.2 kmod 兼容性测试。验证：在设备上安装同一次构建产出的任意一个 kmod，能成功加载；改一处内核配置另外构建一次，拿它产出的 kmod 来装，apk 会拒绝。
-- [ ] 8.3 向上游 openwrt 提交 `include/image.mk:110` 的修正（`docs/upstream/0001-build-make-the-EROFS-compression-selectable.patch`）。不能只把 `CONFIG_EROFS_FS_ZIP_LZMA` 改名为 `CONFIG_KERNEL_EROFS_FS_ZIP_LZMA`：后者没有提示项、开启 EROFS 时默认为 y，只改名会让所有 EROFS 构建静默改用 LZMA。补丁改为新增一个压缩算法的选择项，默认 lz4hc。验证：PR 链接记录在 `docs/upstream-contributions.md`。
+- [ ] 8.3 （提交前必须得到你的明确同意）向上游 openwrt 提交 `include/image.mk:110` 的修正（`docs/upstream/0001-build-make-the-EROFS-compression-selectable.patch`）。不能只把 `CONFIG_EROFS_FS_ZIP_LZMA` 改名为 `CONFIG_KERNEL_EROFS_FS_ZIP_LZMA`：后者没有提示项、开启 EROFS 时默认为 y，只改名会让所有 EROFS 构建静默改用 LZMA。补丁改为新增一个压缩算法的选择项，默认 lz4hc。验证：PR 链接记录在 `docs/upstream-contributions.md`。

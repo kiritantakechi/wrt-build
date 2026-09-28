@@ -205,7 +205,7 @@ CONFIG_PACKAGE_zsh-plugins=y
 job host-toolchain (timeout 330m)
   key = hash(git rev-parse <owrt>:tools, <owrt>:toolchain,
              <pkgs>:lang/golang, <pkgs>:lang/rust,
-             config/toolchain.seed, flake.lock)
+             config/toolchain.seed, flake.nix, flake.lock)
   hit  -> done
   miss -> fetch, patch, config
           -> make tools/install toolchain/install + host packages (golang, rust)
