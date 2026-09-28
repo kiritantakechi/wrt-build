@@ -24,4 +24,6 @@ seed=$(cat "${REPO_DIR}/config/toolchain.seed")
 environment=${WRT_BUILD_INPUTS##*/}
 
 digest=$(printf '%s\n' "${arch}" "${trees}" "${langs}" "${seed}" "${environment}" | sha256sum)
-printf 'key=toolchain-v2-%s\n' "${digest%% *}"
+# The version changes with what the archive holds; v3 adds the toolchain's compile
+# stamp (toolchain-build).
+printf 'key=toolchain-v3-%s\n' "${digest%% *}"
