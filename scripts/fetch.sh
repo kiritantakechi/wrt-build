@@ -30,6 +30,10 @@ for feed in ${feeds}; do
 done
 printf 'src-link wrtbuild %s\n' "${REPO_DIR}/feed" >>"${feeds_conf}"
 ln -sfn "${REPO_DIR}/feed" "${TREE}/feeds/wrtbuild"
+# The A/B U-Boot sources, read by uboot-rockchip and our uboot-wrt-qemu; linked
+# before any package index is built, since both Makefiles include env/uboot.
+mkdir -p "${TREE}/env"
+ln -sfn "${REPO_DIR}/uboot" "${TREE}/env/uboot"
 
 # The feeds are already at the pinned commits (scripts/feeds skips existing ^sha
 # feeds, design D2); only rebuild the package indexes.

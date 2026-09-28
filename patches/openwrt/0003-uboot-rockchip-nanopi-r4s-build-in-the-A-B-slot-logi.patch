@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 28 Sep 2026 23:55:25 +0800
+Subject: [PATCH] uboot-rockchip: nanopi-r4s: build in the A/B slot logic
+
+Build the NanoPi R4S U-Boot with the A/B slot logic of wrt-build: the
+configuration fragments wrt-ab.config and board-r4s.config after its
+defconfig, and a default environment of the board constants followed by
+the shared logic. The stored environment may set only boot_slot,
+bootcount and upgrade_available (ENV_WRITEABLE_LIST), and U-Boot starts
+the DesignWare watchdog.
+
+The sources and build glue come from env/uboot (wrt-ab.mk), where the
+emulator's U-Boot reads the same shared logic. Every other variant is
+unchanged.
+---
+ package/boot/uboot-rockchip/Makefile | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/package/boot/uboot-rockchip/Makefile b/package/boot/uboot-rockchip/Makefile
+index 7161e56..7f2916f 100644
+--- a/package/boot/uboot-rockchip/Makefile
++++ b/package/boot/uboot-rockchip/Makefile
+@@ -16,6 +16,7 @@ UBOOT_USE_INTREE_DTC:=1
+ 
+ include $(INCLUDE_DIR)/u-boot.mk
+ include $(INCLUDE_DIR)/package.mk
++include $(TOPDIR)/env/uboot/wrt-ab.mk
+ 
+ define U-Boot/Default
+   BUILD_TARGET:=rockchip
+@@ -141,6 +142,7 @@ define U-Boot/nanopi-r4s-rk3399
+   BUILD_DEVICES:= \
+     friendlyarm_nanopi-r4s \
+     friendlyarm_nanopi-r4s-enterprise
++  UBOOT_CONFIG:=nanopi-r4s-rk3399 $(call WrtAB/config,r4s)
+ endef
+ 
+ define U-Boot/rock-4c-plus-rk3399
+@@ -496,6 +498,17 @@ UBOOT_MAKE_FLAGS += \
+   BL31=$(STAGING_DIR_IMAGE)/$(ATF) \
+   $(if $(TPL),ROCKCHIP_TPL=$(STAGING_DIR_IMAGE)/$(TPL))
+ 
++# The A/B slot logic of wrt-build (env/uboot/wrt-ab.mk), in the R4S's U-Boot only.
++ifeq ($(BUILD_VARIANT),nanopi-r4s-rk3399)
++  PKG_FILE_DEPENDS += $(WRT_AB_DIR)/
++  KBUILD_CFLAGS += $(WRT_AB_KBUILD_CFLAGS)
++
++  define Build/Prepare
++	$(call Build/Prepare/Default)
++	$(call Build/Prepare/WrtAB,r4s,board/rockchip/evb_rk3399)
++  endef
++endif
++
+ define Build/Configure
+ 	$(call Build/Configure/U-Boot)
+ 
