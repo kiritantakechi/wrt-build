@@ -29,8 +29,21 @@ The workflows reference no secrets, and the repository has none configured, so e
 | 2026-09-28 | 36412223299 | host-toolchain job total | 4 min 22 s | Toolchain cache hit, although `flake.nix` changed: only test packages were added, so `WRT_BUILD_INPUTS` stayed the same |
 | 2026-09-28 | 36412223299 | firmware job total | 141 min | ccache from the previous run |
 | 2026-09-28 | 36412223299 | system-test job total | 13 min | Tests: 8 min 04 s, 64 passed and 1 device-only skipped; spec coverage and the JUnit report (65 tests) published |
+| 2026-09-28 | 36437827311 #1 | host-toolchain job total | 49 min | New key `toolchain-v3` (the archive now holds the toolchain's compile stamp), so a cold rebuild |
+| 2026-09-28 | 36437827311 #1 | firmware job total | 79 min | Build: 67 min on an Intel Xeon 6973P-C; the cross toolchain is no longer rebuilt; empty `ccache-v2`: 2,418 of 20,837 cacheable calls hit (11.6%) |
+| 2026-09-28 | 36437827311 #2 | host-toolchain job total | 4 min 30 s | Re-run of the same run: toolchain cache hit |
+| 2026-09-28 | 36437827311 #2 | firmware job total | 30 min | Build: 23 min 35 s on an AMD EPYC 7763; ccache of the first attempt: 20,834 of 20,837 cacheable calls hit (99.99%) |
 
 The first full pipeline on a cold cache took about 3 hours 6 minutes; both build jobs are well within the 6-hour limit.
+
+### Compiler cache
+
+Until run 36412223299 the restored ccache hit almost nothing, for two reasons:
+
+- ccache identified the cross compiler by its mtime, and `toolchain-unpack` gives the restored toolchain fresh mtimes on every run. `config/ccache.conf` (linked into the cache directory by `scripts/config.sh`) sets `compiler_check = content`, and the cache key moved to `ccache-v2-`, since entries of the old caches can never hit.
+- `make world` rebuilt the whole cross toolchain (25 to 31 min) on top of the cached one, because `toolchain/install` never writes the stamp `world` checks. `toolchain-build` now builds the stamp too, `toolchain-pack` refuses an archive without it, and the key moved to `toolchain-v3`.
+
+`scripts/build.sh` prints the ccache statistics of each build (OpenWrt's own go to its silenced output) and the CPU, since runners differ (an Intel Xeon 6973P-C and an AMD EPYC 7763 in the two attempts above). A ci build fills about 4.5 GB of the 12 GB the cache may grow to.
 
 ## Cache usage
 
