@@ -22,3 +22,5 @@
 补丁的做法：新增 `KERNEL_F2FS_FS_COMPRESSION` 以及它下面的每一个算法选项（LZO、LZO-RLE、LZ4、LZ4HC、ZSTD）。内核把这些选项都默认为 y，有任何一个没有取值，构建就会停下，所以每个都要有对应的 `KERNEL_*`。
 
 本项目的用法：不依赖这个补丁，而是用上游原生的内核配置叠加文件（`config/kernel.config` → `env/kernel-config`）提供同样的选项。补丁被上游接受之后，可以改回用 seed 里的 `CONFIG_KERNEL_F2FS_*`。
+
+核对记录：2026-09-28，两个补丁都能用 `git am` 干净地打到 lock 固定的 openwrt `1019293` 上。

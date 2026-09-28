@@ -1,0 +1,3 @@
+# ty configuration of the system tests (design D12): every rule is an error.
+[rules]
+all = "error"

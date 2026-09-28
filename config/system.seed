@@ -17,3 +17,9 @@ CONFIG_KERNEL_ZRAM_DEF_COMP_ZSTD=y
 CONFIG_PACKAGE_bash=y
 CONFIG_PACKAGE_zsh=y
 CONFIG_PACKAGE_zsh-plugins=y
+# Diagnostics the kernel spec is checked with: bpftool (tcx programs) and ss
+# (congestion control of a connection).
+CONFIG_PACKAGE_bpftool-minimal=y
+CONFIG_PACKAGE_ss=y
+# ss reads the congestion control of a connection over inet_diag.
+CONFIG_PACKAGE_kmod-inet-diag=y

@@ -17,8 +17,9 @@
 | 构建步骤不能执行或应用下载来的内容，不能用 `sed -i` 就地修改上游文件 | `forbidden-patterns` | — |
 | 脚本骨架，以及脚本和 just 命令按名字一一对应 | `skeleton` | — |
 | Python 格式（`tests/`） | `ruff-format` | `ruff format` |
-| Python 静态检查：`select = ["ALL"]`，排除项写在 `tests/pyproject.toml` 里并注明原因 | `ruff-check` | — |
-| Python 类型检查：全部规则按 error 处理 | `ty` | — |
+| Python 静态检查：`select = ["ALL"]`，排除项写在 `tests/ruff.toml` 里并注明原因 | `ruff-check` | — |
+| Python 类型检查：全部规则按 error 处理（`tests/ty.toml`） | `ty` | — |
+| 规格与用例的对应结构：标记指向存在的场景、一个场景只有一个用例、目录规则（设计 D13） | `spec-coverage` | — |
 
 不受这些规则约束的文件：`patches/` 和 `docs/upstream/`（保持上游补丁的原样），`.claude/`（工具生成），以及锁文件。OpenWrt 包的 `Makefile` 按上游惯例混用 tab 和两个空格，所以不检查缩进风格。
 

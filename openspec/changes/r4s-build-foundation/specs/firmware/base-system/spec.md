@@ -22,10 +22,10 @@
 - **THEN** 升级后 LAN 地址仍然是用户设置的那个
 
 ### Requirement: Web 管理界面
-LuCI SHALL 由 uhttpd 配合 ucode 提供，默认界面语言 SHALL 是简体中文。镜像 MUST NOT 包含 nginx 或 uwsgi。
+LuCI SHALL 由 uhttpd 配合 ucode 提供，并带简体中文语言包；界面语言 SHALL 保持 LuCI 默认的 `auto`，跟随浏览器的语言设置。镜像 MUST NOT 包含 nginx 或 uwsgi。
 
 #### Scenario: 访问管理界面
-- **WHEN** 在 LAN 上用浏览器访问 `http://10.0.0.1`
+- **WHEN** 在 LAN 上用语言设置为简体中文的浏览器访问 `http://10.0.0.1`
 - **THEN** 由 uhttpd 返回 LuCI 页面，界面语言为简体中文
 
 #### Scenario: 不包含 nginx 和 uwsgi

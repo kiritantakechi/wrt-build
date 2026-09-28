@@ -1,0 +1,31 @@
+[project]
+name = "wrt-tests"
+version = "0"
+description = "System tests for the wrt-build firmware: one test per spec scenario (design D13)"
+requires-python = ">=3.14"
+dependencies = [
+    "labgrid>=26.0",
+    "pytest>=9.1",
+]
+
+[project.scripts]
+emu-prepare = "wrt_tests.emu:main"
+spec-coverage = "wrt_tests.coverage:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16",
+    "ty>=0.0.84",
+]
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv]
+# Python comes from uv itself, pinned by .python-version, never from the host.
+python-preference = "only-managed"
+
+[tool.uv.build-backend]
+module-name = "wrt_tests"
+module-root = ""

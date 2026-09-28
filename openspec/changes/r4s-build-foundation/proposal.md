@@ -41,7 +41,7 @@
   - overlay 用 f2fs，启动参数里加上 `fstools_overlay_compression_type=zstd` 开启压缩。
   - 本 change 产出单槽镜像，沿用上游分区布局；A/B 由 `r4s-ab-rollback` 负责。
 - **基础系统**
-  - LAN 地址 10.0.0.1；LuCI 用 uhttpd + ucode，界面为简体中文。
+  - LAN 地址 10.0.0.1；LuCI 用 uhttpd + ucode，带简体中文语言包，界面语言跟随浏览器。
   - 登录 shell 保持 ash，交互式会话自动进入 zsh（预装 autosuggestions 和 syntax-highlighting 两个插件）；镜像同时提供 bash。
   - zram-swap 1 GiB，zstd 压缩；镜像里不预置 root 密码。
 - **不采用**：UPX、LRNG、urngd、shortcut-fe、natflow、PCRE1、zh-cn 翻译转换脚本、opkg 补丁、i915 实时内核补丁、用 nginx/uwsgi 跑 LuCI，以及伪造 vermagic。

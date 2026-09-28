@@ -62,6 +62,15 @@ repo_files() {
 		done
 }
 
+# use_tests_venv: point uv at the tests' virtual environment for this OS and
+# architecture. macOS and the Linux VM share the repository, and a virtual
+# environment only works on the host that created it.
+use_tests_venv() {
+	host=$(uname -sm | tr 'A-Z ' 'a-z-')
+	UV_PROJECT_ENVIRONMENT="${REPO_DIR}/tests/.venv-${host}"
+	export UV_PROJECT_ENVIRONMENT
+}
+
 # kernel_dir: the kernel build directory of the tree; exactly one must exist.
 kernel_dir() {
 	set -- "${TREE}"/build_dir/target-*/linux-rockchip_armv8/linux-[0-9]*

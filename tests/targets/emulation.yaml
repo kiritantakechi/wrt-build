@@ -1,0 +1,35 @@
+# The emulated R4S (design D14): the shipped kernel, an R4S-identity device tree
+# and a copy-on-write overlay of the shipped disk. scripts/test.sh fills
+# $LG_EMU_DIR with emu-prepare and runs the suite inside the network sandbox,
+# where eth0 (WAN) sits on br-wan and eth1 (LAN) on br-lan.
+targets:
+  main:
+    resources:
+      NetworkService:
+        address: 10.0.0.1
+        username: root
+    drivers:
+      QEMUDriver:
+        qemu_bin: qemu
+        machine: virt,gic-version=3
+        cpu: cortex-a72
+        memory: 4G
+        kernel: kernel
+        dtb: dtb
+        boot_args: !template "$LG_BOOTARGS"
+        extra_args: !template >-
+          -smp 6
+          -drive if=none,id=disk,format=qcow2,file=$LG_EMU_DIR/overlay.qcow2
+          -device virtio-blk-pci,drive=disk
+          -netdev tap,id=wan,ifname=emu-wan,script=no,downscript=no
+          -device virtio-net-pci,netdev=wan,mac=52:54:00:0a:00:10
+          -netdev tap,id=lan,ifname=emu-lan,script=no,downscript=no
+          -device virtio-net-pci,netdev=lan,mac=52:54:00:0a:00:11
+          -device i6300esb
+          -action watchdog=reset
+      SSHDriver: {}
+images:
+  kernel: !template "$LG_EMU_DIR/Image"
+  dtb: !template "$LG_EMU_DIR/r4s.dtb"
+tools:
+  qemu: qemu-system-aarch64

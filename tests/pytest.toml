@@ -1,0 +1,15 @@
+# pytest configuration of the system tests (design D13).
+[pytest]
+minversion = "9.1"
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--import-mode=importlib",
+    "-p", "wrt_tests.plugin",
+]
+testpaths = ["."]
+# pytest skips build/ and dist/ by default; here build/ holds the build/* specs.
+norecursedirs = [".*", "__pycache__"]
+python_files = ["test_*.py"]
+xfail_strict = true
+junit_family = "xunit2"

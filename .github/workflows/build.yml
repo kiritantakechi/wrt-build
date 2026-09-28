@@ -1,6 +1,8 @@
-# Build the R4S firmware in two stages that each fit in the 6-hour job limit:
+# Build the R4S firmware in two stages that each fit in the 6-hour job limit, then
+# test the result in the emulator (design D11):
 #   host-toolchain: tools + cross toolchain, cached by the inputs that affect them
 #   firmware:       everything else (ci profile: all kmods), unsigned artifacts
+#   system-test:    the system tests against the shipped image, JUnit report
 # No job here uses any secret; signing happens elsewhere (r4s-release-pipeline).
 name: build
 
@@ -35,13 +37,13 @@ jobs:
     outputs:
       key: ${{ steps.key.outputs.key }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
 
       - name: Prepare runner
         # Before Nix is installed, so the script runs directly rather than via just.
         run: scripts/runner-prepare.sh
 
-      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      - uses: DeterminateSystems/nix-installer-action@v23
 
       - name: Host environment
         run: |
@@ -57,7 +59,7 @@ jobs:
 
       - name: Restore toolchain
         id: cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@v6
         with:
           key: ${{ steps.key.outputs.key }}
           path: ${{ env.WRT_WORKDIR }}/toolchain-cache.tar.zst
@@ -70,7 +72,7 @@ jobs:
 
       - name: Save toolchain
         if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/save@v6
         with:
           key: ${{ steps.key.outputs.key }}
           path: ${{ env.WRT_WORKDIR }}/toolchain-cache.tar.zst
@@ -80,19 +82,19 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
 
       - name: Prepare runner
         # Before Nix is installed, so the script runs directly rather than via just.
         run: scripts/runner-prepare.sh
 
-      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      - uses: DeterminateSystems/nix-installer-action@v23
 
       - name: Fetch, patch and configure
         run: nix develop -c sh -c 'just fetch && just patch && just config ci'
 
       - name: Restore toolchain
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@v6
         with:
           key: ${{ needs.host-toolchain.outputs.key }}
           path: ${{ env.WRT_WORKDIR }}/toolchain-cache.tar.zst
@@ -102,14 +104,14 @@ jobs:
         run: nix develop -c just toolchain-unpack "$WRT_WORKDIR/toolchain-cache.tar.zst"
 
       - name: Restore download cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@v6
         with:
           key: dl-${{ hashFiles('upstream.lock', 'feed/**/Makefile') }}
           restore-keys: dl-
           path: ${{ env.WRT_WORKDIR }}/dl
 
       - name: Restore compiler cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@v6
         with:
           key: ccache-${{ github.run_id }}
           restore-keys: ccache-
@@ -120,29 +122,61 @@ jobs:
 
       - name: Save download cache
         if: always()
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/save@v6
         with:
           key: dl-${{ hashFiles('upstream.lock', 'feed/**/Makefile') }}
           path: ${{ env.WRT_WORKDIR }}/dl
 
       - name: Save compiler cache
         if: always()
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/save@v6
         with:
           key: ccache-${{ github.run_id }}
           path: ${{ env.WRT_WORKDIR }}/ccache
 
       - name: Build logs
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@v7
         with:
           name: logs
           path: ${{ env.WRT_WORKDIR }}/openwrt/logs
           if-no-files-found: ignore
 
       - name: Upload unsigned firmware
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@v7
         with:
           name: firmware-unsigned
           path: ${{ env.WRT_WORKDIR }}/out/ci
           if-no-files-found: error
+
+  system-test:
+    needs: firmware
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Prepare runner
+        # Before Nix is installed, so the script runs directly rather than via just.
+        run: scripts/runner-prepare.sh
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: firmware-unsigned
+          path: ${{ env.WRT_WORKDIR }}/out/ci
+
+      - name: System tests
+        run: nix develop -c just test ci -rs
+
+      - name: Spec coverage
+        run: nix develop -c sh -c 'cd tests && uv run --locked spec-coverage --change r4s-build-foundation'
+
+      - name: Test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: system-test-report
+          path: tests/.reports
+          if-no-files-found: warn

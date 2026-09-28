@@ -9,3 +9,10 @@
 *.img.gz
 *.apk
 .DS_Store
+# Python tooling state of the tests project (uv, pytest, ruff, ty).
+/tests/.venv/
+/tests/.venv-*/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+/tests/.reports/

@@ -1,0 +1,141 @@
+"""firmware/kernel: version, BTF, BPF and cgroup v2, built-in filesystems, BBRv3, vermagic."""
+
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from wrt_tests import spec, target
+from wrt_tests.bpf import tcx_object
+
+if TYPE_CHECKING:
+    from wrt_tests.router import Router
+
+CAPABILITY = "firmware/kernel"
+PATCHES = Path(__file__).resolve().parents[2] / "patches" / "openwrt"
+BBR3_ONLY_SYMBOLS = ("bbr_skb_marked_lost", "bbr_tso_segs")
+KERNEL_PATCH_DIR = re.compile(r"^target/linux/[^/]+/(patches|hack|pending|backport)-[0-9.]+/")
+BBR3_PATCH = re.compile(r"^target/linux/generic/hack-[0-9.]+/960-bbr3-")
+BPF_OBJECT = "/tmp/wrt_pass.o"  # noqa: S108 (a path on the router)
+VIRTIO_NICS = ("eth0 (WAN)", "eth1 (LAN)")
+
+
+@spec(CAPABILITY, "内核版本跟随上游", "检查运行中的内核")
+def test_running_kernel_is_the_packaged_one(router: Router) -> None:
+    packaged = re.search(
+        r"^kernel-(\d+\.\d+\.\d+)~", router.run("apk list -I kernel"), re.MULTILINE
+    )
+    assert packaged is not None
+    assert router.run("uname -r") == packaged.group(1)
+
+
+@spec(CAPABILITY, "提供 BTF", "检查 BTF")
+def test_btf_for_kernel_and_modules(router: Router) -> None:
+    assert int(router.run("wc -c < /sys/kernel/btf/vmlinux")) > 0
+    modules = router.run("cut -d' ' -f1 /proc/modules").split()
+    assert modules
+    missing = router.run(
+        f"for m in {' '.join(modules)}; do [ -s /sys/kernel/btf/$m ] || echo $m; done"
+    )
+    assert missing == ""
+
+
+@spec(CAPABILITY, "BPF 与 cgroup v2", "检查 cgroup 挂载")
+def test_cgroup2_only(router: Router) -> None:
+    mounts = [line.split() for line in router.run("cat /proc/mounts").splitlines()]
+    assert ["/sys/fs/cgroup", "cgroup2"] in [fields[1:3] for fields in mounts]
+    assert [fields for fields in mounts if fields[2] == "cgroup"] == []
+
+
+@spec(CAPABILITY, "BPF 与 cgroup v2", "能加载 tcx 程序")
+def test_tcx_program_attaches(router: Router, tmp_path: Path) -> None:
+    program = tmp_path / "wrt_pass.o"
+    program.write_bytes(tcx_object("wrt_pass"))
+    router.put(program, BPF_OBJECT)
+    router.run("mountpoint -q /sys/fs/bpf || mount -t bpf bpf /sys/fs/bpf")
+    router.run(f"bpftool prog load {BPF_OBJECT} /sys/fs/bpf/wrt_pass")
+    try:
+        router.run("bpftool net attach tcx_ingress pinned /sys/fs/bpf/wrt_pass dev br-lan")
+        listing = router.run("bpftool net show dev br-lan")
+        assert re.search(r"tcx/ingress\s+wrt_pass\b", listing), listing
+    finally:
+        router.returncode("bpftool net detach tcx_ingress dev br-lan")
+        router.run("rm -f /sys/fs/bpf/wrt_pass")
+
+
+@spec(CAPABILITY, "根文件系统和 overlay 需要的内核功能都编进内核", "不加载任何模块就能启动")
+def test_filesystems_are_built_in(router: Router) -> None:
+    filesystems = router.run("cat /proc/filesystems").split()
+    modules = router.run("cut -d' ' -f1 /proc/modules").split()
+    for filesystem in ("erofs", "f2fs"):
+        assert filesystem in filesystems
+        assert filesystem not in modules
+    mounts = [line.split()[1:3] for line in router.run("cat /proc/mounts").splitlines()]
+    assert ["/rom", "erofs"] in mounts
+    assert ["/overlay", "f2fs"] in mounts
+
+
+@spec(CAPABILITY, "同一个内核能在模拟器中启动", "出货内核在模拟器中启动")
+@target("emulation", "checks the emulator's virtual devices")
+def test_virt_devices(router: Router) -> None:
+    assert "console=ttyAMA0" in router.run("cat /proc/cmdline").split()
+    assert router.returncode("dmesg | grep -q 'printk: console \\[ttyAMA0\\] enabled'") == 0
+    assert router.run("awk '$2 == \"/rom\" { print $1 }' /proc/mounts") in {
+        "/dev/root",
+        "/dev/vda2",
+    }
+    assert router.returncode("[ -b /dev/vda2 ]") == 0
+    nics = router.run("ls /sys/bus/virtio/drivers/virtio_net/ | grep '^virtio'").split()
+    assert len(nics) == len(VIRTIO_NICS)
+    # OpenWrt builds without WATCHDOG_SYSFS; the driver announces itself instead.
+    assert router.returncode("dmesg | grep -q 'i6300ESB timer .*initialized'") == 0
+    assert router.returncode("[ -c /dev/watchdog0 ]") == 0
+
+
+@spec(CAPABILITY, "默认拥塞控制为 BBRv3", "检查拥塞控制设置")
+def test_bbr3_is_the_default(router: Router) -> None:
+    assert router.run("sysctl -n net.ipv4.tcp_congestion_control") == "bbr"
+    assert router.run("sysctl -n net.core.default_qdisc") == "fq"
+    symbols = set(router.run("awk '{ print $3 }' /proc/kallsyms").split())
+    assert set(BBR3_ONLY_SYMBOLS) <= symbols
+
+
+@spec(CAPABILITY, "默认拥塞控制为 BBRv3", "本机发起的连接使用 BBR")
+def test_local_connection_uses_bbr(router: Router) -> None:
+    # Hold a connection from the router to its own web server open, then look at it.
+    info = router.run(
+        "(sleep 5 | nc 127.0.0.1 80 >/dev/null) & sleep 2; ss -Htin state established 'dport = :80'"
+    )
+    assert re.search(r"\bbbr\b", info), info
+
+
+@spec(CAPABILITY, "内核源码只改 BBRv3", "审计内核补丁")
+def test_only_bbr3_patches_the_kernel() -> None:
+    changed = {
+        line.split()[3].removeprefix("b/")
+        for patch in PATCHES.glob("*.patch")
+        for line in patch.read_text().splitlines()
+        if line.startswith("diff --git ")
+    }
+    kernel = {path for path in changed if KERNEL_PATCH_DIR.match(path)}
+    assert kernel
+    assert {path for path in kernel if not BBR3_PATCH.match(path)} == set()
+
+
+@spec(CAPABILITY, "使用标准 vermagic", "安装同一次构建的 kmod")
+@target("emulation", "serves the build's package repository from the runner")
+def test_kmod_of_the_same_build_loads(router: Router, repository: str) -> None:
+    router.run(f"apk add --repository {repository}/targets/packages/packages.adb kmod-dummy")
+    router.run("modprobe dummy")
+    assert "dummy" in router.run("cut -d' ' -f1 /proc/modules").split()
+
+
+@spec(CAPABILITY, "使用标准 vermagic", "拒绝内核配置不同的 kmod")
+def test_kmod_of_another_kernel_is_refused(router: Router) -> None:
+    # A kmod depends on kernel=<version>~<vermagic>; a virtual package with the
+    # running version but another vermagic has exactly the dependency of a kmod
+    # from a build with a different kernel configuration.
+    version = router.run("uname -r")
+    dependency = f"kernel={version}~{'0' * 32}-r1"
+    code = router.returncode(f"apk add --virtual kmod-wrt-vermagic-probe '{dependency}'")
+    assert code != 0
+    assert router.returncode("apk info -e kmod-wrt-vermagic-probe") != 0

@@ -192,7 +192,7 @@ build.yml   (paths-ignore: openspec/**, docs/**, **/*.md)
 |---|---|---|
 | shell | `shfmt`（按 `.editorconfig`：POSIX 方言、tab 缩进、`switch_case_indent`） | `shellcheck`（`.shellcheckrc`：`shell=sh`，启用 `add-default-case`、`avoid-nullary-conditions`、`check-extra-masked-returns`、`check-set-e-suppressed`、`check-unassigned-uppercase`、`deprecate-which`、`quote-safe-variables`、`require-variable-braces`） |
 | Nix | `nixfmt` | — |
-| Python | `ruff format` | `ruff check`（`select = ["ALL"]`，排除项写在 pyproject 里并注明原因）、`ty check`（全部规则按 error 处理） |
+| Python | `ruff format` | `ruff check`（`select = ["ALL"]`，排除项写在 `tests/ruff.toml` 里并注明原因）、`ty check`（`tests/ty.toml`：全部规则按 error 处理） |
 | workflows | — | `actionlint` |
 | 全部文本 | `.editorconfig`（UTF-8、LF、文件末尾换行、去掉行尾空格） | `editorconfig-checker`（`patches/` 除外） |
 | 仓库 | — | 禁止模式检查（远程下载后执行或打补丁、就地 `sed -i`）、脚本骨架检查、`gitleaks`（全部历史里不能有密钥） |
@@ -223,7 +223,8 @@ require_linux; require_workdir; ensure_fhs "$@"   # only the guards the script n
 
 ```
 tests/
-  pyproject.toml  uv.lock  .python-version     (python 3.14, uv-managed)
+  pyproject.toml  uv.lock  .python-version     project and dependencies (python 3.14, uv-managed)
+  pytest.toml  ruff.toml  ty.toml              one configuration file per tool
   conftest.py                                  fixtures: shell, ssh, emulator, net
   targets/emulation.yaml  targets/r4s.yaml     labgrid environments (symmetric)
   wrt_tests/                                   helpers: spec markers, coverage, emu, net
@@ -246,7 +247,9 @@ tests/
   - 用例用 `@target("emulation")` 或 `@target("device")` 标注专属目标，并写明原因。没有标注的用例在两种目标上都运行。
   - `just test` 用 `emulation.yaml`；`just test-device <host>` 用 `r4s.yaml`。
   - 真机的电源控制用 labgrid 的 `ManualPowerDriver`，需要断电时提示人工操作。
-- **报告**：两种目标都输出 JUnit 和终端摘要，格式相同。
+- **报告**：两种目标都输出 JUnit 和终端摘要，格式相同，分别写到 `tests/.reports/emulation.xml` 和 `device.xml`。
+- **路由器接口**：`wrt_tests.router.Router` 在两种目标上提供同一组方法：`run`、`returncode`、`login`（真正的交互登录）、`put`、`http`、`reboot`、`wait_ready`、`moved_to`（临时改用另一个 LAN 地址）。只有 `reset` 不同：模拟器回到快照，真机不做任何事，所以真机上的用例要自己恢复改动过的状态。
+- **不依赖编译器的 BPF 对象**：检查 tcx 的用例需要一个 BPF 程序。Apple 的 clang 没有 BPF 后端，而真机测试可以从 macOS 发起，所以这个两条指令的程序由 `wrt_tests/bpf.py` 直接写成 ELF 目标文件。
 
 ### D14. 模拟环境
 
@@ -274,6 +277,14 @@ sandbox: unshare --user --map-root-user --net --mount (rootless)
 - **为什么要伪装成 R4S 的板型**：R4S 的 `02_network` 按 `eth1` 为 LAN、`eth0` 为 WAN 分配网口角色，板型的升级元数据校验也依赖它。改了 `compatible` 之后，这些都走与真机相同的代码。LED 这类硬件节点在模拟器里不存在，相关脚本只会记一条日志，不影响功能。
 - **为什么用 TCG**：本机虚拟机没有 KVM，CI 上又是 x86 模拟 aarch64，只能用 TCG。启动一次大约一两分钟，每个测试模块只启动一次，用例之间用快照还原磁盘。
 - **在 FHS 环境里运行测试**：uv 管理的 Python 和 manylinux wheel 在 NixOS 上需要 FHS 才能运行，所以测试也在 FHS 环境里跑；网络沙箱是嵌套在里面的用户命名空间。
+- **实施中确定的细节**：
+  - `scripts/test.sh` 用 `unshare --user --map-root-user --net --mount --pid --mount-proc` 启动 pytest。独立的 PID 命名空间保证 pytest 一旦退出（包括被中断），QEMU、dnsmasq、udhcpc 都随之结束，不留孤儿进程。
+  - 网络命名空间由一个 `unshare --net sleep` 进程持有，命令用 `nsenter` 进入，不需要 `/run/netns`。
+  - 串口必须一直有人读：PL011 逐字节写出，而在 Unix socket 上每个字节都占一整个缓冲槽，几百字节没人读，客户机就会卡住。`Emulator` 用一个后台线程持续读取串口，写进内存和日志，用例在这份记录上等待输出。
+  - 快照用 `savevm`/`loadvm`：会话里只启动一次，打一个 `booted` 快照；每个用例结束后回到这个快照，内存和磁盘都还原，只需几秒。
+  - 判断“启动完成”看 `logread` 里 procd 的 `- init complete -`。procd 通过 ulog 输出，logd 起来以后不再写内核日志，所以 `dmesg` 里等不到这一行。
+  - 测试环境的 `ssh` 和 `scp` 用一份固定配置（`-F`）：每次镜像的主机密钥都不同；而在沙箱里，宿主的配置文件可能属于未映射的用户，OpenSSH 会拒绝读取。
+  - 板级脚本按 SD 卡（`mmcblk1`）的 CID 生成 MAC，模拟器里没有这个设备，这一步会打印算术错误并跳过，网口沿用 QEMU 指定的固定 MAC。其余网口角色分配与真机相同。
 - **模拟器覆盖不了、只能留给真机的**：
   - RK3399 的 BootROM、TPL/SPL 和 U-Boot 从 SD 卡启动；
   - 两个物理网口的驱动（stmmac、r8169）以及中断亲和性；

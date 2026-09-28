@@ -38,15 +38,25 @@ build profile="dev": fetch patch (config profile)
 image-audit image:
     scripts/image-audit.sh {{ image }}
 
-# Run every code-standard check; changes nothing (any host)
-[group('quality')]
-check:
-    scripts/check.sh
+# Run the system tests against the emulator, booting a built profile's image
+[group('test')]
+test profile="dev" *args:
+    scripts/test.sh {{ profile }} {{ args }}
 
-# Format every file that has a formatter (any host)
+# Run the system tests against a real R4S at <host> (Linux or macOS)
+[group('test')]
+test-device host *args:
+    scripts/test-device.sh {{ host }} {{ args }}
+
+# Run the code-standard checks, all or the named ones; changes nothing (any host)
 [group('quality')]
-fmt:
-    scripts/fmt.sh
+check *names:
+    scripts/check.sh {{ names }}
+
+# Format with all formatters or the named ones (any host)
+[group('quality')]
+fmt *names:
+    scripts/fmt.sh {{ names }}
 
 # Prepare a GitHub-hosted runner (CI only)
 [group('ci')]

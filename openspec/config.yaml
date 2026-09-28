@@ -1,13 +1,12 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+# Project context, shown when creating artifacts.
+context: |
+  Custom OpenWrt build for the NanoPi R4S 4GB (see openspec/changes for the plan).
+  Every artifact, document, comment and identifier is written in English:
+  concise, modern technical prose with consistent terminology across changes.
+  Requirement and scenario names are referenced by @spec markers in tests/, so
+  renaming one means updating those markers.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.

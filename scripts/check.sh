@@ -1,6 +1,6 @@
 #!/bin/sh
-# check: run every code-standard check of design D12; changes nothing.
-# Usage: scripts/check.sh
+# check: run the code-standard checks of design D12; changes nothing.
+# Usage: scripts/check.sh [check...]   (all checks when none is named)
 # Runs on Linux and macOS with the tools of the quality devShell. NixOS cannot run
 # the generic Linux binaries that uv installs (Python, ruff, ty), so there the
 # script re-executes inside wrt-test-fhs.
@@ -8,10 +8,20 @@ set -eu
 # shellcheck source=scripts/lib.sh
 . "$(dirname -- "$0")/lib.sh"
 
+checks='shfmt shellcheck nixfmt actionlint editorconfig-checker gitleaks forbidden-patterns skeleton ruff-format ruff-check ty spec-coverage'
+requested=$*
+for name in ${requested}; do
+	case " ${checks} " in
+		*" ${name} "*) ;;
+		*) die "unknown check '${name}' (checks: ${checks})" ;;
+	esac
+done
+
 if [ -e /etc/NIXOS ]; then
 	ensure_fhs test "$@"
 fi
 
+use_tests_venv
 cd "${REPO_DIR}"
 files=$(repo_files)
 shell_files=$(printf '%s\n' "${files}" | xargs shfmt -f)
@@ -102,11 +112,16 @@ skeleton() {
 }
 
 failed=
-# run <name> <command...>: the command runs in a subshell, so the check functions
-# above cannot clobber these variables (POSIX sh has no local variables).
+# run <name> <command...>: run a requested check. The command runs in a subshell,
+# so the check functions above cannot clobber these variables (POSIX sh has no
+# local variables).
 run() {
 	check=$1
 	shift
+	case " ${requested:-${check}} " in
+		*" ${check} "*) ;;
+		*) return 0 ;;
+	esac
 	if ("$@"); then
 		printf 'ok    %s\n' "${check}"
 	else
@@ -125,12 +140,12 @@ run() {
 	run gitleaks secrets
 	run forbidden-patterns forbidden_patterns
 	run skeleton skeleton
-}
-if [ -f tests/pyproject.toml ]; then
 	run ruff-format uv run --directory tests --locked ruff format --check
 	run ruff-check uv run --directory tests --locked ruff check
 	run ty uv run --directory tests --locked ty check
-fi
+	# Structure only: dangling markers, duplicates, the directory rule.
+	run spec-coverage uv run --directory tests --locked spec-coverage --summary
+}
 
 [ -z "${failed}" ] || die "failed:${failed}"
-info "all checks passed"
+info "checks passed"

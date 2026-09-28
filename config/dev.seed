@@ -1,2 +1,5 @@
 # Local development builds: only the selected packages and kmods.
 CONFIG_CCACHE=y
+# One kmod built but not installed, so the system tests can install a kmod from
+# the repository of the same build (the ci profile builds every kmod anyway).
+CONFIG_PACKAGE_kmod-dummy=m

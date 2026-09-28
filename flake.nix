@@ -145,10 +145,34 @@
         ]
         ++ (with pkgs; [
           stdenv.cc.cc.lib
+          # boot partition reading (debugfs) and the network sandbox
+          e2fsprogs
           iproute2
           dnsmasq
-          openssh
-        ]);
+          # LAN clients take their address over DHCP; only this applet of
+          # busybox, which would otherwise shadow coreutils in the FHS.
+          (writeShellScriptBin "udhcpc" ''exec ${busybox}/bin/busybox udhcpc "$@"'')
+        ])
+        ++ testSsh pkgs;
+
+      # ssh and scp with a fixed configuration instead of the host's: the router's
+      # host key changes with every fresh image, and inside the test sandbox the
+      # host's configuration files may belong to an unmapped user, which OpenSSH
+      # refuses to read.
+      testSsh =
+        pkgs:
+        let
+          config = pkgs.writeText "wrt-test-ssh-config" ''
+            Host *
+              StrictHostKeyChecking no
+              UserKnownHostsFile /dev/null
+              LogLevel ERROR
+          '';
+        in
+        map (tool: pkgs.writeShellScriptBin tool ''exec ${pkgs.openssh}/bin/${tool} -F ${config} "$@"'') [
+          "ssh"
+          "scp"
+        ];
 
       # Fingerprint of everything that shapes host-built tools and the cross
       # toolchain: the build package set and the build profile. The toolchain
