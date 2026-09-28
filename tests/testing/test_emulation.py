@@ -18,7 +18,7 @@ CAPABILITY = "testing/emulation"
 DHCP_TIMEOUT = 60.0
 
 
-@spec(CAPABILITY, "启动的是出货产物", "核对产物来源")
+@spec(CAPABILITY, "Boot the shipped artifacts", "Verify artifact provenance")
 @target("emulation", "checks where the emulator's kernel and disk come from")
 def test_boots_the_shipped_artifacts(router: Router, emulation_source: dict[str, str]) -> None:
     source = emulation_source
@@ -36,12 +36,12 @@ def test_boots_the_shipped_artifacts(router: Router, emulation_source: dict[str,
     assert router.run("cat /proc/cmdline") == source["bootargs"]
 
 
-@spec(CAPABILITY, "以 R4S 的板型身份启动", "读取板型")
+@spec(CAPABILITY, "Boot with the R4S board identity", "Read board name")
 def test_board_name(router: Router) -> None:
     assert router.run("cat /tmp/sysinfo/board_name") == BOARD_COMPATIBLE
 
 
-@spec(CAPABILITY, "指令集与真机一致", "运行用户态程序")
+@spec(CAPABILITY, "Instruction set matches the device", "Run userspace programs")
 def test_userspace_runs(router: Router) -> None:
     # Programs built for cortex-a72.cortex-a53+crypto from several packages and
     # languages; an unsupported instruction would kill them with SIGILL.
@@ -59,7 +59,7 @@ def test_userspace_runs(router: Router) -> None:
     assert router.returncode("dmesg | grep -qi 'illegal instruction\\|undefined instruction'") != 0
 
 
-@spec(CAPABILITY, "可重复的网络拓扑", "局域网客户端获得地址")
+@spec(CAPABILITY, "Repeatable network topology", "LAN client gets an address")
 @target("emulation", "the LAN client lives in the emulator's network sandbox")
 def test_lan_client_gets_an_address(router: Router, network: Network) -> None:
     client = network["client-a"]
@@ -71,7 +71,7 @@ def test_lan_client_gets_an_address(router: Router, network: Network) -> None:
     client.run("ping", "-c", "1", "-W", "2", router.address)
 
 
-@spec(CAPABILITY, "可重复的网络拓扑", "不需要 root 权限")
+@spec(CAPABILITY, "Repeatable network topology", "No root privileges needed")
 @target("emulation", "concerns how the emulator's sandbox is built")
 def test_sandbox_needs_no_root(router: Router, network: Network) -> None:
     # Root in here is the invoking user outside: uid_map is "0 <uid> 1".
@@ -82,7 +82,7 @@ def test_sandbox_needs_no_root(router: Router, network: Network) -> None:
     assert router.run("true") == ""
 
 
-@spec(CAPABILITY, "故障注入", "用例之间互不影响")
+@spec(CAPABILITY, "Fault injection", "Tests are isolated")
 @target("emulation", "the device keeps its state between tests")
 def test_tests_do_not_leak_state(router: Router) -> None:
     router.run("uci set system.@system[0].hostname=leaked && uci commit system && sync")
@@ -90,7 +90,7 @@ def test_tests_do_not_leak_state(router: Router) -> None:
     assert router.run("uci get system.@system[0].hostname") == "OpenWrt"
 
 
-@spec(CAPABILITY, "故障注入", "强制断电")
+@spec(CAPABILITY, "Fault injection", "Forced power cut")
 @target("emulation", "cuts the power without a shutdown")
 def test_power_cut_keeps_the_disk(router: Router) -> None:
     emulator = router.emulator

@@ -1,18 +1,18 @@
-# 内核配置
+# Kernel configuration
 
-内核配置有三个来源，各管一类：
+Kernel configuration comes from three sources, each responsible for one kind of setting:
 
-| 来源 | 放什么 | 例子 |
+| Source | What goes there | Examples |
 |---|---|---|
-| `config/kernel.seed` 里的 `CONFIG_KERNEL_*` | 上游在 `Config-kernel.in` 里提供了选项、而且会影响软件包依赖或宿主工具的符号 | BTF、`BPF_EVENTS`、cgroup |
-| `config/kernel.config` | 上游没有提供 `CONFIG_KERNEL_*` 选项的符号 | F2FS 压缩、QEMU virt 驱动 |
-| `patches/openwrt/` | 只有 BBRv3 修改内核源码 | `hack-6.18/960-bbr3-*` |
+| `CONFIG_KERNEL_*` in `config/kernel.seed` | Symbols for which upstream provides an option in `Config-kernel.in` and that affect package dependencies or host tools | BTF, `BPF_EVENTS`, cgroup |
+| `config/kernel.config` | Symbols with no upstream `CONFIG_KERNEL_*` option | F2FS compression, QEMU virt drivers |
+| `patches/openwrt/` | Only BBRv3 modifies kernel source | `hack-6.18/960-bbr3-*` |
 
-`config/kernel.config` 由 `scripts/config.sh` 链接到 `$TREE/env/kernel-config`。它是 `LINUX_KCONFIG_LIST` 的最后一层（`include/target.mk`），也是上游原生支持的机制。构建完成后，`scripts/build.sh` 会逐行核对：叠加文件里的每一行都必须原样出现在内核的 `.config` 中。
+`scripts/config.sh` links `config/kernel.config` to `$TREE/env/kernel-config`. It is the last layer of `LINUX_KCONFIG_LIST` (`include/target.mk`), a mechanism upstream supports natively. After the build, `scripts/build.sh` checks it line by line: every line of the kernel config overlay must appear verbatim in the kernel's `.config`.
 
-## 往叠加文件里加符号
+## Adding symbols to the kernel config overlay
 
-打开一个符号，常常会让它下面的一批新符号变得可见。内核配置遇到没有取值的可见符号时会直接停下，所以新符号必须一起写明取值。找出它们的办法：
+Enabling a symbol often makes a batch of new symbols beneath it visible. Kernel configuration stops outright when it meets a visible symbol with no value, so the new symbols must be given values as well. To find them:
 
 ```sh
 # inside wrt-build-fhs, after one complete build of the tree
@@ -24,15 +24,15 @@ make -s -C "$K" ARCH=arm64 CROSS_COMPILE="$TC/bin/aarch64-openwrt-linux-musl-" \
   KCONFIG_CONFIG=/tmp/try.config listnewconfig
 ```
 
-列出来的每一个符号都要在叠加文件里给出取值。还要注意依赖：比如 `VIRTIO_PCI` 挂在 `VIRTIO_MENU` 下面，只写 `VIRTIO_PCI=y` 会被静默丢掉。构建后的逐行核对就是为了拦住这种情况。
+Every symbol listed must be given a value in the kernel config overlay. Also watch the dependencies: for example, `VIRTIO_PCI` sits under `VIRTIO_MENU`, so writing only `VIRTIO_PCI=y` gets silently dropped. The line-by-line check after the build exists to catch exactly this.
 
-## virt 驱动组的代价
+## Cost of the virt driver group
 
-为了让出货内核能直接在 QEMU `virt` 机器里启动，叠加文件内置了通用 PCIe 主机控制器、virtio-pci、virtio-blk、virtio-net 和 i6300esb 看门狗。PL011 串口在 rockchip 的配置里本来就是内置的。只启用现代 virtio，不启用 legacy，其他 virtio 设备一律关闭。
+So that the shipped kernel can boot directly in the QEMU `virt` machine, the kernel config overlay builds in the generic PCIe host controller, virtio-pci, virtio-blk, virtio-net and the i6300esb watchdog. The PL011 serial console is already built in by the rockchip config. Only modern virtio is enabled, not legacy, and all other virtio devices are off.
 
-实测（2026-09-28，内核 6.18.52）：新增的目标文件合计 141,430 字节（text + data + bss），约 138 KiB；带 BTF 的 `Image` 为 26,867,720 字节。R4S 上没有这些设备，这些驱动不会被探测到，只占用这部分空间。
+Measured (2026-09-28, kernel 6.18.52): the added object files total 141,430 bytes (text + data + bss), about 138 KiB; the `Image` with BTF is 26,867,720 bytes. The R4S has none of these devices, so these drivers are never probed; they only take up this space.
 
-| 目标文件 | 字节 |
+| Object file | Bytes |
 |---|---|
 | `drivers/net/virtio_net.o` | 57,861 |
 | `drivers/virtio/virtio_ring.o` | 23,332 |

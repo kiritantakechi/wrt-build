@@ -2,50 +2,50 @@
 
 ## Context
 
-动机见 proposal.md 的 Why 一节。本设计依赖以下现状和约束。
+See the Why section of proposal.md for motivation. This design depends on the following facts and constraints.
 
-### 上游（main `1019293`，2026-09-27，均已在源码中核对）
+### Upstream (main `1019293`, 2026-09-27, all verified in the source)
 
-- rockchip 默认内核是 6.18.52；U-Boot 2026.07、TF-A 2.15.0、erofs-utils 1.9.4、apk 3.0.5、musl 1.2.6。
-- GCC 默认是 14，15 可选；llvm-bpf 22.1.3，dwarves 1.31。
-- `friendlyarm_nanopi-r4s` 就是 “4GB LPDDR4” 这个型号（`target/linux/rockchip/image/armv8.mk:139-145`）。
-- `LINUX_KCONFIG_LIST` 的最后一层是 `$(TOPDIR)/env/kernel-config`（`include/target.mk:173`），这是上游原生支持的内核配置叠加文件，而且 `/env` 已在上游的 `.gitignore` 里。
-- `.config` 里的 `CONFIG_KERNEL_*` 只会写进内核配置里那些在 Kconfig 中有定义的符号（`include/kernel-defaults.mk:118-119`）。
-- 内核配置遇到没有取值的新符号时，构建会停下来报错。这在打开 F2FS 压缩时已经实际遇到过，要用 `make listnewconfig` 把所有缺值的符号一次性找出来。
-- OpenWrt 开启了 `CONFIG_MODULE_STRIPPED`，模块里的 `MODULE_VERSION` 等信息都会被删掉。
+- The rockchip default kernel is 6.18.52; U-Boot 2026.07, TF-A 2.15.0, erofs-utils 1.9.4, apk 3.0.5, musl 1.2.6.
+- GCC defaults to 14, with 15 optional; llvm-bpf 22.1.3, dwarves 1.31.
+- `friendlyarm_nanopi-r4s` is the "4GB LPDDR4" model (`target/linux/rockchip/image/armv8.mk:139-145`).
+- The last layer of `LINUX_KCONFIG_LIST` is `$(TOPDIR)/env/kernel-config` (`include/target.mk:173`). This is the kernel config overlay upstream supports natively, and `/env` is already in upstream's `.gitignore`.
+- `CONFIG_KERNEL_*` in `.config` is written only into kernel config symbols that are defined in Kconfig (`include/kernel-defaults.mk:118-119`).
+- When the kernel config meets a new symbol with no value, the build stops with an error. This already happened when enabling F2FS compression; use `make listnewconfig` to find all symbols missing values in one pass.
+- OpenWrt enables `CONFIG_MODULE_STRIPPED`, which removes `MODULE_VERSION` and similar information from modules.
 
-### 宿主机与 Nix 环境（实施时核对）
+### Host and Nix environment (verified during implementation)
 
-- **宿主机**：M1 Max、32 GB 内存；OrbStack 的 NixOS 25.11 虚拟机（aarch64，9 核、15 GB），虚拟机里没有 `/dev/kvm`。
-- **外接 SSD**：HFS+，实测顺序写入约 75 MB/s。
-- **必须在 Linux 上构建**：`KERNEL_DEBUG_INFO_BTF` 和 mold 都依赖 `!HOST_OS_MACOS`，dwarves 在 Darwin 上会被跳过。
-- **FHS 环境里需要补齐的三件事**：
-  1. `/usr/include` 里要有 glibc 头文件，否则 CMake 的 `find_path` 找不到 `iconv.h`。
-  2. 要有能处理 LTO 的归档工具 `gcc-ar`，宿主机版 apk 用 `b_lto` 链接静态库时离不开它。
-  3. 要设置 `FAKEROOTDONTTRYCHOWN=1`：在用户命名空间里，真实的 `chown` 返回的是 EINVAL，而 fakeroot 只会忽略 EPERM，于是报错。
-- **Ubuntu 24.04 runner** 用 AppArmor 限制了非特权用户命名空间，bubblewrap 需要先放开这个限制。
+- **Host**: M1 Max, 32 GB memory; an OrbStack NixOS 25.11 VM (aarch64, 9 cores, 15 GB) with no `/dev/kvm`.
+- **External SSD**: HFS+, measured sequential write about 75 MB/s.
+- **Builds must run on Linux**: `KERNEL_DEBUG_INFO_BTF` and mold both depend on `!HOST_OS_MACOS`, and dwarves is skipped on Darwin.
+- **Three things the FHS environment must add**:
+  1. `/usr/include` must contain the glibc headers, otherwise CMake's `find_path` cannot find `iconv.h`.
+  2. It needs the LTO-capable archiver `gcc-ar`; the host apk requires it when linking static libraries with `b_lto`.
+  3. It must set `FAKEROOTDONTTRYCHOWN=1`: in a user namespace, a real `chown` returns EINVAL, while fakeroot only ignores EPERM, so it errors out.
+- **Ubuntu 24.04 runners** restrict unprivileged user namespaces with AppArmor; bubblewrap needs this restriction lifted first.
 
-### GitHub 托管 runner
+### GitHub-hosted runners
 
-- 单个 job 最长 6 小时；标准 Linux runner 是 4 核、16 GB；缓存总共 10 GB。
-- 冷缓存实测：tools 约 43 分钟，GCC 15 工具链约 35 分钟。
+- A single job runs at most 6 hours; the standard Linux runner has 4 cores and 16 GB; the cache totals 10 GB.
+- Measured on a cold cache: tools about 43 minutes, the GCC 15 toolchain about 35 minutes.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- 同一份 lock，本机和 CI 得到完全相同的源码树、配置和构建时间戳。
-- 产出一个单槽 SD 镜像，以及出自同一次构建的全量 kmod 仓库。
-- 规格场景尽量都在模拟器中对出货镜像自动验证；真机只剩一条命令，外加少数几项硬件专属检查。
-- 代码规范可以机器检查，并在 CI 中强制执行。
+- From the same lock, the local machine and CI get exactly the same source tree, configuration, and build timestamp.
+- Produce a single-slot SD image and a full kmod repository from the same build.
+- Verify as many spec scenarios as possible automatically against the shipped image in the emulator; the device is left with one command plus a few hardware-specific checks.
+- Code standards are machine-checkable and enforced in CI.
 
 **Non-Goals:**
-- 不在本 change 做：A/B（`r4s-ab-rollback`）、数据面（`r4s-ebpf-datapath`）、服务（`r4s-services`）、签名与发布（`r4s-release-pipeline`）。
-- 不用 `-mcpu` 去调优内核本身，也不涉及硬件卸载。
-- 不在模拟器里测性能。在 TCG 下测出来的吞吐没有参考意义。
+- Not in this change: A/B (`r4s-ab-rollback`), datapath (`r4s-ebpf-datapath`), services (`r4s-services`), signing and release (`r4s-release-pipeline`).
+- Do not tune the kernel itself with `-mcpu`, and do not cover hardware offload.
+- Do not measure performance in the emulator. Throughput measured under TCG is meaningless.
 
 ## Decisions
 
-### D1. 仓库布局
+### D1. Repository layout
 
 ```
 wrt-build/
@@ -67,44 +67,44 @@ wrt-build/
 $WRT_WORKDIR/  (outside repo)     openwrt/  dl/  ccache/  out/<profile>/  emu/
 ```
 
-### D2. 按 SHA 获取上游
+### D2. Fetch upstream by SHA
 
-- **做法**：openwrt 用 `git fetch --depth 1 origin <sha>` 获取。每个 feed 也由 `fetch.sh` 自己按 SHA 浅获取。
-- **为什么不让 `scripts/feeds update` 去取 feed**：feed 目录已经存在、并且带 `^sha` 时，它会直接跳过，lock 里的 SHA 改了也不会跟着更新。所以取完之后只执行 `feeds update -i` 重建索引。
-- **`feeds.conf`**：每个 feed 写成 `src-git <name> <url>^<sha>`，另加一行自有 feed 的 `src-link`。
+- **Approach**: openwrt is fetched with `git fetch --depth 1 origin <sha>`. `fetch.sh` also shallow-fetches each feed by SHA itself.
+- **Why not let `scripts/feeds update` fetch the feeds**: when a feed directory already exists and carries `^sha`, it skips it, so a changed SHA in the lock would not be picked up. After fetching, we therefore only run `feeds update -i` to rebuild the index.
+- **`feeds.conf`**: each feed is written as `src-git <name> <url>^<sha>`, plus one `src-link` line for our own feed.
 
-### D3. 补丁用 git am 应用，提交时间和身份都固定
+### D3. Apply patches with git am, with fixed commit time and identity
 
-- 每次先把各仓库重置回 lock 里的提交，并执行 `git clean -fd` 清掉上一次补丁新增的文件。
-- 然后执行 `git am --committer-date-is-author-date`，提交者身份也固定下来。这样同一组补丁无论什么时候应用，得到的 HEAD 都相同。
-- 任何一个补丁失败，就执行 `--abort`，并报出这个补丁的文件名。
+- Each run first resets every repository to the commit in the lock and runs `git clean -fd` to remove files added by the previous patch run.
+- It then runs `git am --committer-date-is-author-date` with a fixed committer identity. The same patch set therefore yields the same HEAD whenever it is applied.
+- If any patch fails, it runs `--abort` and reports that patch's file name.
 
-### D4. 构建时间戳取自 lock
+### D4. The build timestamp comes from the lock
 
-`upstream.lock` 里 openwrt 那一行的时间戳被写入 `version.date`，`scripts/get_source_date_epoch.sh` 会优先读取它。
+The timestamp on the openwrt line of `upstream.lock` is written to `version.date`, which `scripts/get_source_date_epoch.sh` reads first.
 
-### D5. 软件包配置：seed 片段 + defconfig + 逐行校验
+### D5. Package configuration: seed fragments + defconfig + line-by-line verification
 
-- **组合方式**：`config/profiles` 定义每个 profile 由哪些 seed 片段组成，按顺序拼接后执行 `make defconfig`。
-- **校验**：seed 里的每一行（包括 `# ... is not set`）都必须原样出现在最终的 `.config` 中，否则失败。最后输出 diffconfig。
-- **各个 seed 的内容**：见仓库中的 `config/*.seed`。几个要点：
-  - `IMAGEOPT` 和 `PREINITOPT` 必须显式打开，否则自定义的 `TARGET_PREINIT_IP` 会被 defconfig 静默丢弃。
-  - zram 的 zstd 需要打开 `KERNEL_ZRAM_BACKEND_ZSTD` 和 `KERNEL_ZRAM_DEF_COMP_ZSTD`。
+- **Composition**: `config/profiles` defines which seed fragments make up each profile; they are concatenated in order and then `make defconfig` runs.
+- **Verification**: every line of the seeds (including `# ... is not set`) must appear verbatim in the final `.config`, otherwise it fails. A diffconfig is output at the end.
+- **Seed contents**: see `config/*.seed` in the repository. Key points:
+  - `IMAGEOPT` and `PREINITOPT` must be enabled explicitly, otherwise defconfig silently drops the custom `TARGET_PREINIT_IP`.
+  - zstd for zram needs `KERNEL_ZRAM_BACKEND_ZSTD` and `KERNEL_ZRAM_DEF_COMP_ZSTD` enabled.
 
-### D6. 工具链只靠配置
+### D6. The toolchain relies on configuration only
 
-`CONFIG_EXTRA_OPTIMIZATION` 排在 `TARGET_OPTIMIZATION` 之后（`rules.mk:256`），所以 `-O2 -mcpu=cortex-a72.cortex-a53+crypto` 会覆盖默认值。实测命令行为 `-Os -pipe -mcpu=generic ... -O2 -mcpu=cortex-a72.cortex-a53+crypto`。
+`CONFIG_EXTRA_OPTIMIZATION` comes after `TARGET_OPTIMIZATION` (`rules.mk:256`), so `-O2 -mcpu=cortex-a72.cortex-a53+crypto` overrides the defaults. The measured command line is `-Os -pipe -mcpu=generic ... -O2 -mcpu=cortex-a72.cortex-a53+crypto`.
 
-个别包在 LTO 下编不过时，只让这个包退出 LTO：在 `patches/packages` 里用补丁给它加上 `PKG_BUILD_FLAGS:=no-lto`，并在 `docs/lto-optouts.md` 里登记。
+When an individual package fails to build under LTO, only that package opts out of LTO: a patch in `patches/packages` adds `PKG_BUILD_FLAGS:=no-lto` to it, and it is registered in `docs/lto-optouts.md`.
 
-### D7. 内核：两个补丁，加一个叠加配置
+### D7. Kernel: two patches plus a config overlay
 
-1. **BBRv3**（`patches/openwrt/0001`）：20 个补丁放进 `hack-6.18/960-bbr3-*`，全部保留。
-   - 第 0019 个改的是通用的 `bpf_tcp_ca.c`，缺了它就编译不过。
-   - 继续用上游的 `kmod-tcp-bbr` 打包。
-   - 因为 `MODULE_STRIPPED` 会删掉版本号，验证方式是核对 BBRv3 才有的回调：`bbr_skb_marked_lost` 和 `bbr_tso_segs`。
-2. **启动脚本**（`patches/openwrt/0002`）：在 `default.bootscript` 里加上 `fstools_overlay_compression_type=zstd`。
-3. **内核配置叠加文件** `config/kernel.config`：`config.sh` 把它链接到 `$TREE/env/kernel-config`，内容分为两组：
+1. **BBRv3** (`patches/openwrt/0001`): 20 patches go into `hack-6.18/960-bbr3-*`, all kept.
+   - Patch 0019 changes the generic `bpf_tcp_ca.c`; without it the build fails.
+   - Packaging continues to use upstream's `kmod-tcp-bbr`.
+   - Because `MODULE_STRIPPED` removes the version, verification checks the callbacks only BBRv3 has: `bbr_skb_marked_lost` and `bbr_tso_segs`.
+2. **Boot script** (`patches/openwrt/0002`): adds `fstools_overlay_compression_type=zstd` to `default.bootscript`.
+3. **Kernel config overlay** `config/kernel.config`: `config.sh` links it to `$TREE/env/kernel-config`. Its contents fall into two groups:
 
 ```
 # f2fs overlay compression (fstools_overlay_compression_type=zstd)
@@ -125,30 +125,30 @@ CONFIG_I6300ESB_WDT=y
 # plus every symbol `make listnewconfig` reports for these, with explicit values
 ```
 
-- **为什么删掉原来的补丁 0001**：它给 `Config-kernel.in` 加 F2FS 选项。叠加文件是上游原生支持的机制，不需要补丁，也不会随上游改动而打不上。那个补丁作为上游贡献只在本地准备，不再放进补丁队列。
-- **构建后校验**：`build.sh` 在构建完成后核对，叠加文件中的每一行都必须出现在内核的 `.config` 里，否则失败。
-- **seed 里保留 `CONFIG_KERNEL_*` 的选项**（BTF、`BPF_EVENTS`、cgroup 等）：这些选项会影响软件包依赖和宿主机工具的选择，所以它们留在 seed 里。
-- **备选方案**：给 `Config-kernel.in` 补上全部选项，或者直接修改 `target/.../config-6.18`。都否决：前者补丁越打越多，后者跟着上游一改就打不上。
+- **Why the original patch 0001 was removed**: it added F2FS options to `Config-kernel.in`. The overlay is a mechanism upstream supports natively, needs no patch, and does not stop applying when upstream changes. That patch is prepared locally only as an upstream contribution and is no longer in the patch queue.
+- **Post-build verification**: after the build, `build.sh` checks that every line of the overlay appears in the kernel `.config`, otherwise it fails.
+- **`CONFIG_KERNEL_*` options stay in the seeds** (BTF, `BPF_EVENTS`, cgroup, and so on): these options affect package dependencies and host tool selection, so they remain in the seeds.
+- **Alternatives**: add every option to `Config-kernel.in`, or modify `target/.../config-6.18` directly. Both rejected: the former makes the patch grow without end, and the latter stops applying whenever upstream changes.
 
-### D8. 基础系统
+### D8. Base system
 
-- **LAN 地址**：通过 `TARGET_PREINIT_IP` 加 `DEFAULT_LAN_IP_FROM_PREINIT` 设置，它会生成 `board.d/99-lan-ip`，只在生成默认配置时生效，所以保留配置升级时不会覆盖用户的地址。
-- **zram**：用 uci-defaults 脚本写入 1024 MiB 和 zstd，只在这两项尚未设置时才写。
-- **LuCI**：由 uhttpd 通过 ucode CGI（`/www/cgi-bin/luci`）提供。`uhttpd-mod-ucode` 只是进程内加速，不是必需的。
-- **shell**：
-  - 登录 shell 是 ash；`profile.d/99-zsh.sh` 只在从 ash 交互登录时 `exec zsh -l`，`bash -l` 不会被切走。
-  - zsh 插件的测试数据不打进包里。
+- **LAN address**: set through `TARGET_PREINIT_IP` plus `DEFAULT_LAN_IP_FROM_PREINIT`. This generates `board.d/99-lan-ip`, which takes effect only when the default configuration is generated, so a config-preserving upgrade does not overwrite the user's address.
+- **zram**: a uci-defaults script writes 1024 MiB and zstd, only when these two options are not yet set.
+- **LuCI**: served by uhttpd through the ucode CGI (`/www/cgi-bin/luci`). `uhttpd-mod-ucode` is only an in-process accelerator and is not required.
+- **shell**:
+  - The login shell is ash; `profile.d/99-zsh.sh` runs `exec zsh -l` only for an interactive login from ash, and `bash -l` is not switched away.
+  - Test data of the zsh plugins is not packaged.
 
-### D9. 本机构建目录
+### D9. Local build directory
 
-外接 SSD 上放一个 112 GiB 的 ext4 镜像文件，在虚拟机里 loop 挂载到 `/mnt/wrt`。`workdir-mount` 和 `workdir-unmount` 成对提供，`mount` 可以重复执行，`--format` 只会格式化空镜像。
+A 112 GiB ext4 image file on the external SSD is loop-mounted at `/mnt/wrt` inside the VM. `workdir-mount` and `workdir-unmount` come as a pair; `mount` can be run repeatedly, and `--format` only formats an empty image.
 
-### D10. 构建环境（flake）
+### D10. Build environment (flake)
 
-- **两个 nixpkgs 输入，各管一摊**：
-  - `nixpkgs`（nixos-25.11）提供构建环境和规范检查工具，求稳。
-  - `nixpkgs-unstable` 只用来提供最新的 `uv`，以及模拟器相关的 `qemu`、`dtc`、`u-boot-tools`，求新。
-- **两个 FHS 环境，外加两个 devShell**：
+- **Two nixpkgs inputs, each with its own role**:
+  - `nixpkgs` (nixos-25.11) provides the build environment and the code-standard tools, for stability.
+  - `nixpkgs-unstable` only provides the latest `uv`, plus the emulator-related `qemu`, `dtc`, and `u-boot-tools`, for freshness.
+- **Two FHS environments, plus two devShells**:
 
 ```
 wrt-build-fhs   build packages + build profile            (WRT_FHS=build)
@@ -157,17 +157,17 @@ devShell quality  code standards only, same on Linux and macOS (CI check job)
 devShell default  quality + both FHS environments on Linux; quality on macOS
 ```
 
-  - 脚本用 `ensure_fhs build` 或 `ensure_fhs test` 声明自己需要的环境；测试环境包含构建环境，两者都满足。
-  - 构建环境的 profile 导出 `WRT_BUILD_INPUTS`，指向一个列出全部构建包路径和 profile 内容的文件，这是构建环境的指纹。
-- **Python 相关工具由 uv 管理**：ruff、ty、pytest、labgrid 以及 Python 解释器本身都由 `tests/uv.lock` 固定版本，不走 Nix。
-- **测试工具组**：flake 里的 `testPackages` 列表收纳模拟环境中各类对端要用的守护进程和客户端，例如后续 change 加入的 PPPoE 服务端和镜像仓库。它们来自 `nixpkgs`，放进 FHS 环境，`just test` 也在 FHS 里运行。foundation 放的是 uv、qemu、dtc、u-boot-tools、`iproute2`、`dnsmasq`、`openssh`，以及 manylinux wheel 需要的 `libstdc++`。完整版 qemu 的闭包约 2.2 GiB，但 cache.nixos.org 上有现成的二进制，自己裁剪反而要从源码编译，所以不裁剪。
-- **FHS 的 profile 里导出的变量**：
+  - Scripts declare the environment they need with `ensure_fhs build` or `ensure_fhs test`; the test environment contains the build environment and satisfies both.
+  - The build environment's profile exports `WRT_BUILD_INPUTS`, pointing to a file that lists every build package path and the profile contents. This is the build environment's fingerprint.
+- **Python tools are managed by uv**: ruff, ty, pytest, labgrid, and the Python interpreter itself are pinned by `tests/uv.lock`, not by Nix.
+- **Test tool set**: the flake's `testPackages` list collects the daemons and clients that the various peers in the emulation environment need, for example the PPPoE server and package mirror added by later changes. They come from `nixpkgs` and go into the FHS environment; `just test` also runs in the FHS. The foundation adds uv, qemu, dtc, u-boot-tools, `iproute2`, `dnsmasq`, `openssh`, and the `libstdc++` that manylinux wheels need. The closure of full qemu is about 2.2 GiB, but cache.nixos.org has prebuilt binaries, while trimming it ourselves would mean building from source, so we do not trim it.
+- **Variables exported by the FHS profile**:
   - `NIX_HARDENING_ENABLE=`
-  - `AR=gcc-ar`、`NM=gcc-nm`、`RANLIB=gcc-ranlib`
+  - `AR=gcc-ar`, `NM=gcc-nm`, `RANLIB=gcc-ranlib`
   - `FAKEROOTDONTTRYCHOWN=1`
   - `WRT_FHS=1`
 
-### D11. CI：两个工作流，四个 job
+### D11. CI: two workflows, four jobs
 
 ```
 check.yml   (every push/PR, no paths filter)          ~2 min
@@ -182,22 +182,22 @@ build.yml   (paths-ignore: openspec/**, docs/**, **/*.md)
   system-test     needs firmware; just test (emulation, TCG); JUnit report
 ```
 
-- **缓存键为什么用构建环境的指纹，而不是 `flake.nix` 和 `flake.lock` 的内容**：后续 change 会不断往测试环境里加工具，如果按文件内容算，每加一次工具都要重建一次工具链（约 80 分钟）。指纹只随构建包和构建 profile 变化，结果更精确。
-- **为什么单独拆出 `check.yml`**：它不受路径过滤的限制，任何推送都会触发，而且很快就能出结果；重构建则只在代码变化时才跑。
-- **缓存放不下怎么办**：缓存用量超过 10 GB 时，把工具链压缩包改为 Release 附件存放。
+- **Why the cache key uses the build environment's fingerprint rather than the contents of `flake.nix` and `flake.lock`**: later changes keep adding tools to the test environment. If the key were computed from file contents, every added tool would rebuild the toolchain (about 80 minutes). The fingerprint changes only with the build packages and the build profile, which is more precise.
+- **Why `check.yml` is separate**: it is not subject to path filters, so every push triggers it and it reports quickly; the heavy build runs only when code changes.
+- **If the cache does not fit**: when cache usage exceeds 10 GB, store the toolchain archive as a Release asset instead.
 
-### D12. 代码规范
+### D12. Code standards
 
-| 对象 | 格式化 | 静态检查 |
+| Target | Formatter | Static checks |
 |---|---|---|
-| shell | `shfmt`（按 `.editorconfig`：POSIX 方言、tab 缩进、`switch_case_indent`） | `shellcheck`（`.shellcheckrc`：`shell=sh`，启用 `add-default-case`、`avoid-nullary-conditions`、`check-extra-masked-returns`、`check-set-e-suppressed`、`check-unassigned-uppercase`、`deprecate-which`、`quote-safe-variables`、`require-variable-braces`） |
+| shell | `shfmt` (per `.editorconfig`: POSIX dialect, tab indentation, `switch_case_indent`) | `shellcheck` (`.shellcheckrc`: `shell=sh`, enables `add-default-case`, `avoid-nullary-conditions`, `check-extra-masked-returns`, `check-set-e-suppressed`, `check-unassigned-uppercase`, `deprecate-which`, `quote-safe-variables`, `require-variable-braces`) |
 | Nix | `nixfmt` | — |
-| Python | `ruff format` | `ruff check`（`select = ["ALL"]`，排除项写在 `tests/ruff.toml` 里并注明原因）、`ty check`（`tests/ty.toml`：全部规则按 error 处理） |
+| Python | `ruff format` | `ruff check` (`select = ["ALL"]`, exclusions listed in `tests/ruff.toml` with reasons), `ty check` (`tests/ty.toml`: all rules treated as errors) |
 | workflows | — | `actionlint` |
-| 全部文本 | `.editorconfig`（UTF-8、LF、文件末尾换行、去掉行尾空格） | `editorconfig-checker`（`patches/` 除外） |
-| 仓库 | — | 禁止模式检查（远程下载后执行或打补丁、就地 `sed -i`）、脚本骨架检查、`gitleaks`（全部历史里不能有密钥） |
+| All text | `.editorconfig` (UTF-8, LF, final newline, trailing whitespace trimmed) | `editorconfig-checker` (except `patches/`) |
+| Repository | — | Forbidden-pattern checks (executing or applying remote downloads, in-place `sed -i`), script skeleton check, `gitleaks` (no secrets anywhere in history) |
 
-- **脚本骨架**：每个脚本按下面的顺序组织，骨架检查会核对前三部分。
+- **Script skeleton**: every script is organized in the order below; the skeleton check verifies the first three parts.
 
 ```sh
 #!/bin/sh
@@ -212,14 +212,14 @@ require_linux; require_workdir; ensure_fhs "$@"   # only the guards the script n
 <main>
 ```
 
-- **命名规则**：
-  - 流水线阶段是单独的动词：`fetch`、`patch`、`config`、`build`、`test`、`check`、`fmt`。
-  - 针对具体对象的操作用“对象-动词”：`workdir-mount`/`workdir-unmount`、`toolchain-key`/`toolchain-build`/`toolchain-pack`/`toolchain-unpack`、`image-audit`、`env-report`。
-  - just 命令名和脚本名一致，并用 `[group(...)]` 分组。
-  - 环境变量统一用 `WRT_` 前缀。
-- **一条命令检查**：`just check` 只检查、不修改；`just fmt` 执行格式化。两者都能在 macOS 上运行，所用工具由对应平台的 devShell 提供。
+- **Naming rules**:
+  - Pipeline stages are single verbs: `fetch`, `patch`, `config`, `build`, `test`, `check`, `fmt`.
+  - Operations on a specific object use "object-verb": `workdir-mount`/`workdir-unmount`, `toolchain-key`/`toolchain-build`/`toolchain-pack`/`toolchain-unpack`, `image-audit`, `env-report`.
+  - just recipe names match script names and are grouped with `[group(...)]`.
+  - Environment variables all use the `WRT_` prefix.
+- **One command to check**: `just check` only checks and never modifies; `just fmt` formats. Both run on macOS, with their tools provided by the platform's devShell.
 
-### D13. 测试框架
+### D13. Test framework
 
 ```
 tests/
@@ -234,24 +234,24 @@ tests/
   unit/test_<helper>.py                        unit tests of wrt_tests/, no target, no @spec
 ```
 
-- **目录规则**：
-  - 规格用例只能放在 `tests/<域>/test_<能力>.py`，能力名里的连字符换成下划线；模块里的每个用例都必须带 `@spec`，而且标注的能力必须就是这个模块对应的能力。
-  - `tests/unit/` 只测 `wrt_tests/` 里的辅助代码，不连接任何目标，也不带 `@spec`。
-  - 两条规则都由 `spec-coverage` 检查，没有例外。
+- **Directory rules**:
+  - Spec tests may only live in `tests/<domain>/test_<capability>.py`, with hyphens in the capability name replaced by underscores. Every test in the module must carry `@spec`, and the capability it names must be the module's own capability.
+  - `tests/unit/` only tests the helper code in `wrt_tests/`, connects to no target, and carries no `@spec`.
+  - `spec-coverage` enforces both rules, with no exceptions.
 
-- **与规格的对应**：
-  - 每个用例用 `@spec("firmware/rootfs", "<requirement>", "<scenario>")` 标注它对应的场景。
-  - `uv run spec-coverage` 解析 `openspec/` 下的规格和收集到的用例，报告哪些场景没有用例。
-  - 由构建或 CI 本身验证的场景（例如 build/ci）记录在 `tests/verified-elsewhere.toml` 里，并写明由谁验证。
-- **目标选择**：
-  - 用例用 `@target("emulation")` 或 `@target("device")` 标注专属目标，并写明原因。没有标注的用例在两种目标上都运行。
-  - `just test` 用 `emulation.yaml`；`just test-device <host>` 用 `r4s.yaml`。
-  - 真机的电源控制用 labgrid 的 `ManualPowerDriver`，需要断电时提示人工操作。
-- **报告**：两种目标都输出 JUnit 和终端摘要，格式相同，分别写到 `tests/.reports/emulation.xml` 和 `device.xml`。
-- **路由器接口**：`wrt_tests.router.Router` 在两种目标上提供同一组方法：`run`、`returncode`、`login`（真正的交互登录）、`put`、`http`、`reboot`、`wait_ready`、`moved_to`（临时改用另一个 LAN 地址）。只有 `reset` 不同：模拟器回到快照，真机不做任何事，所以真机上的用例要自己恢复改动过的状态。
-- **不依赖编译器的 BPF 对象**：检查 tcx 的用例需要一个 BPF 程序。Apple 的 clang 没有 BPF 后端，而真机测试可以从 macOS 发起，所以这个两条指令的程序由 `wrt_tests/bpf.py` 直接写成 ELF 目标文件。
+- **Mapping to specs**:
+  - Each test is annotated with `@spec("firmware/rootfs", "<requirement>", "<scenario>")` for the scenario it covers.
+  - `uv run spec-coverage` parses the specs under `openspec/` and the collected tests, and reports which scenarios have no test.
+  - Scenarios verified elsewhere, by the build or CI itself (for example build/ci), are recorded in `tests/verified-elsewhere.toml` together with what verifies them.
+- **Target selection**:
+  - A test is marked `@target("emulation")` or `@target("device")` for a dedicated target, with a reason. Unmarked tests run on both targets.
+  - `just test` uses `emulation.yaml`; `just test-device <host>` uses `r4s.yaml`.
+  - Power control on the device uses labgrid's `ManualPowerDriver`, which prompts for manual action when power must be cut.
+- **Reports**: both targets output JUnit and a terminal summary in the same format, written to `tests/.reports/emulation.xml` and `device.xml` respectively.
+- **Router interface**: `wrt_tests.router.Router` offers the same methods on both targets: `run`, `returncode`, `login` (a real interactive login), `put`, `http`, `reboot`, `wait_ready`, `moved_to` (temporarily use another LAN address). Only `reset` differs: the emulator returns to the snapshot, while the device does nothing, so tests on the device must restore the state they change themselves.
+- **Compiler-free BPF object**: the test that checks tcx needs a BPF program. Apple's clang has no BPF backend, and device tests can be started from macOS, so `wrt_tests/bpf.py` writes this two-instruction program directly as an ELF object file.
 
-### D14. 模拟环境
+### D14. Emulation environment
 
 ```
 sysupgrade.img.gz --gunzip (fwtool trailer tolerated)--> disk.raw (read-only base)
@@ -274,47 +274,47 @@ sandbox: unshare --user --map-root-user --net --mount (rootless)
   br-wan: emu-wan + veth -> netns "isp"   (later changes run PPPoE/DHCPv6/STUN here)
 ```
 
-- **为什么要伪装成 R4S 的板型**：R4S 的 `02_network` 按 `eth1` 为 LAN、`eth0` 为 WAN 分配网口角色，板型的升级元数据校验也依赖它。改了 `compatible` 之后，这些都走与真机相同的代码。LED 这类硬件节点在模拟器里不存在，相关脚本只会记一条日志，不影响功能。
-- **为什么用 TCG**：本机虚拟机没有 KVM，CI 上又是 x86 模拟 aarch64，只能用 TCG。启动一次大约一两分钟，每个测试模块只启动一次，用例之间用快照还原磁盘。
-- **在 FHS 环境里运行测试**：uv 管理的 Python 和 manylinux wheel 在 NixOS 上需要 FHS 才能运行，所以测试也在 FHS 环境里跑；网络沙箱是嵌套在里面的用户命名空间。
-- **实施中确定的细节**：
-  - `scripts/test.sh` 用 `unshare --user --map-root-user --net --mount --pid --mount-proc` 启动 pytest。独立的 PID 命名空间保证 pytest 一旦退出（包括被中断），QEMU、dnsmasq、udhcpc 都随之结束，不留孤儿进程。
-  - 网络命名空间由一个 `unshare --net sleep` 进程持有，命令用 `nsenter` 进入，不需要 `/run/netns`。
-  - 串口必须一直有人读：PL011 逐字节写出，而在 Unix socket 上每个字节都占一整个缓冲槽，几百字节没人读，客户机就会卡住。`Emulator` 用一个后台线程持续读取串口，写进内存和日志，用例在这份记录上等待输出。
-  - 快照用 `savevm`/`loadvm`：会话里只启动一次，打一个 `booted` 快照；每个用例结束后回到这个快照，内存和磁盘都还原，只需几秒。
-  - 判断“启动完成”看 `logread` 里 procd 的 `- init complete -`。procd 通过 ulog 输出，logd 起来以后不再写内核日志，所以 `dmesg` 里等不到这一行。
-  - 测试环境的 `ssh` 和 `scp` 用一份固定配置（`-F`）：每次镜像的主机密钥都不同；而在沙箱里，宿主的配置文件可能属于未映射的用户，OpenSSH 会拒绝读取。
-  - 板级脚本按 SD 卡（`mmcblk1`）的 CID 生成 MAC，模拟器里没有这个设备，这一步会打印算术错误并跳过，网口沿用 QEMU 指定的固定 MAC。其余网口角色分配与真机相同。
-- **模拟器覆盖不了、只能留给真机的**：
-  - RK3399 的 BootROM、TPL/SPL 和 U-Boot 从 SD 卡启动；
-  - 两个物理网口的驱动（stmmac、r8169）以及中断亲和性；
-  - DesignWare 看门狗的真实复位；
-  - USB3 UAS；
-  - 吞吐和温度。
+- **Why impersonate the R4S board**: the R4S `02_network` assigns port roles with `eth1` as LAN and `eth0` as WAN, and the board's upgrade metadata check also depends on it. With `compatible` changed, all of this runs the same code as on the device. Hardware nodes such as LEDs do not exist in the emulator; the related scripts only log a line, with no functional effect.
+- **Why TCG**: the local VM has no KVM, and CI emulates aarch64 on x86, so TCG is the only option. One boot takes about one to two minutes; each test module boots once, and disks are restored from a snapshot between tests.
+- **Running tests in the FHS environment**: uv-managed Python and manylinux wheels need an FHS to run on NixOS, so tests also run in the FHS environment; the network sandbox is a user namespace nested inside it.
+- **Details settled during implementation**:
+  - `scripts/test.sh` starts pytest with `unshare --user --map-root-user --net --mount --pid --mount-proc`. The separate PID namespace ensures that as soon as pytest exits (including on interruption), QEMU, dnsmasq, and udhcpc all exit with it, leaving no orphan processes.
+  - Each network namespace is held by an `unshare --net sleep` process, and commands enter it with `nsenter`; `/run/netns` is not needed.
+  - The serial console must be read continuously: PL011 writes byte by byte, and on a Unix socket each byte takes a whole buffer slot, so if a few hundred bytes go unread the guest stalls. `Emulator` uses a background thread that keeps reading the serial console into memory and a log, and tests wait for output on that record.
+  - Snapshots use `savevm`/`loadvm`: the session boots once and takes a `booted` snapshot; after each test it returns to this snapshot, restoring both memory and disk in a few seconds.
+  - "Boot complete" is detected by procd's `- init complete -` in `logread`. procd logs through ulog, and once logd is up it no longer writes to the kernel log, so waiting for this line in `dmesg` never succeeds.
+  - `ssh` and `scp` in the test environment use one fixed configuration (`-F`): each image has different host keys, and inside the sandbox the host's config files may belong to an unmapped user, which OpenSSH refuses to read.
+  - The board script derives MACs from the CID of the SD card (`mmcblk1`). The emulator has no such device, so this step prints an arithmetic error and is skipped, and the ports keep the fixed MACs set by QEMU. All other port role assignment is the same as on the device.
+- **What the emulator cannot cover and is left to the device**:
+  - The RK3399 BootROM, TPL/SPL, and U-Boot booting from the SD card;
+  - The drivers of the two physical ports (stmmac, r8169) and interrupt affinity;
+  - A real reset by the DesignWare watchdog;
+  - USB3 UAS;
+  - Throughput and temperature.
 
-  这些都以 `@target("device")` 用例的形式存在。
+  These all exist as `@target("device")` tests.
 
 ## Risks / Trade-offs
 
-- **[BBRv3 在 6.18.y 升级时打不上]** 补丁失败时 CI 立即停止；可以暂时退回上一个 lock，再重整补丁。
-- **[virt 驱动增加内核体积]** 预计约 100～300 KB，实施时实测。R4S 上没有对应的设备，这些驱动不会被探测到。
-- **[叠加文件漏写子选项，导致内核配置卡住]** 实施时用 `listnewconfig` 补全；构建后的逐行校验会拦住配置漂移。
-- **[模拟器与真机的差异被误认为已覆盖]** 覆盖报告把只能在真机上验证的场景单独列出；板型身份一致，但硬件节点不同，这一点写在文档里。
-- **[嵌套用户命名空间不可用]** OrbStack 虚拟机里已实测可用；CI 依靠 `prepare-runner.sh` 放开 AppArmor 的限制，实施 `system-test` 时再实测一次。
-- **[ty 仍处于 0.0.x 阶段]** 版本由 `uv.lock` 固定；升级 ty 放在每周 bump 里一起处理，出现误报时在 pyproject 里记录下来。
-- **[TCG 速度慢]** 每个模块只启动一次虚拟机，用例之间用快照还原；`system-test` job 的目标耗时是 30 分钟以内。
-- **[超过 GitHub 缓存上限]** 退路见 D11。
+- **[BBRv3 fails to apply on a 6.18.y update]** CI stops immediately when a patch fails; we can temporarily return to the previous lock and then rebase the patches.
+- **[virt drivers grow the kernel]** Expected at about 100-300 KB, to be measured during implementation. The R4S has no matching devices, so these drivers are never probed.
+- **[The overlay misses a sub-option and the kernel config stalls]** Fill in with `listnewconfig` during implementation; post-build line-by-line verification catches config drift.
+- **[Differences between emulator and device mistaken as covered]** The coverage report lists device-only scenarios separately; the board identity matches but the hardware nodes differ, and this is documented.
+- **[Nested user namespaces unavailable]** Already confirmed working in the OrbStack VM; CI relies on `prepare-runner.sh` to lift the AppArmor restriction, to be confirmed again when implementing `system-test`.
+- **[ty is still at 0.0.x]** The version is pinned by `uv.lock`; ty upgrades are handled in the weekly bump, and false positives are recorded in pyproject.
+- **[TCG is slow]** Each module boots the VM once and tests are restored from a snapshot; the target duration of the `system-test` job is under 30 minutes.
+- **[Exceeding the GitHub cache limit]** See D11 for the fallback.
 
 ## Migration Plan
 
-- **新项目**：这是全新项目，没有旧东西要迁移。第一次交付就是一个通过了模拟测试的单槽镜像。
-- **已实施的部分需要这样调整**：
-  - 删除补丁 0001，F2FS 选项改由叠加文件提供，BBRv3 和启动脚本的补丁顺延为 0001、0002；
-  - 已有的脚本按统一骨架重排，并补上 `workdir-unmount`，`audit-image` 改名为 `image-audit`；
-  - CI 拆分为 `check.yml` 和 `build.yml`。
-- **回退**：在 A/B 那个 change 落地之前，回退方式就是重刷上一次的镜像。
+- **New project**: this is a brand-new project with nothing old to migrate. The first delivery is a single-slot image that has passed the emulation tests.
+- **Adjustments to the parts already implemented**:
+  - Remove patch 0001 and provide the F2FS options through the overlay; the BBRv3 and boot script patches move up to 0001 and 0002;
+  - Reorder existing scripts to the common skeleton, add `workdir-unmount`, and rename `audit-image` to `image-audit`;
+  - Split CI into `check.yml` and `build.yml`.
+- **Rollback**: until the A/B change lands, rollback means reflashing the previous image.
 
 ## Open Questions
 
-- 根分区大小暂定 1024 MiB，A/B 落地时按 SD 卡容量重新规划。
-- zsh 插件已经固定为 v0.7.1 和 0.8.0。以后升级时走普通的版本更新流程即可。
+- The root partition size is tentatively 1024 MiB, to be replanned against SD card capacity when A/B lands.
+- The zsh plugins are pinned to v0.7.1 and 0.8.0. Future upgrades go through the normal version update process.

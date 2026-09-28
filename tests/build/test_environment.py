@@ -26,7 +26,7 @@ def macos(tmp_path: Path) -> dict[str, str]:
     return {**os.environ, "PATH": f"{shim.parent}:{os.environ['PATH']}"}
 
 
-@spec(CAPABILITY, "只在 Linux 宿主机上构建", "在 macOS 上直接运行")
+@spec(CAPABILITY, "Build only on Linux hosts", "Run directly on macOS")
 @pytest.mark.parametrize("entry_point", SOURCE_ENTRY_POINTS)
 def test_macos_is_refused(entry_point: str, macos: dict[str, str], tmp_path: Path) -> None:
     workdir = tmp_path / "work"
@@ -43,7 +43,7 @@ def test_macos_is_refused(entry_point: str, macos: dict[str, str], tmp_path: Pat
     assert list(workdir.iterdir()) == []
 
 
-@spec(CAPABILITY, "统一的构建入口", "子步骤失败")
+@spec(CAPABILITY, "Common build entry points", "Substep fails")
 def test_failed_step_stops_the_build(tmp_path: Path) -> None:
     not_a_directory = tmp_path / "work"
     not_a_directory.write_text("")

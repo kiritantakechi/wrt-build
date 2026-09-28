@@ -2,94 +2,94 @@
 
 ## Why
 
-要为 NanoPi R4S（4GB LPDDR4）做一套自有的 OpenWrt 固件。参考对象 sbwml/r4s_build_script 以官方 v25.12.5 为骨架，但做法既无法复现，也无法审计：
+We want our own OpenWrt firmware for the NanoPi R4S (4GB LPDDR4). The reference, sbwml/r4s_build_script, uses official v25.12.5 as its skeleton, but its approach is neither reproducible nor auditable:
 
-- rockchip 和 generic 两个 target 被替换成需要授权才能访问的私有仓库；
-- 84 次 `git clone` 都拉分支 HEAD，没有一次固定到提交；
-- 构建时有 229 次 `curl` 远程拉取脚本和补丁，另有 118 处 `sed -i` 修改上游文本；
-- 子脚本以 `bash xxx.sh` 的方式调用，shebang 里的 `-e` 不生效，失败会被静默吞掉。
+- The rockchip and generic targets are replaced with private repositories that require authorization to access.
+- All 84 `git clone` calls pull branch HEAD; none is pinned to a commit.
+- The build fetches scripts and patches remotely with `curl` 229 times, and modifies upstream text with `sed -i` in 118 places.
+- Sub-scripts are invoked as `bash xxx.sh`, so the `-e` in the shebang has no effect and failures are silently swallowed.
 
-另一方面，上游 main（2026-09-27，`1019293`）已经原生提供 rockchip 6.18.52 内核、U-Boot 2026.07、TF-A 2.15、EROFS 根文件系统（fstools 已支持在块设备上把 overlay 接在 EROFS 之后），以及 apk 3.0.5。所以自建基础只需要一层很薄的补丁。
+Meanwhile, upstream main (2026-09-27, `1019293`) already ships the rockchip 6.18.52 kernel, U-Boot 2026.07, TF-A 2.15, an EROFS root filesystem (fstools already supports placing the overlay after EROFS on a block device), and apk 3.0.5 natively. Our own base therefore needs only a very thin patch layer.
 
-固件每周都要跟进上游，靠人工上机验证既慢又不可重复。验证必须尽量自动化，而且要在模拟器里运行**真正出货的镜像**，真机只做模拟器无法覆盖的少量硬件检查。
+The firmware must track upstream every week, and manual verification on hardware is slow and not repeatable. Verification must be automated as far as possible, and it must run **the actual shipped image** in the emulator. The device only handles the few hardware checks the emulator cannot cover.
 
 ## What Changes
 
-- **基线与固定版本**
-  - 以 `openwrt/openwrt` main 为基线。
-  - `upstream.lock` 把 openwrt、packages、luci 三个仓库固定到提交 SHA，初始为 `1019293`。
-- **补丁与配置**
-  - 补丁放在 `patches/<repo>/*.patch`，用 `git am` 应用，任一失败即中止。
-  - 构建过程中不联网拉取脚本或补丁，也不用 `sed` 改上游文本。
-  - 软件包配置由 `config/*.seed` 这些 diffconfig 片段组合而成，执行 `make defconfig` 后逐行校验。
-  - 上游没有开放成 `CONFIG_KERNEL_*` 的内核选项，统一写进内核配置叠加文件 `config/kernel.config`。这个文件链接到上游原生支持的 `env/kernel-config`，构建完成后逐行校验。
-- **构建环境与编排**
-  - Nix flake（`buildFHSEnv`）定义宿主机工具，本机和 CI 共用同一份。本机用 OrbStack 的 NixOS 虚拟机，构建目录放在外接 SSD 上。
-  - 构建只能在 Linux 宿主机上进行：`KERNEL_DEBUG_INFO_BTF` 和 `tools/dwarves` 在 macOS 上不可用。
-  - 编排入口统一用 `just` + POSIX sh。命令和脚本按动词对称命名，例如 fetch/patch/config/build/test、mount/unmount、pack/unpack。
-- **工具链**
-  - GCC 15 + LTO + mold + gc-sections。
-  - `-O2 -mcpu=cortex-a72.cortex-a53+crypto` 通过 `CONFIG_EXTRA_OPTIMIZATION` 注入，不修改 `include/target.mk`。
-- **内核**
-  - 使用上游默认的 6.18。
-  - 打开 BTF、`BPF_EVENTS`、`CGROUPS`/`CGROUP_BPF`；只用 cgroup v2。
-  - EROFS 编进内核；打开 F2FS 压缩，其中 zstd 和 lz4 启用。
-  - 默认拥塞控制用 BBRv3 + fq，采用 sbwml 的 6.18 移植，20 个补丁全部保留。
-  - 出货内核内置 QEMU `virt` 平台需要的少量驱动（PL011 串口、通用 PCIe 主机控制器、virtio 磁盘和网卡、i6300esb 看门狗），使同一个内核可以在模拟器里启动。
-- **根文件系统**
-  - EROFS（`lz4hc,12`），不再生成 squashfs。
-  - overlay 用 f2fs，启动参数里加上 `fstools_overlay_compression_type=zstd` 开启压缩。
-  - 本 change 产出单槽镜像，沿用上游分区布局；A/B 由 `r4s-ab-rollback` 负责。
-- **基础系统**
-  - LAN 地址 10.0.0.1；LuCI 用 uhttpd + ucode，带简体中文语言包，界面语言跟随浏览器。
-  - 登录 shell 保持 ash，交互式会话自动进入 zsh（预装 autosuggestions 和 syntax-highlighting 两个插件）；镜像同时提供 bash。
-  - zram-swap 1 GiB，zstd 压缩；镜像里不预置 root 密码。
-- **不采用**：UPX、LRNG、urngd、shortcut-fe、natflow、PCRE1、zh-cn 翻译转换脚本、opkg 补丁、i915 实时内核补丁、用 nginx/uwsgi 跑 LuCI，以及伪造 vermagic。
-- **自动化系统测试**
-  - 测试套件基于 pytest + labgrid，Python 环境由 uv 管理并锁定，格式化用 ruff，类型检查用 ty。
-  - 同一份用例既能在模拟器里运行，也能在真机上运行；每条可测试的规格场景都对应一个测试。
-  - 模拟器里运行的是出货镜像本身：内核从镜像的 FIT 中提取，启动参数取自镜像里的 `boot.scr`，机器以 R4S 的板型身份（`friendlyarm,nanopi-r4s`）启动，网络在无 root 权限的用户命名空间里搭建。
-  - 真机验证压缩为：刷机之后运行 `just test-device <host>`，再加少数几项硬件专属检查。
-- **代码规范**
-  - 以下检查全部强制执行，CI 不通过就算失败：shfmt、shellcheck、nixfmt、ruff format/check、ty、actionlint、editorconfig，以及禁止模式检查。
-  - 所有脚本使用统一骨架；`just check` 做全量检查，`just fmt` 统一格式化。
+- **Baseline and pinning**
+  - Use `openwrt/openwrt` main as the baseline.
+  - `upstream.lock` pins the openwrt, packages, and luci repositories to commit SHAs, initially `1019293`.
+- **Patches and configuration**
+  - Patches live in `patches/<repo>/*.patch` and are applied with `git am`; any failure aborts.
+  - The build does not fetch scripts or patches from the network, and does not use `sed` to modify upstream text.
+  - Package configuration is composed from the diffconfig fragments `config/*.seed`, and is verified line by line after `make defconfig`.
+  - Kernel options that upstream does not expose as `CONFIG_KERNEL_*` all go into the kernel config overlay `config/kernel.config`. This file is linked to `env/kernel-config`, which upstream supports natively, and is verified line by line after the build.
+- **Build environment and orchestration**
+  - A Nix flake (`buildFHSEnv`) defines the host tools, shared by the local machine and CI. Locally we use an OrbStack NixOS VM, with the build directory on an external SSD.
+  - Builds run only on a Linux host: `KERNEL_DEBUG_INFO_BTF` and `tools/dwarves` are unavailable on macOS.
+  - The single orchestration entry point is `just` + POSIX sh. Commands and scripts are named with symmetric verbs, for example fetch/patch/config/build/test, mount/unmount, pack/unpack.
+- **Toolchain**
+  - GCC 15 + LTO + mold + gc-sections.
+  - `-O2 -mcpu=cortex-a72.cortex-a53+crypto` is injected through `CONFIG_EXTRA_OPTIMIZATION`, without modifying `include/target.mk`.
+- **Kernel**
+  - Use the upstream default, 6.18.
+  - Enable BTF, `BPF_EVENTS`, `CGROUPS`/`CGROUP_BPF`; use cgroup v2 only.
+  - Build EROFS into the kernel; enable F2FS compression with zstd and lz4.
+  - Default congestion control is BBRv3 + fq, using sbwml's 6.18 port, with all 20 patches kept.
+  - The shipped kernel has built in the few drivers the QEMU `virt` platform needs (PL011 serial, generic PCIe host controller, virtio disk and NIC, i6300esb watchdog), so the same kernel boots in the emulator.
+- **Root filesystem**
+  - EROFS (`lz4hc,12`); squashfs is no longer produced.
+  - The overlay uses f2fs, with compression enabled by adding `fstools_overlay_compression_type=zstd` to the boot arguments.
+  - This change produces a single-slot image and keeps the upstream partition layout; A/B belongs to `r4s-ab-rollback`.
+- **Base system**
+  - LAN address 10.0.0.1; LuCI uses uhttpd + ucode, ships the Simplified Chinese language pack, and follows the browser's interface language.
+  - The login shell stays ash; interactive sessions switch to zsh automatically (with the autosuggestions and syntax-highlighting plugins preinstalled); the image also provides bash.
+  - zram-swap of 1 GiB with zstd compression; the image has no preset root password.
+- **Not adopted**: UPX, LRNG, urngd, shortcut-fe, natflow, PCRE1, the zh-cn translation conversion script, opkg patches, the i915 real-time kernel patch, running LuCI on nginx/uwsgi, and forged vermagic.
+- **Automated system tests**
+  - The test suite is built on pytest + labgrid, with the Python environment managed and locked by uv, formatting by ruff, and type checking by ty.
+  - The same tests run both in the emulator and on the device; every testable spec scenario maps to one test.
+  - The emulator runs the shipped image itself: the kernel is extracted from the image's FIT, the boot arguments come from the image's `boot.scr`, the machine boots with the R4S board identity (`friendlyarm,nanopi-r4s`), and the network is built in an unprivileged user namespace.
+  - Device verification shrinks to running `just test-device <host>` after flashing, plus a few hardware-specific checks.
+- **Code standards**
+  - The following checks are all enforced, and CI fails if any fails: shfmt, shellcheck, nixfmt, ruff format/check, ty, actionlint, editorconfig, and forbidden-pattern checks.
+  - All scripts use one skeleton; `just check` runs every check and `just fmt` formats everything.
 - **CI**
-  - 公开 GitHub 仓库 + GitHub 托管 runner。
-  - 包含四个 job：`check`（规范检查）、`host-toolchain`（按输入哈希缓存）、`firmware`（`ALL_KMODS`）、`system-test`（模拟器）。每个 job 都控制在 6 小时以内。
-  - 正式镜像和 kmod 仓库必须出自同一次构建。
-  - 签名和发布由 `r4s-release-pipeline` 负责。
-- **上游贡献**（只在本地准备好，提交前需要维护者明确同意）：
-  - `include/image.mk:110` 判断的配置项名写错了，导致 EROFS 的 LZMA 分支永远走不到。修正方式是新增一个默认 lz4hc 的压缩算法选择项。
-  - 为 F2FS 压缩的各个选项增加对应的 `KERNEL_*` 开关。
+  - Public GitHub repository + GitHub-hosted runners.
+  - Four jobs: `check` (code-standard checks), `host-toolchain` (cached by input hash), `firmware` (`ALL_KMODS`), `system-test` (emulator). Each job stays under 6 hours.
+  - The release image and the kmod repository must come from the same build.
+  - Signing and release belong to `r4s-release-pipeline`.
+- **Upstream contributions** (prepared locally only; submitting requires the maintainer's explicit consent):
+  - The config symbol name tested at `include/image.mk:110` is misspelled, so the EROFS LZMA branch is never reached. The fix adds a compression algorithm choice that defaults to lz4hc.
+  - Add matching `KERNEL_*` switches for each F2FS compression option.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `build/environment`：可复现的 Linux 构建环境。Nix flake 保证本机虚拟机和 CI 一致，统一用 just 作为入口。
-- `build/upstream-pinning`：上游源码和 feeds 固定到 SHA，以及补丁队列的应用方式和失败处理。
-- `build/ci`：分阶段 CI、缓存、全量 kmod 的产出，以及“镜像与 kmod 出自同一次构建”的约束。
-- `firmware/toolchain`：目标工具链的版本和编译优化选项。
-- `firmware/kernel`：内核版本、必需的内核特性（BTF、cgroup v2、EROFS、F2FS 压缩、模拟平台驱动），以及 BBRv3。
-- `firmware/rootfs`：EROFS 根文件系统和 f2fs zstd overlay 的布局与行为。
-- `firmware/base-system`：出厂默认值（LAN 地址、Web 界面、语言、shell、zram、密码策略）和不采用的组件清单。
-- `testing/harness`：测试套件、规格场景与测试的对应关系、模拟器和真机两种目标，以及 Python 工具链。
-- `testing/emulation`：在 QEMU 中以 R4S 身份启动出货镜像，并提供网络拓扑和故障注入。
-- `quality/code-standards`：格式化、静态检查、统一的脚本骨架与对称命名，以及在 CI 中强制执行。
+- `build/environment`: a reproducible Linux build environment. The Nix flake keeps the local VM and CI identical, with just as the single entry point.
+- `build/upstream-pinning`: upstream sources and feeds pinned to SHAs, plus how the patch queue is applied and how failures are handled.
+- `build/ci`: staged CI, caching, full kmod output, and the constraint that "the image and kmods come from the same build".
+- `firmware/toolchain`: the target toolchain version and compiler optimization options.
+- `firmware/kernel`: the kernel version, required kernel features (BTF, cgroup v2, EROFS, F2FS compression, emulation platform drivers), and BBRv3.
+- `firmware/rootfs`: the layout and behavior of the EROFS root filesystem and the f2fs zstd overlay.
+- `firmware/base-system`: factory defaults (LAN address, web interface, language, shell, zram, password policy) and the list of components not adopted.
+- `testing/harness`: the test suite, the mapping between spec scenarios and tests, the emulator and device targets, and the Python toolchain.
+- `testing/emulation`: booting the shipped image in QEMU as an R4S, with a network topology and fault injection.
+- `quality/code-standards`: formatting, static checks, the common script skeleton and symmetric naming, and enforcement in CI.
 
 ### Modified Capabilities
 
-（无。项目目前还没有已有规格。）
+(None. The project has no existing specs yet.)
 
 ## Impact
 
-- **新增目录和文件**：`flake.nix`、`justfile`、`upstream.lock`、`patches/`、`config/`（包括 `kernel.config`）、`files/`、`feed/`、`tests/`（pyproject、uv.lock、labgrid 目标、用例）、`.editorconfig`、`.shellcheckrc`、`.github/workflows/`。
-- **外部依赖**：
-  - OrbStack 的 NixOS 虚拟机和外接 SSD。虚拟机里没有 KVM，本机的 QEMU 走 TCG 纯软件模拟。
-  - GitHub Actions 托管 runner。
-  - PyPI（通过 uv.lock 固定版本并校验哈希）。
-- **kmod 来源**：内核是自己编的，官方源的 kmod 装不上，所有 kmod 都来自本项目的仓库。
-- **需要长期维护的内核源码补丁**：BBRv3 改动的是 TCP 核心，每次 6.18.y 升级都可能要重整。
-- **出货内核变化**：多了几个 virt 平台驱动，体积约增加 100～300 KB；在 R4S 上这些驱动不会被加载。
-- **补丁层变化**：删除原先给 `Config-kernel.in` 加 F2FS 选项的补丁 0001，改用内核配置叠加文件。补丁只剩 BBRv3 和启动脚本两个。
-- **依赖本 change 的后续 change**：`r4s-ab-rollback`、`r4s-ebpf-datapath`、`r4s-services`、`r4s-release-pipeline`。它们的验证都建立在这里的测试框架和模拟环境之上。
+- **New directories and files**: `flake.nix`, `justfile`, `upstream.lock`, `patches/`, `config/` (including `kernel.config`), `files/`, `feed/`, `tests/` (pyproject, uv.lock, labgrid targets, tests), `.editorconfig`, `.shellcheckrc`, `.github/workflows/`.
+- **External dependencies**:
+  - An OrbStack NixOS VM and an external SSD. The VM has no KVM, so local QEMU uses TCG pure software emulation.
+  - GitHub Actions hosted runners.
+  - PyPI (versions pinned and hashes verified through uv.lock).
+- **kmod source**: we build our own kernel, so kmods from the official repository cannot be installed; all kmods come from this project's repository.
+- **Kernel source patches that need long-term maintenance**: BBRv3 changes the TCP core, and every 6.18.y update may require rebasing it.
+- **Shipped kernel changes**: a few virt platform drivers are added, growing it by about 100-300 KB; these drivers are not loaded on the R4S.
+- **Patch layer changes**: patch 0001, which added F2FS options to `Config-kernel.in`, is removed in favor of the kernel config overlay. Only two patches remain: BBRv3 and the boot script.
+- **Follow-up changes that depend on this change**: `r4s-ab-rollback`, `r4s-ebpf-datapath`, `r4s-services`, `r4s-release-pipeline`. Their verification builds on the test framework and emulation environment defined here.

@@ -2,72 +2,72 @@
 
 ## Purpose
 
-规定固件的出厂默认值和基础使用体验：管理地址、Web 管理界面、界面语言、交互 shell、内存压缩和密码策略，以及明确不包含的组件。
+Define the firmware's factory defaults and basic user experience: management address, web management interface, interface language, interactive shell, memory compression, and password policy, plus the components that are explicitly excluded.
 
 ## ADDED Requirements
 
-### Requirement: LAN 默认地址
-在没有保留配置的情况下，LAN 的默认地址 SHALL 是 10.0.0.1/24，故障安全模式（failsafe）下的地址也 SHALL 是 10.0.0.1。保留配置升级时 MUST NOT 覆盖用户自己设置的 LAN 地址。
+### Requirement: Default LAN address
+Without preserved configuration, the default LAN address SHALL be 10.0.0.1/24, and the address in failsafe mode SHALL also be 10.0.0.1. A config-preserving upgrade MUST NOT overwrite a LAN address the user has set.
 
-#### Scenario: 全新安装
-- **WHEN** 刷入镜像后第一次启动，没有任何保留配置
-- **THEN** br-lan 的地址是 10.0.0.1/24
+#### Scenario: Fresh install
+- **WHEN** the router boots for the first time after flashing, with no preserved configuration
+- **THEN** the address of br-lan is 10.0.0.1/24
 
-#### Scenario: 进入故障安全模式
-- **WHEN** 设备进入故障安全模式
-- **THEN** 可以通过 10.0.0.1 访问设备
+#### Scenario: Enter failsafe mode
+- **WHEN** the router enters failsafe mode
+- **THEN** the router is reachable at 10.0.0.1
 
-#### Scenario: 保留配置升级
-- **WHEN** 用户把 LAN 地址改成别的地址后，做了一次保留配置的升级
-- **THEN** 升级后 LAN 地址仍然是用户设置的那个
+#### Scenario: Config-preserving upgrade
+- **WHEN** the user changes the LAN address to a different address and then performs a config-preserving upgrade
+- **THEN** after the upgrade, the LAN address is still the one the user set
 
-### Requirement: Web 管理界面
-LuCI SHALL 由 uhttpd 配合 ucode 提供，并带简体中文语言包；界面语言 SHALL 保持 LuCI 默认的 `auto`，跟随浏览器的语言设置。镜像 MUST NOT 包含 nginx 或 uwsgi。
+### Requirement: Web management interface
+LuCI SHALL be served by uhttpd with ucode and ship the Simplified Chinese language pack; the interface language SHALL stay at LuCI's default `auto` and follow the browser's language setting. The image MUST NOT contain nginx or uwsgi.
 
-#### Scenario: 访问管理界面
-- **WHEN** 在 LAN 上用语言设置为简体中文的浏览器访问 `http://10.0.0.1`
-- **THEN** 由 uhttpd 返回 LuCI 页面，界面语言为简体中文
+#### Scenario: Open the management interface
+- **WHEN** a browser whose language is set to Simplified Chinese opens `http://10.0.0.1` on the LAN
+- **THEN** uhttpd returns the LuCI page, and the interface language is Simplified Chinese
 
-#### Scenario: 不包含 nginx 和 uwsgi
-- **WHEN** 列出镜像里安装的软件包
-- **THEN** 其中没有 nginx，也没有 uwsgi
+#### Scenario: No nginx or uwsgi
+- **WHEN** the packages installed in the image are listed
+- **THEN** neither nginx nor uwsgi is among them
 
-### Requirement: 交互 shell
-root 的登录 shell SHALL 是 `/bin/ash`。交互式登录会话在 zsh 可用时 SHALL 自动切换到 zsh，并加载 autosuggestions 和 syntax-highlighting 两个插件；zsh 不可用时 MUST 留在 ash。非交互式执行命令时 MUST NOT 启动 zsh。镜像 SHALL 同时提供 bash，用户可以手动进入；以登录方式启动的 bash MUST NOT 被切换到 zsh。
+### Requirement: Interactive shell
+The root login shell SHALL be `/bin/ash`. An interactive login session SHALL switch to zsh automatically when zsh is available, loading the autosuggestions and syntax-highlighting plugins; when zsh is unavailable, it MUST stay in ash. Non-interactive command execution MUST NOT start zsh. The image SHALL also provide bash, which the user can enter manually; bash started as a login shell MUST NOT be switched to zsh.
 
-#### Scenario: SSH 交互登录
-- **WHEN** 通过 SSH 以 root 交互方式登录
-- **THEN** 进入 zsh 会话，两个插件都已加载
+#### Scenario: Interactive SSH login
+- **WHEN** root logs in interactively over SSH
+- **THEN** a zsh session starts with both plugins loaded
 
-#### Scenario: 非交互执行命令
-- **WHEN** 通过 SSH 远程执行一条命令，不分配终端
-- **THEN** 命令由 ash 执行，不启动 zsh
+#### Scenario: Non-interactive command
+- **WHEN** a command is run remotely over SSH without allocating a terminal
+- **THEN** ash runs the command, and zsh is not started
 
-#### Scenario: zsh 不可用
-- **WHEN** zsh 可执行文件不存在或无法执行
-- **THEN** 交互登录仍然成功，停留在 ash
+#### Scenario: zsh unavailable
+- **WHEN** the zsh executable does not exist or cannot be executed
+- **THEN** the interactive login still succeeds and stays in ash
 
-#### Scenario: 手动进入 bash
-- **WHEN** 登录后执行 `bash -l`
-- **THEN** 进入 bash 会话，并且不会被切换到 zsh
+#### Scenario: Enter bash manually
+- **WHEN** `bash -l` is run after login
+- **THEN** a bash session starts and is not switched to zsh
 
-### Requirement: 内存压缩交换
-系统 SHALL 提供一个 1 GiB、用 zstd 压缩的 zram 交换设备。
+### Requirement: Compressed memory swap
+The system SHALL provide a 1 GiB zram swap device compressed with zstd.
 
-#### Scenario: 检查交换设备
-- **WHEN** 系统启动完成后查看交换设备
-- **THEN** 存在一个 1 GiB 的 zram 交换设备，压缩算法是 zstd
+#### Scenario: Check swap device
+- **WHEN** the swap devices are inspected after boot completes
+- **THEN** there is a 1 GiB zram swap device whose compression algorithm is zstd
 
-### Requirement: 镜像不预置密码
-镜像 MUST NOT 包含任何预置的 root 密码哈希。管理员 SHALL 在首次使用时自己设置密码。
+### Requirement: No preset password
+The image MUST NOT contain any preset root password hash. The administrator SHALL set the password on first use.
 
-#### Scenario: 检查影子密码文件
-- **WHEN** 查看镜像里的 `/etc/shadow`
-- **THEN** root 条目没有密码哈希
+#### Scenario: Check shadow file
+- **WHEN** `/etc/shadow` in the image is inspected
+- **THEN** the root entry has no password hash
 
-### Requirement: 不包含的组件
-镜像 MUST NOT 包含以下组件：用 UPX 压缩过的可执行文件、LRNG、urngd、shortcut-fe、natflow、PCRE1 库、opkg。
+### Requirement: Excluded components
+The image MUST NOT contain the following components: UPX-compressed executables, LRNG, urngd, shortcut-fe, natflow, the PCRE1 library, opkg.
 
-#### Scenario: 检查安装的软件包和可执行文件
-- **WHEN** 列出镜像里的软件包，并扫描可执行文件
-- **THEN** 以上组件都不存在，也没有任何可执行文件带 UPX 标记
+#### Scenario: Check installed packages and executables
+- **WHEN** the packages in the image are listed and its executables are scanned
+- **THEN** none of the components above are present, and no executable carries a UPX marker

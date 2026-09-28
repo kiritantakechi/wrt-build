@@ -2,42 +2,42 @@
 
 ## Purpose
 
-规定每次发布的内容、存放位置和组织方式；区分候选版和正式版；保证同一次发布里的产物出自同一次构建。
+Defines what each release contains, where it is stored, and how it is organized; distinguishes candidates from stable releases; and ensures that all artifacts in one release come from the same build.
 
 ## ADDED Requirements
 
-### Requirement: 签名并通过演练后发布
-每次签名完成并通过升级演练后 SHALL 在 GitHub 上生成一个 Release；演练失败时 MUST NOT 创建 Release。Release 中包含：签名后的出厂镜像、签名后的单槽升级镜像、包含同一次构建全部软件包和 kmod 的仓库归档、构建清单，以及各产物的校验和。
+### Requirement: Publish after signing and drill
+After each signing completes and passes the upgrade drill, a Release SHALL be created on GitHub; when the drill fails, a Release MUST NOT be created. The Release contains the signed factory image, the signed single-slot upgrade image, a repository archive containing all packages and kmods from the same build, the build manifest, and checksums for each artifact.
 
-#### Scenario: 检查 Release 内容
-- **WHEN** 查看一个已发布的 Release
-- **THEN** 其中有出厂镜像、升级镜像、仓库归档、构建清单和校验和文件，清单里的 vermagic 与仓库中 kmod 所依赖的内核版本标识一致
+#### Scenario: Inspect Release contents
+- **WHEN** a published Release is inspected
+- **THEN** it contains the factory image, the upgrade image, the repository archive, the build manifest, and the checksum file, and the vermagic in the manifest matches the kernel version identifier that the kmods in the repository depend on
 
-#### Scenario: 升级演练失败
-- **WHEN** 签名后的产物没有通过升级演练
-- **THEN** 不创建 Release
+#### Scenario: Upgrade drill fails
+- **WHEN** the signed artifacts do not pass the upgrade drill
+- **THEN** no Release is created
 
-### Requirement: 候选版与正式版
-来自 bump PR 的构建 SHALL 以预发布（候选版）的形式发布；合并进主分支之后的构建 SHALL 以正式版发布。
+### Requirement: Candidates and stable releases
+Builds from bump PRs SHALL be published as prereleases (candidates); builds made after merging into the main branch SHALL be published as stable releases.
 
-#### Scenario: PR 构建
-- **WHEN** 一个 bump PR 的构建完成签名
-- **THEN** 它以预发布的形式出现，而不会成为最新的正式版
+#### Scenario: PR build
+- **WHEN** the build of a bump PR finishes signing
+- **THEN** it appears as a prerelease and does not become the latest stable release
 
-#### Scenario: 合并后构建
-- **WHEN** PR 合并后主分支的构建完成签名
-- **THEN** 它以正式版发布，成为最新的正式版
+#### Scenario: Post-merge build
+- **WHEN** the main-branch build after the PR is merged finishes signing
+- **THEN** it is published as a stable release and becomes the latest stable release
 
-### Requirement: 产物必须出自同一次构建
-如果镜像和仓库归档来自不同的构建运行（构建清单中的运行标识不一致），发布 MUST 失败。
+### Requirement: Artifacts come from one build
+If the images and the repository archive come from different build runs (the run identifiers in the build manifest do not match), publishing MUST fail.
 
-#### Scenario: 混用了两次构建的产物
-- **WHEN** 发布流程收到的镜像和仓库归档出自两次不同的构建
-- **THEN** 发布失败，不创建 Release
+#### Scenario: Artifacts mixed from two builds
+- **WHEN** the publishing flow receives images and a repository archive from two different builds
+- **THEN** publishing fails and no Release is created
 
-### Requirement: 发布说明可追溯
-Release 的说明 SHALL 列出这次构建所用的 `upstream.lock` 中三个上游仓库的 SHA，以及补丁队列的哈希。
+### Requirement: Traceable release notes
+The Release notes SHALL list the SHAs of the three upstream repositories in the `upstream.lock` used for this build, and the patch queue hash.
 
-#### Scenario: 查看发布说明
-- **WHEN** 打开一个 Release 的说明
-- **THEN** 能看到 openwrt、packages、luci 的 SHA，以及补丁队列的哈希
+#### Scenario: View release notes
+- **WHEN** the notes of a Release are opened
+- **THEN** the SHAs of openwrt, packages, and luci and the patch queue hash are visible

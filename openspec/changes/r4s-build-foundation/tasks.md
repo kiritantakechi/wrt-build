@@ -1,88 +1,88 @@
 # Tasks
 
-## 1. 仓库骨架与构建环境
+## 1. Repository skeleton and build environment
 
-- [x] 1.1 建立仓库目录结构：`patches/{openwrt,packages,luci}`、`feed/`、`config/`、`files/`、`scripts/`、`docs/`、`.github/workflows/`。在 `.gitignore` 里排除构建目录。验证：`git status` 干净，目录都在。
-- [x] 1.2 编写 `flake.nix`：用 `buildFHSEnv` 提供 OpenWrt 需要的宿主机依赖、`just`，以及固定版本的 clang/llvm（用于编译 BPF）。生成 `flake.lock`。验证：在 NixOS 虚拟机里 `nix flake check` 通过，`nix develop -c true` 退出码为 0。
-- [x] 1.3 在 `justfile` 里加 `env-report` 命令，输出宿主机工具的版本清单。验证：这份清单在 11.3 里和 CI 的输出逐项比对。
-- [x] 1.4 在 OrbStack 里创建 NixOS 虚拟机；在外接 SSD 上建 ext4 镜像文件，在虚拟机里 loop 挂载成 `WRT_WORKDIR`；把步骤写进 `docs/dev-setup.md`。验证：`findmnt $WRT_WORKDIR` 显示 ext4；在这个目录里建两个只有大小写不同的文件都能成功；macOS 系统盘的已用空间没有增长。
-- [x] 1.5 写一个宿主机检查脚本，被所有会获取或编译源码的 `just` 命令先调用：不是 Linux 就立刻退出。验证：在 macOS 上执行 `just fetch`，返回非零并给出提示，也没有创建任何目录。
-- [x] 1.6 给 flake 增加 `nixpkgs-unstable` 输入，提供 `uv`、`qemu`、`dtc`、`u-boot-tools`；两种平台的 devShell 都加入 `shfmt`、`nixfmt`、`actionlint`、`editorconfig-checker`、`gitleaks`（design D10）。验证：`nix flake check` 通过；`just env-report` 输出 uv、qemu、shfmt、nixfmt、actionlint、editorconfig-checker、gitleaks 的版本。
+- [x] 1.1 Create the repository directory structure: `patches/{openwrt,packages,luci}`, `feed/`, `config/`, `files/`, `scripts/`, `docs/`, `.github/workflows/`. Exclude the build directory in `.gitignore`. Verification: `git status` is clean and all directories exist.
+- [x] 1.2 Write `flake.nix`: use `buildFHSEnv` to provide the host dependencies OpenWrt needs, `just`, and a pinned clang/llvm (for compiling BPF). Generate `flake.lock`. Verification: in the NixOS VM, `nix flake check` passes and `nix develop -c true` exits with status 0.
+- [x] 1.3 Add an `env-report` recipe to the `justfile` that outputs the version list of the host tools. Verification: in 11.3 this list is compared item by item with the CI output.
+- [x] 1.4 Create a NixOS VM in OrbStack; create an ext4 image file on the external SSD and loop-mount it in the VM as `WRT_WORKDIR`; document the steps in `docs/dev-setup.md`. Verification: `findmnt $WRT_WORKDIR` shows ext4; creating two files in this directory whose names differ only in case succeeds for both; used space on the macOS system disk does not grow.
+- [x] 1.5 Write a host check script that every `just` recipe that fetches or compiles source calls first: on a non-Linux host it exits immediately. Verification: running `just fetch` on macOS returns nonzero with a message and creates no directories.
+- [x] 1.6 Add a `nixpkgs-unstable` input to the flake to provide `uv`, `qemu`, `dtc`, `u-boot-tools`; add `shfmt`, `nixfmt`, `actionlint`, `editorconfig-checker`, `gitleaks` to the devShells on both platforms (design D10). Verification: `nix flake check` passes; `just env-report` outputs the versions of uv, qemu, shfmt, nixfmt, actionlint, editorconfig-checker, gitleaks.
 
-## 2. 固定上游与补丁流程
+## 2. Upstream pinning and patch flow
 
-- [x] 2.1 定义 `upstream.lock` 的格式：每个仓库记录 URL、SHA 和提交时间戳。初始值取 openwrt `1019293` 以及当时的 packages 和 luci 的 SHA，并写进 `docs/upstream-lock.md`。验证：lock 里的三个 SHA 都能在上游仓库解析到对应提交。
-- [x] 2.2 实现 `scripts/fetch.sh`（对应 `just fetch`）：按 SHA 浅获取 openwrt；生成带 `^sha` 的 `feeds.conf`，外加自有 feed 的 `src-link`；写入 `version.date`；执行 `feeds update -a`。验证：换一台机器或换个时间执行两次，三个仓库检出的 SHA 都和 lock 一致；`feeds.conf` 里没有任何分支名。
-- [x] 2.3 实现 `scripts/patch.sh`（对应 `just patch`）：按仓库、按文件名顺序执行 `git am`，并固定提交者的身份和时间；失败时先 `--abort` 再退出，并报出补丁文件名。验证：放一个故意冲突的补丁，命令返回非零并指出这个文件；删掉它再跑两次，得到的源码树 HEAD 的 SHA 完全相同。
-- [x] 2.4 写一个检查脚本（对应 `just lint`），扫描 `scripts/`、`justfile` 和工作流，找远程下载后执行或打补丁的写法，以及对源码树的 `sed -i`。验证：当前仓库检查通过；往里临时加一行 `curl ... | sh`，检查失败。
+- [x] 2.1 Define the format of `upstream.lock`: each repository records its URL, SHA, and commit timestamp. The initial values are openwrt `1019293` and the packages and luci SHAs of that time, documented in `docs/upstream-lock.md`. Verification: all three SHAs in the lock resolve to commits in the upstream repositories.
+- [x] 2.2 Implement `scripts/fetch.sh` (for `just fetch`): shallow-fetch openwrt by SHA; generate a `feeds.conf` with `^sha`, plus a `src-link` for our own feed; write `version.date`; run `feeds update -a`. Verification: across two runs on different machines or at different times, the SHAs checked out for all three repositories match the lock; `feeds.conf` contains no branch name.
+- [x] 2.3 Implement `scripts/patch.sh` (for `just patch`): run `git am` per repository in file name order, with a fixed committer identity and time; on failure, run `--abort` first, then exit and report the patch file name. Verification: with a deliberately conflicting patch, the command returns nonzero and names that file; after removing it and running twice, the resulting source tree HEAD SHAs are identical.
+- [x] 2.4 Write a check script (for `just lint`) that scans `scripts/`, the `justfile`, and the workflows for patterns that execute or apply remote downloads, and for `sed -i` on the source tree. Verification: the current repository passes the check; temporarily adding a `curl ... | sh` line makes the check fail.
 
-## 3. 配置组合
+## 3. Configuration composition
 
-- [x] 3.1 按 design D5 写出 `config/` 下的 `target`、`toolchain`、`kernel`、`rootfs`、`system`、`ci`、`dev` 这几个 seed 片段。验证：由 3.2 的校验覆盖。
-- [x] 3.2 实现 `scripts/config.sh`（对应 `just config <profile>`）：拼接 seed，执行 `make defconfig`，逐行检查 seed 的每一行是否仍在 `.config` 里，最后输出 diffconfig 产物。验证：`dev` 和 `ci` 两个 profile 都通过；故意加一个不存在的选项时，校验失败并报出这一行。
-- [x] 3.3 让 `config.sh` 把 `config/kernel.config` 链接到 `$TREE/env/kernel-config`；在 `build.sh` 构建完成后逐行校验内核的 `.config`（design D7）。验证：叠加文件的每一行都出现在内核的 `.config` 里；故意在叠加文件中加一个不存在的符号，`build.sh` 失败并报出这一行。
+- [x] 3.1 Following design D5, write the seed fragments under `config/`: `target`, `toolchain`, `kernel`, `rootfs`, `system`, `ci`, `dev`. Verification: covered by the verification in 3.2.
+- [x] 3.2 Implement `scripts/config.sh` (for `just config <profile>`): concatenate the seeds, run `make defconfig`, check line by line that every seed line is still in `.config`, and finally output the diffconfig artifact. Verification: both the `dev` and `ci` profiles pass; with a deliberately added nonexistent option, verification fails and reports that line.
+- [x] 3.3 Make `config.sh` link `config/kernel.config` to `$TREE/env/kernel-config`; after the build completes, `build.sh` verifies the kernel `.config` line by line (design D7). Verification: every line of the overlay appears in the kernel `.config`; with a deliberately added nonexistent symbol in the overlay, `build.sh` fails and reports that line.
 
-## 4. 工具链与内核
+## 4. Toolchain and kernel
 
-- [x] 4.1 F2FS 压缩改由内核配置叠加文件提供：在 `config/kernel.config` 写入 F2FS 压缩的五个选项，从 `kernel.seed` 删掉 `KERNEL_F2FS_*`，删除原来的补丁 0001（改为放在 `docs/upstream/`），BBRv3 和启动脚本的补丁顺延为 0001、0002。验证：内核 `.config` 里 `F2FS_FS_COMPRESSION`、`F2FS_FS_LZ4`、`F2FS_FS_ZSTD` 为 y，LZO 和 LZ4HC 为 not set；补丁队列只剩两个；连续执行两次 `just patch` 得到的 HEAD 相同。
-- [x] 4.2 写 BBRv3 的补丁，把 sbwml 的 20 个补丁加进 `target/linux/generic/hack-6.18/`，第 0019 个也保留。验证：`make target/linux/prepare` 能干净地打上全部补丁；`tcp_bbr.ko` 编译成功，符号表里有 BBRv3 才有的 `bbr_skb_marked_lost` 和 `bbr_tso_segs`（OpenWrt 的 `MODULE_STRIPPED` 会去掉 `MODULE_VERSION`，所以不看版本号）。
-- [x] 4.3 新增 `files/etc/sysctl.d/13-default-qdisc.conf`，写入 `net.core.default_qdisc=fq`。验证：由 10.2 的系统测试覆盖。
-- [x] 4.4 核对编译参数：挑一个目标包用 `V=s` 编译。验证：日志里 `-O2 -mcpu=cortex-a72.cortex-a53+crypto` 排在 `-Os` 之后，交叉编译器的 GCC 主版本是 15。
-- [x] 4.5 用 `ci` profile 完整构建一遍。开 LTO 编不过的包，逐个在 `patches/packages` 里加 `no-lto` 退出，并登记到 `docs/lto-optouts.md`。验证：完整构建成功（由 11.2 的 `firmware` job 完成），登记表里的包和补丁队列一一对应。
-- [x] 4.6 在 `config/kernel.config` 加入 QEMU virt 平台驱动（PL011、`PCI_HOST_GENERIC`、virtio-pci/blk/net、i6300esb），用 `make listnewconfig` 把新出现的子选项全部写明取值。验证：内核 `.config` 里这些驱动都是 y；`listnewconfig` 的输出为空；把 `Image` 体积相比之前的增量记录在 `docs/kernel.md` 里。
+- [x] 4.1 Provide F2FS compression through the kernel config overlay: write the five F2FS compression options into `config/kernel.config`, remove `KERNEL_F2FS_*` from `kernel.seed`, delete the original patch 0001 (moved to `docs/upstream/`), and renumber the BBRv3 and boot script patches to 0001 and 0002. Verification: in the kernel `.config`, `F2FS_FS_COMPRESSION`, `F2FS_FS_LZ4`, `F2FS_FS_ZSTD` are y, and LZO and LZ4HC are not set; only two patches remain in the queue; two consecutive runs of `just patch` produce the same HEAD.
+- [x] 4.2 Write the BBRv3 patch, adding sbwml's 20 patches to `target/linux/generic/hack-6.18/`, keeping patch 0019 as well. Verification: `make target/linux/prepare` applies all patches cleanly; `tcp_bbr.ko` compiles, and its symbol table contains the BBRv3-only `bbr_skb_marked_lost` and `bbr_tso_segs` (OpenWrt's `MODULE_STRIPPED` removes `MODULE_VERSION`, so the version number is not checked).
+- [x] 4.3 Add `files/etc/sysctl.d/13-default-qdisc.conf` containing `net.core.default_qdisc=fq`. Verification: covered by the system tests in 10.2.
+- [x] 4.4 Check the compiler flags: build one target package with `V=s`. Verification: in the log, `-O2 -mcpu=cortex-a72.cortex-a53+crypto` comes after `-Os`, and the cross compiler's GCC major version is 15.
+- [x] 4.5 Do a full build with the `ci` profile. For each package that fails to build with LTO enabled, add a `no-lto` opt-out in `patches/packages` and register it in `docs/lto-optouts.md`. Verification: the full build succeeds (done by the `firmware` job in 11.2), and the packages in the register match the patch queue one to one.
+- [x] 4.6 Add the QEMU virt platform drivers (PL011, `PCI_HOST_GENERIC`, virtio-pci/blk/net, i6300esb) to `config/kernel.config`, and use `make listnewconfig` to give explicit values to all newly appearing sub-options. Verification: all these drivers are y in the kernel `.config`; the output of `listnewconfig` is empty; the growth of the `Image` size compared with before is recorded in `docs/kernel.md`.
 
-## 5. 根文件系统与启动
+## 5. Root filesystem and boot
 
-- [x] 5.1 用 `rootfs.seed` 构建。验证：`bin/targets/rockchip/armv8/` 里只有 erofs 的 sysupgrade 镜像，没有 squashfs 或 ext4 的镜像。
-- [x] 5.2 写启动脚本的补丁，在 bootargs 里追加 `fstools_overlay_compression_type=zstd`。验证：生成的 `boot.scr` 里有这个参数；`/overlay` 的挂载选项由 10.1 的系统测试覆盖。
+- [x] 5.1 Build with `rootfs.seed`. Verification: `bin/targets/rockchip/armv8/` contains only the erofs sysupgrade image, with no squashfs or ext4 images.
+- [x] 5.2 Write the boot script patch that appends `fstools_overlay_compression_type=zstd` to bootargs. Verification: the generated `boot.scr` contains this argument; the mount options of `/overlay` are covered by the system tests in 10.1.
 
-## 6. 基础系统
+## 6. Base system
 
-- [x] 6.1 在自有 feed 里新增 `zsh-plugins` 包，把 autosuggestions 和 syntax-highlighting 固定到指定标签并校验哈希，同时提供全局 zshrc 来加载它们。验证：解开生成的 apk，两个插件和 zshrc 都在预期路径。
-- [x] 6.2 新增 `files/etc/profile.d/99-zsh.sh`，只在交互式登录且 zsh 可执行时 `exec zsh -l`。验证：三种 shell 场景由 10.3 的系统测试覆盖。
-- [ ] 6.3 新增一个 uci-defaults 脚本，只在 zram 的两个选项未设置时，写入 `zram_size_mb=1024` 和 `zram_comp_algo=zstd`。验证：由 10.3 的系统测试覆盖——全新安装后有 1 GiB、zstd 的 zram；把值改成 512 后做一次保留配置升级，值仍然是 512。
-- [x] 6.4 实现镜像审计（对应 `just audit-image`），检查以下几项：不含 urngd、nginx、uwsgi、opkg、libpcre（PCRE1）、LRNG、shortcut-fe、natflow；没有带 UPX 标记的可执行文件；`/etc/shadow` 里 root 没有密码哈希；已装 luci 的 zh-cn 语言包。验证：对 5.1 产出的镜像运行，审计通过。
-- [x] 6.5 镜像加入 bash（默认交互 shell 仍是 zsh），切换脚本只在 ash 登录时生效。验证：`just config dev` 的逐行校验通过；镜像审计显示 bash 已安装；`bash -l` 的场景由 10.3 的系统测试覆盖。
+- [x] 6.1 Add a `zsh-plugins` package to our own feed that pins autosuggestions and syntax-highlighting to specific tags with hash verification, and provides a global zshrc that loads them. Verification: unpacking the generated apk shows both plugins and the zshrc at the expected paths.
+- [x] 6.2 Add `files/etc/profile.d/99-zsh.sh`, which runs `exec zsh -l` only for an interactive login when zsh is executable. Verification: the three shell scenarios are covered by the system tests in 10.3.
+- [ ] 6.3 Add a uci-defaults script that writes `zram_size_mb=1024` and `zram_comp_algo=zstd` only when the two zram options are unset. Verification: covered by the system tests in 10.3: after a fresh install there is a 1 GiB zstd zram; after changing the value to 512 and doing a config-preserving upgrade, the value is still 512.
+- [x] 6.4 Implement the image audit (for `just audit-image`), checking the following: no urngd, nginx, uwsgi, opkg, libpcre (PCRE1), LRNG, shortcut-fe, natflow; no executable with a UPX marker; root has no password hash in `/etc/shadow`; the luci zh-cn language pack is installed. Verification: run against the image produced in 5.1, the audit passes.
+- [x] 6.5 Add bash to the image (the default interactive shell is still zsh); the switch script takes effect only for ash logins. Verification: the line-by-line verification of `just config dev` passes; the image audit shows bash installed; the `bash -l` scenario is covered by the system tests in 10.3.
 
-## 7. 代码规范
+## 7. Code standards
 
-- [x] 7.1 新增 `.editorconfig` 和 `.shellcheckrc`（启用 design D12 列出的可选检查），并修正现有代码中的全部告警。验证：`editorconfig-checker` 和 `shellcheck` 都通过。
-- [x] 7.2 把现有脚本按统一骨架重排并用 shfmt 格式化；把 `audit-image` 改名为 `image-audit`；新增 `workdir-unmount`，与 `workdir-mount` 成对；justfile 用 `[group(...)]` 分组，命令名与脚本名一致。验证：骨架检查通过；删掉任意一个脚本的 `set -eu` 后，骨架检查失败并指出这个脚本。
-- [x] 7.3 实现 `scripts/check.sh` 和 `scripts/fmt.sh`（对应 `just check` 和 `just fmt`），覆盖 shfmt、shellcheck、nixfmt、ruff format/check、ty、actionlint、editorconfig-checker、gitleaks、禁止模式检查和骨架检查，原来的 `just lint` 并入 `just check`。验证：在 macOS 和虚拟机上，先 `just fmt` 再 `just check` 都通过；`tests/quality/test_code_standards.py` 在仓库的临时副本里为每一种检查各制造一个违规，确认检查失败并指出位置。
-- [x] 7.4 编写 `docs/conventions.md`，写明全部规则、脚本骨架和命名规则。验证：文档里的每一条规则都能在 `check.sh` 中找到对应的检查，反之亦然。
+- [x] 7.1 Add `.editorconfig` and `.shellcheckrc` (enabling the optional checks listed in design D12), and fix all warnings in the existing code. Verification: `editorconfig-checker` and `shellcheck` both pass.
+- [x] 7.2 Reorder the existing scripts to the common skeleton and format them with shfmt; rename `audit-image` to `image-audit`; add `workdir-unmount`, paired with `workdir-mount`; group the justfile with `[group(...)]`, with recipe names matching script names. Verification: the skeleton check passes; after removing `set -eu` from any script, the skeleton check fails and names that script.
+- [x] 7.3 Implement `scripts/check.sh` and `scripts/fmt.sh` (for `just check` and `just fmt`), covering shfmt, shellcheck, nixfmt, ruff format/check, ty, actionlint, editorconfig-checker, gitleaks, the forbidden-pattern checks, and the skeleton check; the former `just lint` is merged into `just check`. Verification: on both macOS and the VM, `just fmt` followed by `just check` passes; `tests/quality/test_code_standards.py` creates one violation for each kind of check in a temporary copy of the repository and confirms that the check fails and points to the location.
+- [x] 7.4 Write `docs/conventions.md`, documenting all rules, the script skeleton, and the naming rules. Verification: every rule in the document has a corresponding check in `check.sh`, and vice versa.
 
-## 8. 测试框架
+## 8. Test framework
 
-- [x] 8.1 建立 `tests/` 这个 uv 项目：`pyproject.toml`、`uv.lock`、`.python-version`（3.14）；依赖 pytest 和 labgrid；开发依赖 ruff 和 ty；各工具的配置分别放在 `pytest.toml`、`ruff.toml`、`ty.toml`，规则按 design D12。验证：`uv sync --locked` 成功；`ruff check`、`ruff format --check` 和 `ty check` 都通过；修改依赖但不更新锁文件时，`uv sync --locked` 失败。
-- [x] 8.2 实现 `@spec` 和 `@target` 两种标记、`spec-coverage` 覆盖报告工具，以及 `verified-elsewhere.toml`；`spec-coverage` 同时检查目录规则（design D13）。验证：覆盖报告列出 foundation 的全部场景及其对应用例；标注一个不存在的场景时，检查失败并指出这个用例；`@spec` 标注的能力与所在模块不一致时，检查失败；在模拟器上运行时，仅真机的用例被跳过，并显示原因。
-- [x] 8.3 编写 labgrid 目标描述文件 `targets/emulation.yaml` 和 `targets/r4s.yaml`，以及 `just test` 和 `just test-device <host>`。验证：两个命令以 collect-only 方式收集到的用例 ID 集合相同。
-- [x] 8.4 编写 `tests/testing/test_harness.py`，在宿主上覆盖 testing/harness 规格中可自动化的场景：覆盖报告、指向不存在场景的标记、两种目标收集到相同的用例、跳过原因、锁文件与声明不一致、类型错误。“用例失败”场景由 11.6 验证，“在真机上运行”场景由 12.2 验证，两者登记在 `verified-elsewhere.toml`。验证：用例全部通过。
+- [x] 8.1 Set up `tests/` as a uv project: `pyproject.toml`, `uv.lock`, `.python-version` (3.14); dependencies pytest and labgrid; dev dependencies ruff and ty; each tool's configuration in its own file, `pytest.toml`, `ruff.toml`, `ty.toml`, with rules per design D12. Verification: `uv sync --locked` succeeds; `ruff check`, `ruff format --check`, and `ty check` all pass; after changing a dependency without updating the lock file, `uv sync --locked` fails.
+- [x] 8.2 Implement the `@spec` and `@target` markers, the `spec-coverage` coverage report tool, and `verified-elsewhere.toml`; `spec-coverage` also checks the directory rules (design D13). Verification: the coverage report lists every foundation scenario and its test; marking a nonexistent scenario makes the check fail and names that test; when the capability in `@spec` does not match its module, the check fails; when running on the emulator, device-only tests are skipped with the reason shown.
+- [x] 8.3 Write the labgrid target description files `targets/emulation.yaml` and `targets/r4s.yaml`, plus `just test` and `just test-device <host>`. Verification: the sets of test IDs the two commands collect in collect-only mode are identical.
+- [x] 8.4 Write `tests/testing/test_harness.py`, covering on the host the automatable scenarios of the testing/harness spec: the coverage report, a marker naming a missing scenario, both targets collecting the same tests, skip reasons, the lock file out of sync with its declarations, and type errors. The "Test failure" scenario is verified by 11.6 and the "Run on the device" scenario by 12.2; both are registered in `verified-elsewhere.toml`. Verification: all tests pass.
 
-## 9. 模拟环境
+## 9. Emulation environment
 
-- [x] 9.1 实现出货产物的提取：解压镜像（容忍 fwtool 尾部数据）、从 FIT 中取出并解压 `Image`、从 `boot.scr` 生成启动参数（替换串口、用 MBR 签名算出 PARTUUID）；记录 sha256 并与 `manifest.json` 比对。验证：对本机构建的镜像运行提取，sha256 与构建清单一致；启动参数里有 `fstools_overlay_compression_type=zstd` 和正确的 `root=PARTUUID`。
-- [x] 9.2 生成 R4S 身份的设备树：用与启动时相同的参数导出 `virt` 的设备树，再用 `fdtput` 改写 `compatible` 和 `model`。验证：在模拟器中 `ubus call system board` 显示 `friendlyarm,nanopi-r4s`。
-- [x] 9.3 实现无 root 权限的网络沙箱：用户命名空间，`br-lan` 和 `br-wan` 两个网桥，`client-a` 和 `isp` 两个网络命名空间；拓扑以数据形式声明在 `wrt_tests/net.py` 里，后续 change 只增加条目。验证：以普通用户身份运行，`client-a` 通过 DHCP 拿到 10.0.0.0/24 的地址并能访问 10.0.0.1。OrbStack 虚拟机里已确认普通用户可以在用户命名空间中创建 veth、网桥和 tap；CI 依靠 `prepare-runner.sh` 里的 AppArmor 设置，所以不需要 sudo 的退路。
-- [x] 9.4 实现故障注入：每个用例用 qcow2 覆盖层还原磁盘、强制断电并从同一块磁盘重启、提供 i6300esb 看门狗、在启动过程中向串口输入按键。验证：`tests/testing/test_emulation.py` 覆盖 testing/emulation 规格的全部场景，并且都通过。
+- [x] 9.1 Implement extraction of the shipped artifacts: decompress the image (tolerating the fwtool trailer), extract `Image` from the FIT and decompress it, generate the boot arguments from `boot.scr` (replacing the serial console and computing PARTUUID from the MBR signature); record the sha256 values and compare them with `manifest.json`. Verification: running the extraction on a locally built image, the sha256 values match the build manifest; the boot arguments contain `fstools_overlay_compression_type=zstd` and the correct `root=PARTUUID`.
+- [x] 9.2 Generate the R4S-identity device tree: dump the `virt` device tree with the same arguments used at boot, then rewrite `compatible` and `model` with `fdtput`. Verification: in the emulator, `ubus call system board` shows `friendlyarm,nanopi-r4s`.
+- [x] 9.3 Implement the rootless network sandbox: a user namespace, two bridges `br-lan` and `br-wan`, and two network namespaces `client-a` and `isp`; the topology is declared as data in `wrt_tests/net.py`, and later changes only add entries. Verification: running as a regular user, `client-a` gets an address in 10.0.0.0/24 through DHCP and can reach 10.0.0.1. In the OrbStack VM it is confirmed that a regular user can create veth, bridge, and tap devices in a user namespace; CI relies on the AppArmor setting in `prepare-runner.sh`, so no sudo fallback is needed.
+- [x] 9.4 Implement fault injection: restore the disk with a qcow2 overlay for each test, force a power cut and reboot from the same disk, provide the i6300esb watchdog, and send keystrokes to the serial console during boot. Verification: `tests/testing/test_emulation.py` covers every scenario of the testing/emulation spec, and all pass.
 
-## 10. 系统测试用例（每个规格能力一个模块）
+## 10. System tests (one module per spec capability)
 
-- [ ] 10.1 `tests/firmware/test_rootfs.py`：`/rom` 是 erofs；`/overlay` 是 f2fs 并带 zstd；恢复出厂只清空 overlay，EROFS 不变；镜像能直接启动。验证：在模拟器中全部通过。
-- [ ] 10.2 `tests/firmware/test_kernel.py`：内核版本、BTF、只有 cgroup2、tcx 程序能加载、文件系统不需要模块、BBRv3 的回调和 sysctl 以及 `ss -ti`、virt 驱动。另外做 kmod 兼容性测试：从同一次构建的仓库安装一个 kmod 能成功加载；用 apk 生成一个依赖不同内核版本标识的测试包，安装会被拒绝。验证：在模拟器中全部通过。
-- [ ] 10.3 `tests/firmware/test_base_system.py`：LAN 地址（全新安装、保留配置升级、故障安全模式）；LuCI 由 uhttpd 提供，中文浏览器看到简体中文界面；镜像里没有 nginx 和 uwsgi；四种 shell 场景；zram（覆盖 6.3 的两种情况）；没有预置密码；不包含的组件。验证：在模拟器中全部通过。
-- [ ] 10.4 把 `docs/validation/foundation.md` 里原来的人工核对清单改为指向自动化用例，只保留“仅真机”的项目。验证：`spec-coverage` 报告中 foundation 没有未覆盖的场景；build 域和 firmware/toolchain 的场景都登记在 `verified-elsewhere.toml`，指向 CI 里验证它们的 job。
+- [ ] 10.1 `tests/firmware/test_rootfs.py`: `/rom` is erofs; `/overlay` is f2fs with zstd; factory reset clears only the overlay and leaves EROFS unchanged; the image boots directly. Verification: all pass in the emulator.
+- [ ] 10.2 `tests/firmware/test_kernel.py`: kernel version, BTF, cgroup2 only, tcx programs load, filesystems need no modules, BBRv3 callbacks and sysctl plus `ss -ti`, virt drivers. Also kmod compatibility tests: a kmod installed from the repository of the same build loads successfully; a test package generated with apk that depends on a different kernel version identifier is rejected at install time. Verification: all pass in the emulator.
+- [ ] 10.3 `tests/firmware/test_base_system.py`: LAN address (fresh install, config-preserving upgrade, failsafe mode); LuCI served by uhttpd, with a Chinese-language browser seeing the Simplified Chinese interface; no nginx or uwsgi in the image; the four shell scenarios; zram (covering both cases of 6.3); no preset password; excluded components. Verification: all pass in the emulator.
+- [ ] 10.4 Change the former manual checklist in `docs/validation/foundation.md` to point to the automated tests, keeping only the device-only items. Verification: the `spec-coverage` report shows no uncovered foundation scenarios; the scenarios of the build domain and firmware/toolchain are all registered in `verified-elsewhere.toml`, pointing to the CI jobs that verify them.
 
 ## 11. CI
 
-- [ ] 11.1 编写 `host-toolchain` job：安装 Nix，准备 runner，按 design D11 计算缓存键；缓存未命中时构建 tools 和工具链，只打包实际存在的路径并保存。验证：冷缓存运行在 6 小时内完成，并把各阶段耗时记录到 `docs/ci.md`；第二次运行缓存命中，几分钟内结束。
-- [x] 11.2 编写 `firmware` job：恢复工具链时刷新文件时间戳，恢复 ccache 和 dl 缓存；用 `ci` profile 构建；生成 `manifest.json`；上传未签名的产物。验证：job 在 6 小时内完成；清单里的 vermagic 和镜像里 `kmod-*` 依赖的内核版本标识一致。
-- [ ] 11.3 核对环境和权限。验证：CI 里 `just env-report` 的输出和本机的完全一致；工作流里没有引用任何密钥；在一个没有配置任何密钥的 fork 里运行成功。
-- [x] 11.4 检查缓存用量。验证：工具链缓存和 ccache 的总大小记录进 `docs/ci.md`；如果超过 10 GB，按 design D11 把工具链改存为 Release 附件，并确认下一次运行能正确恢复。
-- [ ] 11.5 把规范检查拆成独立的 `check.yml`，在每次推送时运行 `just check`，不做路径过滤。验证：只改文档的推送只触发 `check.yml`，不触发 `build.yml`；故意引入一处格式问题后推送，`check` 失败。
-- [ ] 11.6 在 `build.yml` 里增加 `system-test` job：依赖 `firmware` 的产物，运行 `just test` 并发布 JUnit 报告。验证：job 在 30 分钟内完成；人为让一个用例失败后，job 失败，并且报告里有这个用例。
+- [ ] 11.1 Write the `host-toolchain` job: install Nix, prepare the runner, and compute the cache key per design D11; on a cache miss, build the tools and toolchain, pack only the paths that actually exist, and save them. Verification: a cold-cache run finishes within 6 hours, with the duration of each stage recorded in `docs/ci.md`; a second run hits the cache and finishes within minutes.
+- [x] 11.2 Write the `firmware` job: refresh file timestamps when restoring the toolchain, and restore the ccache and dl caches; build with the `ci` profile; generate `manifest.json`; upload unsigned artifacts. Verification: the job finishes within 6 hours; the vermagic in the manifest matches the kernel version identifier that the `kmod-*` dependencies in the image refer to.
+- [ ] 11.3 Check the environment and permissions. Verification: the output of `just env-report` in CI is identical to the local one; the workflows reference no secrets; a run in a fork with no secrets configured succeeds.
+- [x] 11.4 Check cache usage. Verification: the total size of the toolchain cache and ccache is recorded in `docs/ci.md`; if it exceeds 10 GB, store the toolchain as a Release asset instead per design D11, and confirm that the next run restores it correctly.
+- [ ] 11.5 Split the code-standard checks into a separate `check.yml` that runs `just check` on every push, with no path filter. Verification: a docs-only push triggers only `check.yml`, not `build.yml`; pushing a deliberate formatting problem makes `check` fail.
+- [ ] 11.6 Add a `system-test` job to `build.yml`: it depends on the `firmware` artifacts, runs `just test`, and publishes the JUnit report. Verification: the job finishes within 30 minutes; after deliberately making a test fail, the job fails and the report includes that test.
 
-## 12. 真机冒烟与上游贡献
+## 12. Device smoke test and upstream contributions
 
-- [ ] 12.1 把只能在真机上验证的项目写成 `@target("device")` 用例：U-Boot 从 SD 卡启动、两个物理网口的驱动和中断亲和性、吞吐与温度基线（不作为门槛）。验证：在模拟器上运行时，这些用例被跳过并显示原因。
-- [ ] 12.2 把模拟测试通过的镜像刷进 SD 卡，在 R4S 上运行 `just test-device <host>`。验证：报告全部通过（包括仅真机的用例），结果存档到 `docs/validation/foundation-device.md`。这是本 change 里唯一需要真机的步骤。
-- [x] 12.3 在 `docs/upstream/` 准备好两个上游补丁：一个是 EROFS 压缩算法选择项，另一个是 F2FS 压缩的 `KERNEL_*` 选项。它们只在本地准备，提交前必须得到维护者的明确同意。验证：两个补丁都能用 `git am` 干净地打到 lock 所固定的上游提交上；`docs/upstream-contributions.md` 记录了两者的状态。
+- [ ] 12.1 Write the items that can only be verified on the device as `@target("device")` tests: U-Boot booting from the SD card, the drivers and interrupt affinity of the two physical ports, and throughput and temperature baselines (not gating). Verification: when run on the emulator, these tests are skipped with the reason shown.
+- [ ] 12.2 Flash the image that passed the emulation tests to an SD card and run `just test-device <host>` on the R4S. Verification: the report shows everything passing (including the device-only tests), and the results are archived in `docs/validation/foundation-device.md`. This is the only step in this change that needs the device.
+- [x] 12.3 Prepare two upstream patches in `docs/upstream/`: one for the EROFS compression algorithm choice, and one for the F2FS compression `KERNEL_*` options. They are prepared locally only, and submitting them requires the maintainer's explicit consent. Verification: both patches apply cleanly with `git am` to the upstream commit pinned by the lock; `docs/upstream-contributions.md` records the status of both.

@@ -1,26 +1,26 @@
-# 上游贡献
+# Upstream contributions
 
-向任何不属于本人的仓库提交 PR、issue 或推送，都必须先得到明确同意。这里的补丁只在本地准备好，是否提交、什么时候提交由维护者决定。
+Any PR, issue or push to a repository the maintainer does not own requires explicit consent first. The patches here are only prepared locally; whether and when to submit them is up to the maintainer.
 
-| # | 仓库 | 补丁 | 状态 | 链接 |
+| # | Repository | Patch | Status | Link |
 |---|---|---|---|---|
-| 1 | openwrt/openwrt | `docs/upstream/0001-build-make-the-EROFS-compression-selectable.patch` | 已准备，尚未提交（等待确认） | — |
-| 2 | openwrt/openwrt | `docs/upstream/0002-config-kernel-add-F2FS-compression-options.patch` | 已准备，尚未提交（等待确认） | — |
+| 1 | openwrt/openwrt | `docs/upstream/0001-build-make-the-EROFS-compression-selectable.patch` | Prepared, not submitted (awaiting approval) | — |
+| 2 | openwrt/openwrt | `docs/upstream/0002-config-kernel-add-F2FS-compression-options.patch` | Prepared, not submitted (awaiting approval) | — |
 
-## 1. EROFS 压缩算法
+## 1. EROFS compression algorithm
 
-问题：`include/image.mk:110` 判断的是 `CONFIG_EROFS_FS_ZIP_LZMA`，但这个符号不存在，Kconfig 里的选项名是 `KERNEL_EROFS_FS_ZIP_LZMA`。所以 LZMA 分支永远不会被执行，所有 EROFS 镜像实际都用 lz4hc 压缩。
+Problem: `include/image.mk:110` tests `CONFIG_EROFS_FS_ZIP_LZMA`, but that symbol does not exist; the Kconfig option is named `KERNEL_EROFS_FS_ZIP_LZMA`. So the LZMA branch never runs, and every EROFS image is in fact compressed with lz4hc.
 
-为什么不能只改名：`KERNEL_EROFS_FS_ZIP_LZMA` 没有提示项，并且在开启 EROFS 时默认为 y。只改名的话，所有 EROFS 构建都会**静默改用 LZMA**，本项目的镜像也会跟着变，而我们选定的是 lz4hc。
+Why a rename alone is not enough: `KERNEL_EROFS_FS_ZIP_LZMA` has no prompt and defaults to y when EROFS is enabled. With only the rename, every EROFS build would **silently switch to LZMA**, and this project's images would change with it, whereas we chose lz4hc.
 
-补丁的做法：新增一个 `compression` 选择项，默认 lz4hc，与当前实际行为一致；选 LZMA 时同时选中内核的 LZMA 支持。`image.mk` 改为按这个选择项判断。
+What the patch does: it adds a `compression` choice that defaults to lz4hc, matching the current actual behavior; choosing LZMA also selects the kernel's LZMA support. `image.mk` now tests this choice instead.
 
-## 2. F2FS 压缩的内核选项
+## 2. Kernel options for F2FS compression
 
-问题：fstools 支持用 `fstools_overlay_compression_type=` 把 overlay 格式化成带压缩的 f2fs，但 `config/Config-kernel.in` 里没有对应的 `KERNEL_F2FS_*` 选项，构建配置选不出来。
+Problem: fstools can format the overlay as compressed f2fs via `fstools_overlay_compression_type=`, but `config/Config-kernel.in` has no matching `KERNEL_F2FS_*` options, so the build configuration cannot select them.
 
-补丁的做法：新增 `KERNEL_F2FS_FS_COMPRESSION` 以及它下面的每一个算法选项（LZO、LZO-RLE、LZ4、LZ4HC、ZSTD）。内核把这些选项都默认为 y，有任何一个没有取值，构建就会停下，所以每个都要有对应的 `KERNEL_*`。
+What the patch does: it adds `KERNEL_F2FS_FS_COMPRESSION` and each algorithm option beneath it (LZO, LZO-RLE, LZ4, LZ4HC, ZSTD). The kernel defaults all of these options to y, and if any of them has no value the build stops, so each one needs a matching `KERNEL_*`.
 
-本项目的用法：不依赖这个补丁，而是用上游原生的内核配置叠加文件（`config/kernel.config` → `env/kernel-config`）提供同样的选项。补丁被上游接受之后，可以改回用 seed 里的 `CONFIG_KERNEL_F2FS_*`。
+How this project handles it: it does not depend on this patch; instead, the upstream-native kernel config overlay (`config/kernel.config` → `env/kernel-config`) provides the same options. Once upstream accepts the patch, we can switch back to `CONFIG_KERNEL_F2FS_*` in the seed.
 
-核对记录：2026-09-28，两个补丁都能用 `git am` 干净地打到 lock 固定的 openwrt `1019293` 上。
+Verification log: 2026-09-28, both patches apply cleanly with `git am` onto openwrt `1019293`, as pinned by the lock.

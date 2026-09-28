@@ -2,38 +2,38 @@
 
 ## Purpose
 
-规定 WireGuard 和 Tailscale 两种组网方式各自的角色、在防火墙中的归属，以及和透明代理的关系。
+Defines the roles of the two networking options, WireGuard and Tailscale, their placement in the firewall, and their relation to the transparent proxy.
 
 ## ADDED Requirements
 
-### Requirement: WireGuard 远程接入
-固件 SHALL 提供内核 WireGuard，用于远程设备回家访问 LAN。WireGuard 的私钥和对端配置 MUST NOT 预置在镜像里。
+### Requirement: WireGuard remote access
+The firmware SHALL provide in-kernel WireGuard so that remote devices can connect home and access the LAN. The WireGuard private key and peer configuration MUST NOT be preset in the image.
 
-#### Scenario: 远程设备接入
-- **WHEN** 一台已配置好的远程设备通过 WireGuard 连接路由器
-- **THEN** 它可以访问 LAN 上的主机，但访问不到路由器上只对 LAN 开放的服务（例如 SMB）
+#### Scenario: Remote device connects
+- **WHEN** a configured remote device connects to the router over WireGuard
+- **THEN** it can reach hosts on the LAN, but cannot reach router services that are open only to the LAN (such as SMB)
 
-### Requirement: Tailscale 组网
-固件 SHALL 提供 Tailscale，并能把 LAN 网段宣告为子网路由。Tailscale 的防火墙规则 SHALL 使用 nftables。认证凭据 MUST NOT 预置在镜像里。
+### Requirement: Tailscale networking
+The firmware SHALL provide Tailscale and SHALL be able to advertise the LAN subnet as a subnet route. Tailscale's firewall rules SHALL use nftables. Authentication credentials MUST NOT be preset in the image.
 
-#### Scenario: 通过子网路由访问 LAN
-- **WHEN** tailnet 里的另一台设备访问 LAN 上的一台主机
-- **THEN** 经由这台路由器的子网路由访问成功
+#### Scenario: Reach the LAN via subnet route
+- **WHEN** another device in the tailnet accesses a host on the LAN
+- **THEN** the access succeeds through this router's subnet route
 
-### Requirement: 与透明代理的关系
-经 Tailscale 进入的流量 SHALL 与 LAN 流量一样由 dae 按规则分流。经 WireGuard 进入的流量 SHALL 直连，不经过代理。
+### Requirement: Relation to the transparent proxy
+Traffic entering through Tailscale SHALL be split by dae according to the rules, the same as LAN traffic. Traffic entering through WireGuard SHALL go direct, bypassing the proxy.
 
-#### Scenario: tailnet 设备访问代理目标
-- **WHEN** 一台 tailnet 设备把这台路由器当作出口，访问一个被规则判为走代理的目标
-- **THEN** 流量经由代理节点发出
+#### Scenario: Tailnet device reaches a proxied target
+- **WHEN** a tailnet device uses this router as its exit node and accesses a target that the rules send through the proxy
+- **THEN** the traffic leaves through the proxy node
 
-#### Scenario: WireGuard 设备访问外网
-- **WHEN** 一台 WireGuard 设备通过路由器访问外网
-- **THEN** 外部看到的源地址是路由器的 WAN 地址
+#### Scenario: WireGuard device reaches the internet
+- **WHEN** a WireGuard device accesses the internet through the router
+- **THEN** the source address seen externally is the router's WAN address
 
-### Requirement: mark 位登记
-Tailscale 使用的报文 mark 位 SHALL 登记进 mark 分配表，并且 MUST NOT 与其他组件重叠。
+### Requirement: Mark bit registration
+The packet mark bits that Tailscale uses SHALL be registered in the mark allocation table and MUST NOT overlap with those of other components.
 
-#### Scenario: 检查分配表
-- **WHEN** 运行 mark 检查
-- **THEN** 分配表里有 Tailscale 的条目，并且检查通过
+#### Scenario: Check the allocation table
+- **WHEN** the mark check runs
+- **THEN** the allocation table contains a Tailscale entry, and the check passes

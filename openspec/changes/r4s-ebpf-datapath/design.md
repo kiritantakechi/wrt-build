@@ -2,72 +2,72 @@
 
 ## Context
 
-动机见 proposal.md。
+See proposal.md for the motivation.
 
-**核对依据**：
-- 内核：Linux v6.18（6.18.52 与其一致）。
-- OpenWrt：main `1019293`。
-- dae：v2.1.1（`dbae2e8`）。
-- einat-ebpf：0.1.11（`ba647ce`）。
-- qosify：`beeb87ec`。
-- 下面引用都在这些版本的源码里核对过，路径相对于各自的仓库。
+**Sources checked**:
+- Kernel: Linux v6.18 (6.18.52 matches it).
+- OpenWrt: main `1019293`.
+- dae: v2.1.1 (`dbae2e8`).
+- einat-ebpf: 0.1.11 (`ba647ce`).
+- qosify: `beeb87ec`.
+- Every reference below was checked against the source at these versions; paths are relative to each repository.
 
-**内核里 tc 相关钩子的执行顺序**：
-- **收包路径**：先执行 tc 入口（`net/core/dev.c:5930`），再执行 netfilter 入口（`:5938`）。flowtable 就挂在 netfilter 入口上。
-- **发包路径**：顺序是 netfilter 出口（`:4697`）→ tc 出口（`:4705`）→ 队列规则（`:4729`）。
-- **tcx 与传统 clsact 过滤器的关系**：
-  - tcx 程序总是先于传统过滤器执行（`dev.c:4368-4413`）。
-  - 只有返回 `TC_ACT_UNSPEC`（也就是 `TCX_NEXT`）才会继续执行下一个程序。`TC_ACT_OK`、`SHOT`、`REDIRECT` 都会终止整条链，传统过滤器也不再执行（`include/net/tcx.h:145-159`）。
+**Order of tc-related hooks in the kernel**:
+- **Receive path**: tc ingress (`net/core/dev.c:5930`) runs first, then netfilter ingress (`:5938`). The flowtable hooks into netfilter ingress.
+- **Transmit path**: the order is netfilter egress (`:4697`) → tc egress (`:4705`) → queueing discipline (`:4729`).
+- **tcx versus legacy clsact filters**:
+  - tcx programs always run before legacy filters (`dev.c:4368-4413`).
+  - Only a return of `TC_ACT_UNSPEC` (that is, `TCX_NEXT`) continues to the next program. `TC_ACT_OK`, `SHOT`, and `REDIRECT` all terminate the whole chain, and legacy filters do not run either (`include/net/tcx.h:145-159`).
 
-**dae**：
-- 用 tcx 把自己挂到链头（`control/tc_hook_set.go:583-607,690-705`）。
-- WAN 入站遇到 ICMP、分片或非 TCP/UDP 时返回 `TC_ACT_OK`（`control/kern/tproxy.c`，`do_tproxy_wan_ingress`）。
-- 只有配置了 `wan_interface` 时，才会挂 WAN 钩子和 cgroup 钩子（`control/control_plane_datapath.go:149-151`）。
-- 配置支持 `include` 合并多个文件（`config/config_merger.go:132-150`）。
-- 它监听网卡变化只是为了跟踪自己的 `dae0`（`control_plane_core.go:589-640`），不会自动绑定后来出现的 LAN 接口。
-- v2.1.1 把 outbound 这个依赖替换成了个人 fork `olicesx/outbound`（`go.mod:136`）。
-- daed 和 dae-wing 在 GitHub 上都已归档。
+**dae**:
+- Uses tcx to attach itself at the head of the chain (`control/tc_hook_set.go:583-607,690-705`).
+- Returns `TC_ACT_OK` on WAN ingress for ICMP, fragments, or non-TCP/UDP (`control/kern/tproxy.c`, `do_tproxy_wan_ingress`).
+- Attaches WAN hooks and cgroup hooks only when `wan_interface` is configured (`control/control_plane_datapath.go:149-151`).
+- The config supports `include` to merge multiple files (`config/config_merger.go:132-150`).
+- It watches link changes only to track its own `dae0` (`control_plane_core.go:589-640`); it does not automatically bind LAN interfaces that appear later.
+- v2.1.1 replaces the outbound dependency with the personal fork `olicesx/outbound` (`go.mod:136`).
+- daed and dae-wing are both archived on GitHub.
 
-**einat**：
-- 在 6.6 以上的内核上用 tcx，并以 `LinkOrder::first()` 挂到链头（`src/skel/einat/aya.rs:202-203`）。
-- 地址转换完成后返回 `TC_ACT_UNSPEC`（`src/bpf/einat.bpf.c:1880`）。
-- 入站还原地址在 `ingress_rev_snat`（`:1786`）里完成。
-- 不给报文打 mark（`:1322` 只是读 mark 去做路由查询）。
-- 默认端口范围是 20000-29999。
+**einat**:
+- On kernels 6.6 and later it uses tcx and attaches at the head of the chain with `LinkOrder::first()` (`src/skel/einat/aya.rs:202-203`).
+- Returns `TC_ACT_UNSPEC` after address translation (`src/bpf/einat.bpf.c:1880`).
+- Inbound reverse translation happens in `ingress_rev_snat` (`:1786`).
+- Does not mark packets (`:1322` only reads the mark for a route lookup).
+- The default port range is 20000-29999.
 
-**qosify**：
-- 用传统 clsact 挂 `cls_bpf`，优先级 `0x110`（`interface.c:222-262`）。
-- 永远返回 `TC_ACT_UNSPEC`（`qosify-bpf.c:502-554`）。
-- 不需要 BTF。
-- `ingress 0` 时不建用于整形的 `ifb-<iface>`，但入方向照样挂 BPF 分类器（`0x110`），外加 4 条 u32 过滤器（`0x111`–`0x114`），把源端口为 53 的回应转给 `ifb-dns`，用来按 DNS 名称分类（`interface.c:299-330`）。
-- `ifb-dns` 在 qosify 启动时无条件创建（`dns.c:414-418`）。
-- `ubus call qosify get_stats` 按方向和 DSCP 类别给出计数，用例靠它判断“被分类过”。
+**qosify**:
+- Attaches `cls_bpf` through legacy clsact at priority `0x110` (`interface.c:222-262`).
+- Always returns `TC_ACT_UNSPEC` (`qosify-bpf.c:502-554`).
+- Does not need BTF.
+- With `ingress 0` it does not create the shaping `ifb-<iface>`, but it still attaches the BPF classifier on ingress (`0x110`), plus 4 u32 filters (`0x111`–`0x114`) that redirect replies with source port 53 to `ifb-dns` for classification by DNS name (`interface.c:299-330`).
+- `ifb-dns` is created unconditionally when qosify starts (`dns.c:414-418`).
+- `ubus call qosify get_stats` reports counters per direction and DSCP class; tests rely on it to tell whether traffic "was classified".
 
-**cake**：nat 模式会读报文上挂着的 conntrack 记录，取原始方向的地址（`net/sched/sch_cake.c:574-612`）。einat 不改 conntrack，所以取到的是内网地址。
+**cake**: nat mode reads the conntrack entry attached to the packet and takes the original-direction addresses (`net/sched/sch_cake.c:574-612`). einat does not modify conntrack, so cake gets the internal addresses.
 
-**flowtable 在 PPPoE 下的发送方式**：纯软件 flowtable 走 `FLOW_OFFLOAD_XMIT_NEIGH`，也就是交给 pppoe-wan 本身去发，因此会经过 pppoe-wan 的 tc 出口（`net/netfilter/nft_flow_offload.c:95-175`；`nf_flow_table_ip.c:455-461`）。只有路径里有网桥，或者开了硬件卸载时，才会直接发。
+**How the flowtable transmits under PPPoE**: the pure software flowtable uses `FLOW_OFFLOAD_XMIT_NEIGH`, which hands the packet to pppoe-wan itself to send, so it passes through pppoe-wan's tc egress (`net/netfilter/nft_flow_offload.c:95-175`; `nf_flow_table_ip.c:455-461`). It transmits directly only when the path contains a bridge or hardware offload is enabled.
 
-**ifb**：从 ifb 转回来的报文带着 `tc_skip_classify` 标记，会跳过 tcx、clsact 和 netfilter 入口。经 `ifb-dns` 转回来的 DNS 回应在此之前已经被 einat 处理过，所以跳过也没有影响。
+**ifb**: packets returned from an ifb carry the `tc_skip_classify` flag and skip tcx, clsact, and netfilter ingress. DNS replies returned through `ifb-dns` have already been processed by einat before that, so the skip has no effect.
 
-**验证环境**：foundation 的模拟环境（出货镜像、R4S 板型身份、无 root 网络沙箱）和测试框架。本 change 在它的 `isp` 一侧补齐运营商和互联网（D11）。
+**Verification environment**: the foundation's emulation environment (shipped image, R4S board identity, rootless network sandbox) and test framework. This change adds the ISP and the internet on its `isp` side (D11).
 
 ## Goals / Non-Goals
 
 **Goals:**
-- WAN 口和 LAN 口上程序的执行顺序，要靠内核语义和结构设计来保证，不能依赖启动先后。
-- 任何一个数据面组件停掉，网络都要回落到可用的直连或 masquerade 状态，不能断网。
-- 尽量少改上游：einat 只加一个可以提交给上游的 mark 补丁，dae 不打补丁。
+- The execution order of programs on the WAN and LAN ports must be guaranteed by kernel semantics and structural design, not by startup order.
+- If any datapath component stops, the network must fall back to a working direct or masquerade state, never lose connectivity.
+- Change upstream as little as possible: einat gets only one upstreamable mark patch, and dae is not patched.
 
 **Non-Goals:**
-- 代理路由器本机的流量。
-- NAT66。
-- 入方向整形。
-- 硬件卸载。
-- 在固件里带 sing-box 或 daed。
+- Proxying router-originated traffic.
+- NAT66.
+- Ingress shaping.
+- Hardware offload.
+- Shipping sing-box or daed in the firmware.
 
 ## Decisions
 
-### D1. 钩子布局：dae 只绑 LAN
+### D1. Hook layout: dae binds LAN only
 
 ```
 LAN: br-lan (+ podman0, tailscale0)        WAN: pppoe-wan
@@ -80,27 +80,27 @@ LAN: br-lan (+ podman0, tailscale0)        WAN: pppoe-wan
                                             root   cake (egress only, no ifb)
 ```
 
-- **执行顺序怎么保证**：WAN 口上 einat 用的是 tcx，qosify 用的是传统过滤器。内核保证 tcx 先执行，所以 einat 总在 qosify 前面，和谁先启动无关。LAN 口上只有 dae 一个程序，不存在顺序问题。
-- **dae 在 LAN 口返回 `TC_ACT_OK` 没有影响**：LAN 口上没有别的程序，终止了也不会截断谁。
-- **备选方案**：
-  - dae 也绑 WAN。否决，因为 dae 和 einat 会互相抢链头，dae 返回 `TC_ACT_OK` 会截断 einat 对 ICMP 和分片的还原；要解决就得给 dae 打补丁，并且保证挂载顺序。
-  - 用传统过滤器的优先级来排序。否决，因为 dae 和 einat 都优先使用 tcx，需要改两边的代码。
+- **How the order is guaranteed**: on the WAN port, einat uses tcx and qosify uses a legacy filter. The kernel guarantees that tcx runs first, so einat always runs before qosify, regardless of which starts first. On the LAN port, dae is the only program, so ordering is not an issue.
+- **dae returning `TC_ACT_OK` on the LAN port is harmless**: there are no other programs on the LAN port, so terminating the chain cuts nothing off.
+- **Alternatives**:
+  - dae also binds WAN. Rejected: dae and einat would compete for the head of the chain, and dae returning `TC_ACT_OK` would cut off einat's reverse translation of ICMP and fragments; fixing that would require patching dae and guaranteeing the attach order.
+  - Order by legacy filter priority. Rejected: dae and einat both prefer tcx, so both codebases would need changes.
 
-### D2. einat 的 mark 补丁
+### D2. einat mark patch
 
-- **补丁内容**：
-  - 在 `ingress_rev_snat` 里，报文被成功还原成内网地址之后，执行 `skb->mark |= inbound_mark`。
-  - `inbound_mark` 通过配置和命令行参数设置（例如 `--inbound-mark`），经 BPF 全局只读变量传进程序；默认值为 0，表示不打标。
-  - 发夹转发（hairpin）的报文不打标。
-- **理由**：netfilter 在 einat 之后执行，只有 einat 自己知道哪个报文是它还原的。打标后，fw4 只需要一条按 mark 匹配的放行规则。
-- **提交上游**：补丁默认不改变行为，适合提交给上游。提交材料放在 `docs/upstream/`；是否提交、何时提交，由仓库所有者决定。
-- **备选方案**：
-  - 沿用全放行规则。否决，有安全漏洞。
-  - 在 einat 前面再挂一个 tcx 程序做防伪造。否决，又会回到“两个程序都要排在最前面”的顺序问题。
+- **Patch contents**:
+  - In `ingress_rev_snat`, after a packet is successfully reverse-translated to an internal address, execute `skb->mark |= inbound_mark`.
+  - `inbound_mark` is set through config and a command-line argument (for example `--inbound-mark`) and passed into the program as a BPF global read-only variable; the default is 0, meaning no marking.
+  - Hairpin packets are not marked.
+- **Rationale**: netfilter runs after einat, and only einat itself knows which packets it reverse-translated. With the mark in place, fw4 needs only one accept rule that matches on the mark.
+- **Upstreaming**: the patch does not change behavior by default, so it is suitable for upstream. Submission materials go in `docs/upstream/`; whether and when to submit is up to the repository owner.
+- **Alternatives**:
+  - Keep the accept-all rule. Rejected: it is a security hole.
+  - Attach another tcx program in front of einat for anti-spoofing. Rejected: it brings back the ordering problem of "two programs that both must run first".
 
-### D3. fw4 规则跟随 einat 的生命周期
+### D3. fw4 rules follow einat's lifecycle
 
-einat 的 init 脚本通过 procd 的防火墙数据注入规则（沿用 muink 包的做法，只把 WAN→LAN 的全放行改为按 mark 放行）：
+einat's init script injects rules through procd firewall data (following the muink package's approach, changing only the WAN→LAN accept-all into accept-by-mark):
 
 ```
 nat  : src wan, family ipv4, proto tcp udp icmp, target ACCEPT   # bypass masquerade
@@ -109,12 +109,12 @@ zone wan: masq 1, mtu_fix 1        (static, from uci-defaults)
 defaults: flow_offloading 1        (static)
 ```
 
-- **效果**：einat 停止时，procd 会撤掉它注入的两条规则。TCP、UDP、ICMP 自动回落到 masquerade，入站的按 mark 放行规则也随之消失，满足 nat 规格里“停止时回落到 masquerade”那一条。
-- **其他协议**：ESP、GRE 等不受 nat ACCEPT 规则影响，始终走 masquerade。
+- **Effect**: when einat stops, procd withdraws the two rules it injected. TCP, UDP, and ICMP automatically fall back to masquerade, and the inbound accept-by-mark rule disappears with them, which satisfies the nat spec requirement "Fall back to masquerade when einat stops".
+- **Other protocols**: ESP, GRE, and the like are not affected by the nat ACCEPT rule and always go through masquerade.
 
-### D4. mark 位分配表
+### D4. Mark bit allocation table
 
-分配表只有一份：`config/marks.tsv`。GitHub 会把 TSV 直接渲染成表格，所以不另外生成文档。初始内容：
+There is a single allocation table: `config/marks.tsv`. GitHub renders TSV directly as a table, so no separate document is generated. Initial contents:
 
 ```
 mask         owner      purpose                                   source
@@ -124,16 +124,16 @@ mask         owner      purpose                                   source
 0x00ff0000   tailscale  0x40000 masq, 0x80000 bypass              to confirm in r4s-services
 ```
 
-`scripts/marks-check.sh` 由 `just check` 调用。它读取分配表，扫描 `files/` 和 `feed/` 里各组件的配置模板中出现的 mark，出现未登记或重叠的位时检查失败。netavark 在 services 的设计里不装防火墙规则，不使用 mark，所以不在表里。
+`scripts/marks-check.sh` is called by `just check`. It reads the allocation table, scans the marks that appear in each component's config templates under `files/` and `feed/`, and fails when a bit is unregistered or overlapping. In the services design netavark installs no firewall rules and uses no marks, so it is not in the table.
 
-### D5. dae 的打包与配置结构
+### D5. dae packaging and config layout
 
-- **打包**：
-  - 以 ImmortalWrt 的 `net/dae` Makefile（2.0.0）为起点，升级到 2.1.1，保留 `trace` 构建标签。
-  - BPF 对象用 foundation 固定的宿主 clang 编译（`BPF_TOOLCHAIN_HOST`）。
-  - Go 模块按 `go.sum` 校验，并缓存在 `dl/`。
-- **为什么不整体 vendor**：`go.sum` 和 `Cargo.lock` 已经固定了每个依赖的哈希，完整性有保障；整体 vendor 还得另外托管源码包，增加负担。这个决定已经同步到 proposal。
-- **配置结构**：
+- **Packaging**:
+  - Start from ImmortalWrt's `net/dae` Makefile (2.0.0), upgrade it to 2.1.1, and keep the `trace` build tag.
+  - Compile the BPF objects with the host clang pinned by the foundation (`BPF_TOOLCHAIN_HOST`).
+  - Verify Go modules against `go.sum` and cache them in `dl/`.
+- **Why not vendor everything**: `go.sum` and `Cargo.lock` already pin the hash of every dependency, so integrity is assured; vendoring everything would also require hosting the source tarballs separately, which adds burden. This decision has been synced to the proposal.
+- **Config layout**:
 
 ```
 /etc/dae/config.dae            (image)  include { generated/*.dae  user/*.dae }
@@ -143,45 +143,45 @@ mask         owner      purpose                                   source
 /etc/dae/user/*.dae            (pushed from private config repo; nodes, groups, routing, dns upstreams)
 ```
 
-  - `generated/` 目录里是 init 脚本生成的片段，用户配置里 MUST NOT 出现 `lan_interface` 或 `wan_interface`。推送工具在推送前会检查这一点。
-- **后出现的接口怎么处理**：一个 hotplug 脚本（对应 `net` 子系统）监听 podman0 和 tailscale0 的出现与消失，据此重新生成 `10-bind.dae`，然后执行 `dae reload`，满足“60 秒内完成绑定”。
-- **CPU 绑定**：init 脚本支持可选的 `taskset` 参数，把 dae 绑到 A72 大核（cpu4-5）。默认值由真机基准用例（D11）的结果决定。
-- **备选方案**：用户配置里自己写 `lan_interface`。否决，因为这样无法处理后来才出现的接口。
+  - The `generated/` directory holds fragments generated by the init script; user config MUST NOT contain `lan_interface` or `wan_interface`. The push tool checks this before pushing.
+- **Interfaces that appear later**: a hotplug script (for the `net` subsystem) watches podman0 and tailscale0 appear and disappear, regenerates `10-bind.dae` accordingly, and then runs `dae reload`, which satisfies "bound within 60 seconds".
+- **CPU pinning**: the init script supports an optional `taskset` parameter that pins dae to the A72 big cores (cpu4-5). The default is decided by the results of the device benchmark test (D11).
+- **Alternatives**: users write `lan_interface` in their own config. Rejected: this cannot handle interfaces that appear later.
 
-### D6. einat 的打包
+### D6. einat packaging
 
-- **做法**：以 muink 的 `openwrt-einat-ebpf`（0.1.11）为起点。
-  - cargo 只启用 aya 加载器，不启用 libbpf 后端（在 aarch64 上它需要 bindgen 和宿主 libclang），也不启用 `ipv6` 特性。
-  - `build.rs` 会直接调用 PATH 里的 `clang -target bpfel`，flake 提供的 clang 已经在 PATH 里。
-  - Rust 依赖按 `Cargo.lock` 校验。
-- **端口范围**：einat 用 20000-29999；本机临时端口保持内核默认的 32768-60999，互不重叠。
+- **Approach**: start from muink's `openwrt-einat-ebpf` (0.1.11).
+  - cargo enables only the aya loader, not the libbpf backend (which needs bindgen and host libclang on aarch64), and not the `ipv6` feature.
+  - `build.rs` calls `clang -target bpfel` from PATH directly; the flake-provided clang is already in PATH.
+  - Verify Rust dependencies against `Cargo.lock`.
+- **Port range**: einat uses 20000-29999; local ephemeral ports stay at the kernel default of 32768-60999, so the two do not overlap.
 
 ### D7. DNS
 
-- **dnsmasq 的设置**：`server=127.0.0.1#5353`，排在 WAN 获得的上游之前，并打开 `strictorder`，这样 dae 可用时总是先走 dae。
-- **dae 不可用时**：发往 5353 的 UDP 查询会收到端口不可达，dnsmasq 就转向下一个上游，满足“回落到上游 DNS”。
-- **不对外暴露**：dae 的 `dns.bind` 只绑在 127.0.0.1。
-- **备选方案**：`noresolv` 加上只用 dae 一个上游。否决，因为 dae 停了 LAN 就无法解析。
+- **dnsmasq settings**: `server=127.0.0.1#5353`, ordered before the upstreams obtained from WAN, with `strictorder` enabled, so dae is always tried first when it is available.
+- **When dae is unavailable**: UDP queries to 5353 get port unreachable, and dnsmasq moves on to the next upstream, which satisfies "fall back to upstream DNS".
+- **Not exposed**: dae's `dns.bind` binds only to 127.0.0.1.
+- **Alternatives**: `noresolv` with dae as the only upstream. Rejected: if dae stops, the LAN cannot resolve names.
 
 ### D8. qosify
 
-- **UCI 设置**：`interface wan` 的设置为 `ingress 0`、`egress 1`、`bandwidth_up <实测上行带宽的 95%>`、`mode diffserv4`、`nat 1`、`host_isolate 1`。
-- **封装开销**：`overhead_type` 按“光纤 + PPPoE over Ethernet”设置。
-- **分类规则**：沿用 qosify 默认的分类规则，另加游戏和视频会议的端口规则。
+- **UCI settings**: `interface wan` is set to `ingress 0`, `egress 1`, `bandwidth_up <95% of measured upload bandwidth>`, `mode diffserv4`, `nat 1`, `host_isolate 1`.
+- **Encapsulation overhead**: `overhead_type` is set for "fiber + PPPoE over Ethernet".
+- **Classification rules**: keep qosify's default classification rules, plus port rules for gaming and video conferencing.
 
-### D9. WAN 和 IPv6
+### D9. WAN and IPv6
 
-- **WAN**：用 uci-defaults 生成不含凭据的 WAN 配置：`proto pppoe`、`device eth0`、`ipv6 auto`。凭据由 `r4s-release-pipeline` 的配置推送工具写入。
-- **LAN**：`ip6assign 64`，odhcpd 同时提供 RA 和 DHCPv6。
-- **uci-defaults 的写法**：只在对应选项尚未设置时写入，这样保留配置升级时不会覆盖。
+- **WAN**: uci-defaults generates a WAN config without credentials: `proto pppoe`, `device eth0`, `ipv6 auto`. Credentials are written by the config push tool from `r4s-release-pipeline`.
+- **LAN**: `ip6assign 64`; odhcpd provides both RA and DHCPv6.
+- **How uci-defaults writes**: it writes an option only when that option is not yet set, so config-preserving upgrades do not overwrite it.
 
-### D10. 健康检查注册
+### D10. Health check registration
 
-- **`/etc/healthcheck.d/50-dae`**：dae 进程在运行，并且 `bpftool net show` 显示 br-lan（以及当前存在的 podman0、tailscale0）上都挂着 dae 的程序。
-- **`/etc/healthcheck.d/50-einat`**：einat 进程在运行；pppoe-wan 存在时，它的 tcx 入口和出口上都有 einat。pppoe-wan 不存在时直接判为通过。
-- **依赖**：镜像里要带上 `bpftool-minimal`。
+- **`/etc/healthcheck.d/50-dae`**: the dae process is running, and `bpftool net show` shows dae programs attached to br-lan (and to podman0 and tailscale0 when they currently exist).
+- **`/etc/healthcheck.d/50-einat`**: the einat process is running; when pppoe-wan exists, einat is on both its tcx ingress and egress. When pppoe-wan does not exist, the check passes.
+- **Dependency**: the image must include `bpftool-minimal`.
 
-### D11. 验证方式：在沙箱里模拟运营商和互联网
+### D11. Verification: emulating the ISP and the internet in the sandbox
 
 ```
 client-a ─┐                                                     ┌─ inet   203.0.113.0/24  2001:db8:ffff::/64
@@ -196,41 +196,41 @@ inet: netprobe (udp/tcp whoami: peer addr+port, TCP_MAXSEG; "big" mode = 3000-by
 proxy: microsocks, outbound bound to its own addresses
 ```
 
-- **地址**：全部用文档保留地址段（RFC 5737、RFC 3849），不会与真实网络冲突。
-- **工具**：rp-pppoe、ppp、kea、radvd、dnsmasq、microsocks、iperf3、iputils 都来自已固定的 nixpkgs，加进 flake 的测试工具组。
-- **`netprobe`**：`wrt_tests/netprobe.py` 是一个 asyncio 小服务，用来回显对端的地址和端口，以及它看到的 MSS。完全锥形、伪造入站、本机端口、源地址、MSS、分片这些判断都靠它完成。ESP 用原始套接字收发协议号 50 的报文，不依赖宿主的 xfrm。
-- **宿主要求**：宿主内核要有 `ppp_generic` 和 `ppp_async`（OrbStack 和 GitHub runner 都有；OrbStack 内核没有 `pppoe.ko`，所以 ISP 端用 rp-pppoe 的用户态模式），`/dev/ppp` 要对普通用户可读写。CI 的 `prepare-runner.sh` 和 `docs/dev-setup.md` 负责这两件事；`env-report` 会检查。路由器一侧的 PPPoE 在 QEMU 虚拟机里运行，与宿主无关。
-- **用例与规格一一对应**：`tests/network/` 下有六个用例模块，与六个规格同名：`test_transparent_proxy`、`test_dns`、`test_nat`、`test_qos`、`test_wan`、`test_tc_hook_order`。每个模块启动一次模拟器，用例之间只重置配置，不重启。
-- **有代表性的做法**：
-  - 伪造入站：ISP 端把 10.0.0.0/24 路由进 PPP 会话，再从 eth0 所在的二层直接注入目的 IP 为内网地址的帧。两条路径都必须被丢弃。
-  - 重拨：从 ISP 端结束会话，路由器重拨后会拿到新地址。
-  - 公平性：qosify 的上行带宽在用例里设成 20 Mbit/s，TCG 能跑满，结论与线速无关。
-  - flowtable：读 `conntrack -L` 的 `[OFFLOAD]` 标记，同时用 `netprobe` 核对源地址。
-  - dae 的 conntrack 告警（issue #848）：检查模拟器里的 dmesg。内核是同一个，结论直接成立。
-- **只能留给真机的**（写成 `@target("device")` 用例）：
-  1. 吞吐基准：直连 NAT 单流和多流；代理流量在绑定 A72 与不绑定两种情况下的对比，结果决定 D5 的默认值。
-  2. 真实线路冒烟：推送凭据后拨号成功，拿到 PD 前缀，用外部 STUN 服务确认完全锥形。
+- **Addresses**: all from documentation-reserved ranges (RFC 5737, RFC 3849), so they cannot clash with real networks.
+- **Tools**: rp-pppoe, ppp, kea, radvd, dnsmasq, microsocks, iperf3, and iputils all come from the pinned nixpkgs and are added to the flake's test tool group.
+- **`netprobe`**: `wrt_tests/netprobe.py` is a small asyncio service that echoes the peer's address and port and the MSS it sees. The full-cone, spoofed-inbound, local-port, source-address, MSS, and fragmentation checks all rely on it. For ESP it sends and receives protocol 50 packets over raw sockets, without depending on the host's xfrm.
+- **Host requirements**: the host kernel must have `ppp_generic` and `ppp_async` (OrbStack and GitHub runners both do; the OrbStack kernel has no `pppoe.ko`, so the ISP side uses rp-pppoe's user mode), and `/dev/ppp` must be readable and writable by regular users. CI's `prepare-runner.sh` and `docs/dev-setup.md` take care of both; `env-report` checks them. The router-side PPPoE runs inside the QEMU VM and does not depend on the host.
+- **Tests map one-to-one to specs**: `tests/network/` has six test modules named after the six specs: `test_transparent_proxy`, `test_dns`, `test_nat`, `test_qos`, `test_wan`, `test_tc_hook_order`. Each module boots the emulator once; between tests only the config is reset, with no reboot.
+- **Representative techniques**:
+  - Spoofed inbound: the ISP side routes 10.0.0.0/24 into the PPP session, and also injects frames whose destination IP is an internal address directly on the layer 2 segment of eth0. Both paths must be dropped.
+  - Redial: the ISP side ends the session; the router redials and gets a new address.
+  - Fairness: the tests set qosify's upload bandwidth to 20 Mbit/s, which TCG can saturate, so the result does not depend on line rate.
+  - flowtable: read the `[OFFLOAD]` flag from `conntrack -L`, and cross-check the source address with `netprobe`.
+  - dae's conntrack warning (issue #848): check dmesg in the emulator. The kernel is the same, so the result carries over directly.
+- **Device-only** (written as `@target("device")` tests):
+  1. Throughput benchmark: direct NAT with a single stream and multiple streams; proxied traffic with and without A72 pinning. The results decide the D5 default.
+  2. Real-line smoke test: after credentials are pushed, dial-up succeeds, a PD prefix is obtained, and an external STUN service confirms full-cone.
 
 ## Risks / Trade-offs
 
-- **[dae 创建网络命名空间时触发 conntrack 告警]** issue #848 是在 6.6 上报的。→ 模拟器用例检查 dmesg；如果 6.18 上仍然出现，就跟进上游修复。
-- **[PPPoE 下入方向命中不了 flowtable]** 如果 fw4 把下层的 eth0 也注册进 flowtable，入方向的查表会发生在 einat 还原地址之前，查不中，回程就只能走慢路径。→ 模拟器用例读 conntrack 的加速标记，把出入两个方向是否命中记录下来。结果只影响性能，不影响正确性。
-- **[include 合并的语义和预期不一致]** → 实施时先用模拟器用例验证；如果不满足，就改为由 init 脚本把几个片段按文本拼接成一个完整配置文件。
-- **[dae 依赖的 outbound 个人 fork]** → 固定到 `go.sum` 里的版本，并审查它和上游 `daeuniverse/outbound` 的差异（任务 1.2）；以后 dae 升级时重新审查。
-- **[Rust 宿主工具链会拉长 CI 的冷启动]** → 它已经在 foundation 设计的工具链阶段里，并被缓存。
-- **[dae 加载时有大约 120 MB 的内存峰值]** 4 GB 内存下可以接受。
-- **[Tailscale 控制面走直连]** 这是已知限制，已记录在 proposal 里。
-- **[模拟的 ISP 与真实运营商行为不同]** 例如 PD 长度、MTU、LCP echo 的间隔。→ 模拟时取常见值；真实线路冒烟用例会核对实际值。差异只影响配置，不影响数据面的结构。
-- **[宿主缺少 ppp 支持]** → `env-report` 提前报错并说明修复方法，不会等到用例运行时才失败。
+- **[conntrack warning when dae creates a network namespace]** issue #848 was reported on 6.6. → An emulator test checks dmesg; if the warning still appears on 6.18, follow up on an upstream fix.
+- **[Ingress misses the flowtable under PPPoE]** If fw4 also registers the lower eth0 in the flowtable, the ingress lookup happens before einat reverse-translates the address and misses, so return traffic can only take the slow path. → An emulator test reads the conntrack offload flag and records whether each direction hits. The result affects only performance, not correctness.
+- **[include merge semantics differ from expectations]** → Verify with an emulator test first during implementation; if it does not hold, have the init script concatenate the fragments as text into one complete config file instead.
+- **[dae depends on a personal fork of outbound]** → Pin it to the version in `go.sum` and review its diff against upstream `daeuniverse/outbound` (task 1.2); review again on every later dae upgrade.
+- **[The Rust host toolchain lengthens CI cold starts]** → It is already in the toolchain stage of the foundation design, and it is cached.
+- **[dae has a memory peak of about 120 MB at load]** Acceptable with 4 GB of RAM.
+- **[Tailscale's control plane goes direct]** This is a known limitation, recorded in the proposal.
+- **[The emulated ISP behaves differently from a real ISP]** For example PD length, MTU, and the LCP echo interval. → The emulation uses common values; the real-line smoke test checks the actual values. The differences affect only configuration, not the structure of the datapath.
+- **[The host lacks ppp support]** → `env-report` reports the error early along with the fix, instead of failing only when the tests run.
 
 ## Migration Plan
 
-- **部署顺序**：
-  1. 先部署 einat、qosify 和 fw4 规则，这时 dae 不启用，验证 NAT 和 QoS。
-  2. 再推送 dae 配置并启用 dae。
-- **回退**：停掉任何一个组件都会回落到直连或 masquerade，不需要额外的回退步骤。发生严重问题时，用 A/B 切回上一个槽位。
+- **Deployment order**:
+  1. Deploy einat, qosify, and the fw4 rules first, with dae not yet enabled, and verify NAT and QoS.
+  2. Then push the dae config and enable dae.
+- **Rollback**: stopping any component falls back to direct or masquerade, so no extra rollback steps are needed. For serious problems, use A/B to switch back to the previous slot.
 
 ## Open Questions
 
-- 上行带宽的具体数值要实测，只影响 qosify 的一个配置值。
-- 是否要把 dae 绑到 A72，由真机吞吐基准决定，只影响 init 脚本的一个默认参数。
+- The exact upload bandwidth has to be measured; it affects only one qosify config value.
+- Whether to pin dae to the A72 cores is decided by the device throughput benchmark; it affects only one default parameter of the init script.

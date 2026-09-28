@@ -2,36 +2,36 @@
 
 ## Context
 
-动机见 proposal.md。以下现状都在上游源码里核对过（OpenWrt main `1019293`，U-Boot v2026.07）：
+See proposal.md for the motivation. All of the current state below was verified against upstream source (OpenWrt main `1019293`, U-Boot v2026.07):
 
-- **镜像生成**：`scripts/gen_image_generic.sh` 只支持“kernel + rootfs”两个分区；不带 GUID 时，boot 分区用 `make_ext4fs` 生成 ext4。
-- **升级流程**：rockchip 的 `platform.sh` 直接把整个磁盘镜像 `dd` 到启动盘上；`79_move_config` 固定从第 1 个分区取 `sysupgrade.tgz`。
-- **U-Boot 环境变量**：`configs/nanopi-r4s-rk3399_defconfig` 已经开了 `ENV_IS_IN_MMC`，`ENV_OFFSET=0x3F8000`；rockchip 加 MMC 时 `ENV_SIZE` 默认是 `0x8000`。
-- **U-Boot 能力**：支持 `ENV_WRITEABLE_LIST`；`BOOTCOUNT_ENV` 只在 `upgrade_available` 为 1 时才计数并保存；R4S 的 defconfig 没开 `WDT`，但 `DESIGNWARE_WATCHDOG` 对 RK3399 默认为 y。
-- **内核看门狗**：
-  - `DW_WATCHDOG=y`；
-  - `WATCHDOG_HANDLE_BOOT_ENABLED=y`：看门狗已经在运行时，由内核代为喂狗，直到用户态接管；
-  - `WATCHDOG_OPEN_TIMEOUT=0`：内核会无限期地代为喂狗。
-- **内核 panic**：rockchip 的 `PANIC_TIMEOUT=0`，panic 之后会一直卡住。
-- **fstools**：overlay 放在 EROFS 结束处按 64 KiB 对齐后的位置。
-- **foundation 提供的前提**：模拟环境（testing/emulation），它以 R4S 的板型身份运行出货镜像；以及 `config/kernel.config` 叠加机制。
+- **Image generation**: `scripts/gen_image_generic.sh` supports only two partitions, "kernel + rootfs"; without a GUID, the boot partition is generated as ext4 by `make_ext4fs`.
+- **Upgrade flow**: rockchip's `platform.sh` writes the entire disk image to the boot disk with `dd`; `79_move_config` always takes `sysupgrade.tgz` from partition 1.
+- **U-Boot environment**: `configs/nanopi-r4s-rk3399_defconfig` already enables `ENV_IS_IN_MMC` with `ENV_OFFSET=0x3F8000`; when rockchip adds MMC, `ENV_SIZE` defaults to `0x8000`.
+- **U-Boot capabilities**: `ENV_WRITEABLE_LIST` is supported; `BOOTCOUNT_ENV` counts and saves only when `upgrade_available` is 1; the R4S defconfig does not enable `WDT`, but `DESIGNWARE_WATCHDOG` defaults to y for RK3399.
+- **Kernel watchdog**:
+  - `DW_WATCHDOG=y`;
+  - `WATCHDOG_HANDLE_BOOT_ENABLED=y`: when the watchdog is already running, the kernel feeds it until userspace takes over;
+  - `WATCHDOG_OPEN_TIMEOUT=0`: the kernel feeds it on userspace's behalf indefinitely.
+- **Kernel panic**: rockchip has `PANIC_TIMEOUT=0`, so the system hangs forever after a panic.
+- **fstools**: the overlay starts at the end of EROFS, rounded up to a 64 KiB boundary.
+- **Prerequisites from the foundation**: the emulation environment (testing/emulation), which runs the shipped image under the R4S board identity; and the `config/kernel.config` overlay mechanism.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- 升级不碰当前在运行的槽位；新系统起不来时，不接触硬件就能自动恢复。
-- 选槽逻辑固化在引导程序里，Linux 这边只读写三个变量。
-- 健康检查可以扩展，后续 change 能往里注册检查项。
-- 这套 A/B 状态机在模拟器里能跑通完整链路：U-Boot 同版本、同逻辑，SD 卡、分区、环境变量偏移都相同。
+- An upgrade never touches the running slot; when the new system fails to boot, it recovers automatically without touching the hardware.
+- The slot selection logic is fixed in the bootloader; the Linux side only reads and writes three variables.
+- The health check is extensible, so later changes can register checks with it.
+- This A/B state machine runs end to end in the emulator: same U-Boot version and logic, same SD card, partitions, and environment offset.
 
 **Non-Goals:**
-- U-Boot 本身的 A/B 和在线更新。U-Boot 只在刷出厂镜像时更新。
-- 验证启动（签名 FIT、dm-verity）。探索阶段已经否决：R4S 的 SD 卡可以拔插，eFuse 也没烧。
-- 数据面的检查项，它们由 `r4s-ebpf-datapath` 注册。
+- A/B and online updates for U-Boot itself. U-Boot is updated only when the factory image is flashed.
+- Verified boot (signed FIT, dm-verity). Rejected during exploration: the R4S SD card is removable, and the eFuses are not blown.
+- Datapath checks; those are registered by `r4s-ebpf-datapath`.
 
 ## Decisions
 
-### D1. 分区布局
+### D1. Partition layout
 
 ```
 offset        content                         size
@@ -45,17 +45,17 @@ offset        content                         size
 total ~ 2.2 GiB  -> fits a 4 GB card
 ```
 
-- **用 MBR**：与上游一致，四个主分区刚好够用。GPT 带不来额外好处，还会偏离上游。
-- **boot 分区给 64 MiB**：打开 BTF、加上 virt 平台驱动之后，内核 FIT 会变大，这里留出余量。
+- **Use MBR**: consistent with upstream, and four primary partitions are exactly enough. GPT brings no extra benefit and would diverge from upstream.
+- **64 MiB boot partitions**: enabling BTF and adding the virt platform drivers makes the kernel FIT larger; this leaves headroom.
 
-### D2. 镜像产物
+### D2. Image artifacts
 
-- **生成脚本**：`scripts/gen_image_ab.sh` 用 `ptgen` 生成四个分区，boot 分区沿用 `make_ext4fs`。
-- **出厂镜像**：两个槽位内容相同，U-Boot 环境区全部填零，首次启动就进入槽位 A。
-- **升级镜像**：`sysupgrade.tar`，复用 `Build/sysupgrade-tar`，里面是 `kernel`（boot 分区的 ext4 镜像）、`root`（EROFS）和 `CONTROL`，并用 `append-metadata` 附上元数据。
-- **备选方案**：沿用整盘镜像再按分区截取。否决，因为整盘镜像带着 U-Boot 和分区表。
+- **Generator script**: `scripts/gen_image_ab.sh` uses `ptgen` to create the four partitions; the boot partitions still use `make_ext4fs`.
+- **Factory image**: both slots have identical contents, and the U-Boot environment area is zero-filled, so the first boot goes to slot A.
+- **Upgrade image**: `sysupgrade.tar`, reusing `Build/sysupgrade-tar`. It contains `kernel` (the ext4 image of the boot partition), `root` (EROFS), and `CONTROL`, with metadata attached by `append-metadata`.
+- **Alternative**: keep the whole-disk image and slice partitions out of it. Rejected, because the whole-disk image carries U-Boot and the partition table.
 
-### D3. U-Boot：逻辑固化在二进制里，拆成“公共逻辑 + 板级常量”两层
+### D3. U-Boot: logic fixed in the binary, split into two layers, "shared logic + board constants"
 
 ```
 uboot/wrt-ab.env          common state machine (single source of truth)
@@ -65,11 +65,11 @@ uboot/board-qemu.env      wrt_mmc=0  wrt_console=ttyAMA0
                           wrt_earlycon=                            wrt_fdt=${fdtcontroladdr}
 ```
 
-- **两份对称的构建**：每个 U-Boot 构建把“板级常量 + 公共逻辑”拼成 `ENV_SOURCE_FILE` 需要的文本环境文件。
-  - 出货的 `nanopi-r4s-rk3399` 变体：修改 `package/boot/uboot-rockchip/Makefile`，通过 `UBOOT_CUSTOMIZE_CONFIG` 只对这个变体生效。
-  - 测试用的 `qemu_arm64`：放在自有 feed 的 `uboot-wrt-qemu` 包里。它只作为测试产物，不进固件。
-  - 两者的版本必须与 `uboot-rockchip` 完全一致，由规范检查保证。
-- **两份构建共用的配置**：
+- **Two symmetric builds**: each U-Boot build concatenates "board constants + shared logic" into the text environment file that `ENV_SOURCE_FILE` expects.
+  - The shipped `nanopi-r4s-rk3399` variant: modify `package/boot/uboot-rockchip/Makefile`, applying it through `UBOOT_CUSTOMIZE_CONFIG` to this variant only.
+  - The test `qemu_arm64` build: lives in the `uboot-wrt-qemu` package in the in-house feed. It is a test artifact only and does not go into the firmware.
+  - Both must match the `uboot-rockchip` version exactly, enforced by the code-standard checks.
+- **Config shared by both builds**:
 
 ```
 --enable BOOTCOUNT_LIMIT --enable BOOTCOUNT_ENV --set-val BOOTCOUNT_BOOTLIMIT 3
@@ -82,7 +82,7 @@ qemu only: --disable ENV_IS_IN_FLASH --enable ENV_IS_IN_MMC --set-val SYS_MMC_EN
            --enable MMC --enable DM_MMC --enable MMC_SDHCI --enable MMC_PCI   (sdhci over PCI)
 ```
 
-- **公共逻辑**：
+- **Shared logic**:
 
 ```
 wrt_boot:
@@ -102,23 +102,23 @@ wrt_fallback (load failure, same power cycle):
   else: stop at U-Boot prompt (no loop)
 ```
 
-- **只放开三个变量**：`ENV_WRITEABLE_LIST` 保证只有登记为可写的变量会从持久环境读入，所以逻辑永远来自二进制本身。启动时用 `setenv` 设置的每个临时变量也都必须登记为可写，这一点由模拟测试逐条覆盖，不必再等上机时接串口核对。
-- **panic 相关的两个参数**：`panic=5` 覆盖 rockchip 的 `PANIC_TIMEOUT=0`；`watchdog.open_timeout=90` 限制内核代为喂狗的时间。
-- **备选方案**：
-  - 共用一个 boot.scr 来选槽。否决，因为它本身就是单点故障，而且会被持久环境覆盖。
-  - 不用 `ENV_WRITEABLE_LIST`。否决，因为保存下来的旧逻辑会挡住以后的新逻辑。
+- **Only three variables are opened up**: `ENV_WRITEABLE_LIST` ensures that only variables registered as writable are read from the persistent environment, so the logic always comes from the binary itself. Every temporary variable set with `setenv` during boot must also be registered as writable; the emulation tests cover each one, so there is no need to wait for a serial console check on the device.
+- **Two panic-related parameters**: `panic=5` overrides rockchip's `PANIC_TIMEOUT=0`; `watchdog.open_timeout=90` limits how long the kernel feeds the watchdog on userspace's behalf.
+- **Alternatives**:
+  - Select the slot with a shared boot.scr. Rejected, because it is itself a single point of failure and can be overridden by the persistent environment.
+  - Skip `ENV_WRITEABLE_LIST`. Rejected, because saved old logic would shadow newer logic later.
 
-### D4. Linux 侧读写环境变量
+### D4. Reading and writing the environment from Linux
 
-- **uboot-envtools**：打补丁加上 R4S 的配置，启动盘由 `export_bootdevice` 动态确定，偏移 `0x3F8000`，大小 `0x8000`。模拟器里用的是同一份配置，因为 SD 卡在那里同样是 MMC 设备。
-- **`wrt-slot` 命令**：
-  - `wrt-slot status` 输出当前槽位、`upgrade_available`、`bootcount`，以及最近一次健康检查的结果。
-  - `wrt-slot switch` 用 `fw_setenv -s` 写入三个变量，然后重启。
-- **对称设计**：`status` 和 `switch` 分别对应“读”和“写”，没有其他子命令。
+- **uboot-envtools**: patch in the R4S config; the boot disk is determined dynamically by `export_bootdevice`, with offset `0x3F8000` and size `0x8000`. The emulator uses the same config, because the SD card is an MMC device there too.
+- **The `wrt-slot` command**:
+  - `wrt-slot status` prints the current slot, `upgrade_available`, `bootcount`, and the result of the most recent health check.
+  - `wrt-slot switch` writes the three variables with `fw_setenv -s`, then reboots.
+- **Symmetric design**: `status` and `switch` map to "read" and "write"; there are no other subcommands.
 
-### D5. 健康检查
+### D5. Health check
 
-`wrt-healthcheck` 在 `START=99` 启动：
+`wrt-healthcheck` starts at `START=99`:
 
 ```
 wait up to 300s, poll every 10s:
@@ -131,20 +131,20 @@ trial (upgrade_available=1): pass -> fw_setenv -s {bootcount 0, upgrade_availabl
 confirmed: fail -> logger only
 ```
 
-- **为什么不检查 WAN**：运营商断网不代表系统坏了。
-- **为什么已确认的系统失败时不重启**：已确认的系统没有回滚目标，重启只会原地打转。
+- **Why WAN is not checked**: an ISP outage does not mean the system is broken.
+- **Why a confirmed system does not reboot on failure**: a confirmed system has no rollback target, so rebooting would only loop in place.
 
-### D6. 升级流程
+### D6. Upgrade flow
 
-- **`platform_check_image`**：只接受单槽升级 tar，并检查元数据。
-- **`platform_do_upgrade`**：
-  1. 由 `wrt.slot` 算出目标槽位；
-  2. 把 kernel 和 root 分别 `dd` 到目标槽位的两个分区；
-  3. 从 EROFS 结束位置按 64 KiB 对齐，把之后的 1 MiB 清零；
-  4. 执行 `fw_setenv -s` 写入三个变量。
-- **配置迁移**：`platform_copy_config` 把配置备份写到目标槽位的 boot 分区；`79_move_config` 按 `wrt.slot` 找到当前槽位的 boot 分区。
+- **`platform_check_image`**: accepts only the single-slot upgrade tar, and checks the metadata.
+- **`platform_do_upgrade`**:
+  1. derive the target slot from `wrt.slot`;
+  2. `dd` kernel and root to the target slot's two partitions;
+  3. starting at the end of EROFS rounded up to 64 KiB, zero the next 1 MiB;
+  4. run `fw_setenv -s` to write the three variables.
+- **Config migration**: `platform_copy_config` writes the config backup to the target slot's boot partition; `79_move_config` uses `wrt.slot` to find the current slot's boot partition.
 
-### D7. 验证方式：模拟器里的 A/B 链路
+### D7. Verification: the A/B chain in the emulator
 
 ```
 qemu-system-aarch64 -machine virt,gic-version=3 -cpu cortex-a72 -m 4G
@@ -154,35 +154,35 @@ qemu-system-aarch64 -machine virt,gic-version=3 -cpu cortex-a72 -m 4G
   -netdev tap ... (foundation topology)  -device i6300esb -action watchdog=reset
 ```
 
-- **在模拟器里测什么**：U-Boot 和 Linux 看到的都是 MMC 设备，出厂镜像原样作为 SD 卡，环境变量也在 `0x3F8000`。选槽、计数、回滚、同一次上电内切换槽位、两个槽位都失败时停在提示符、持久环境覆盖不了启动逻辑，这些 boot-rollback 的场景都走同一份 `wrt-ab.env`。
-- **ab-upgrade、health-check、ab-layout**：它们的全部场景都在模拟器里用 Linux 侧的出货代码执行。
-  - 写到一半断电：对磁盘写入限速，然后在 `dd` 期间结束 QEMU 进程。
-  - 坏内核：在升级 tar 里放一个损坏的 FIT。
-  - WAN 断开：`isp` 命名空间里不启动 PPPoE 服务端。
-- **内核补充**：模拟用的 SD 卡控制器需要 `CONFIG_MMC_SDHCI_PCI=y`，由本 change 加进 `config/kernel.config` 的 virt 驱动组里。
-- **只能留给真机的**（写成 `@target("device")` 用例）：
-  1. RK3399 的 BootROM、TPL/SPL 从 SD 卡加载这版 U-Boot，并按 `boot_slot` 启动；
-  2. DesignWare 看门狗在内核启动前就开始计时，内核早期卡死时会复位；
-  3. 用户态在 `open_timeout` 内没有接管时会复位。
+- **What the emulator tests**: U-Boot and Linux both see an MMC device, the factory image is used unmodified as the SD card, and the environment is also at `0x3F8000`. The boot-rollback scenarios (slot selection, counting, rollback, switching slots within the same power cycle, stopping at the prompt when both slots fail, and the persistent environment being unable to override the boot logic) all go through the same `wrt-ab.env`.
+- **ab-upgrade, health-check, ab-layout**: all of their scenarios run in the emulator using the shipped Linux-side code.
+  - Power loss mid-write: throttle disk writes, then kill the QEMU process during `dd`.
+  - Bad kernel: put a corrupted FIT in the upgrade tar.
+  - WAN down: do not start the PPPoE server in the `isp` namespace.
+- **Kernel addition**: the emulated SD card controller needs `CONFIG_MMC_SDHCI_PCI=y`, which this change adds to the virt driver group in `config/kernel.config`.
+- **Device-only** (written as `@target("device")` tests):
+  1. The RK3399 BootROM and TPL/SPL load this U-Boot build from the SD card and boot according to `boot_slot`;
+  2. The DesignWare watchdog starts counting before the kernel boots, and resets the device if the kernel hangs early;
+  3. The device resets if userspace does not take over within `open_timeout`.
 
-  其中第 2、3 项需要断电或者模拟卡死，由用例提示人工操作。
+  Items 2 and 3 need a power cut or a simulated hang; the tests prompt for the manual step.
 
 ## Risks / Trade-offs
 
-- **[`ENV_WRITEABLE_LIST` 漏登记了运行时变量]** 模拟测试会覆盖每一条启动路径，漏登记的变量在 CI 里就会暴露出来。
-- **[模拟用的 U-Boot 与出货的 U-Boot 不一致]** 公共逻辑只有一份；规范检查会比对两个包的 U-Boot 版本；板级常量只允许包含 D3 列出的那些变量。
-- **[U-Boot 只有一份]** 只有刷出厂镜像时才更新；U-Boot 的版本变化不会随每周 bump 下发到设备上。
-- **[健康检查太严格导致误回滚]** 总时限 300 秒，单项时限 30 秒，只检查 LAN 侧和本机状态。
-- **[overlay 残留被 fstools 误认]** 升级时清零 EROFS 之后的 1 MiB。
-- **[真机上的 SD 卡编号]** 按 RK3399 惯例写成 1；真机冒烟用例第 1 项会确认。
+- **[`ENV_WRITEABLE_LIST` misses a runtime variable]** The emulation tests cover every boot path, so an unregistered variable shows up in CI.
+- **[The emulated U-Boot diverges from the shipped U-Boot]** There is only one copy of the shared logic; the code-standard checks compare the U-Boot versions of the two packages; the board constants may contain only the variables listed in D3.
+- **[There is only one U-Boot]** It is updated only when the factory image is flashed; U-Boot version changes do not reach devices with each weekly bump.
+- **[A health check that is too strict causes false rollbacks]** 300 seconds total, 30 seconds per check, and only LAN-side and local state are checked.
+- **[fstools misreads leftover overlay data]** The upgrade zeroes the 1 MiB after EROFS.
+- **[SD card index on the device]** Set to 1 per RK3399 convention; item 1 of the device smoke test confirms it.
 
 ## Migration Plan
 
-1. 在单槽系统上执行 `sysupgrade -b`，导出配置备份。
-2. 在电脑上把 A/B 出厂镜像写入 SD 卡（这是 BREAKING 变更）。
-3. 启动后恢复第 1 步的备份。
-4. 之后的升级都用单槽升级镜像。回退方式是 `wrt-slot switch`，或者等自动回滚生效。
+1. On the single-slot system, run `sysupgrade -b` to export a config backup.
+2. On a computer, write the A/B factory image to the SD card (this is the BREAKING change).
+3. After boot, restore the backup from step 1.
+4. Use single-slot upgrade images for all later upgrades. To roll back, use `wrt-slot switch` or wait for the automatic rollback.
 
 ## Open Questions
 
-- 两个 root 分区都用 1024 MiB。SD 卡换大时可以调大，不影响规格。
+- Both root partitions use 1024 MiB. They can be enlarged for a bigger SD card without affecting the specs.

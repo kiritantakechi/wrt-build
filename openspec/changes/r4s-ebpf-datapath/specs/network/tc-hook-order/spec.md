@@ -2,45 +2,45 @@
 
 ## Purpose
 
-规定同一网口上多个 eBPF/tc 程序的挂载顺序和返回值约束，以及各组件使用的报文 mark 位怎么分配，保证它们不会互相截断，也不会互相冲突。
+Define the attach order and return-value constraints for multiple eBPF/tc programs on the same interface, and how the packet mark bits used by each component are allocated, so the programs neither cut each other off nor conflict with each other.
 
 ## ADDED Requirements
 
-### Requirement: WAN 口上的程序与顺序
-在 WAN 接口的入方向和出方向上，einat SHALL 是最先执行的程序，其后才是 qosify 的过滤器。除这两者外，其他组件 MUST NOT 在 WAN 接口上挂载 tc 或 tcx 程序。
+### Requirement: Programs and order on the WAN port
+On both ingress and egress of the WAN interface, einat SHALL be the first program to run, followed by qosify's filters. Components other than these two MUST NOT attach tc or tcx programs to the WAN interface.
 
-#### Scenario: 检查 WAN 口
-- **WHEN** 查看 pppoe-wan 上挂载的全部 BPF 程序
-- **THEN** tcx 入口和出口上只有 einat；传统 tc 过滤器里只有 qosify 的过滤器，即出入两个方向的 BPF 分类器，以及入方向把 DNS 回应转给 `ifb-dns` 的过滤器
+#### Scenario: Check the WAN port
+- **WHEN** all BPF programs attached to pppoe-wan are inspected
+- **THEN** only einat is on tcx ingress and egress; the legacy tc filters are only qosify's, namely the BPF classifiers in both directions and the ingress filters that redirect DNS replies to `ifb-dns`
 
-### Requirement: 放行报文时必须让后续程序继续执行
-挂在共享钩子上的程序放行报文时 MUST 返回“继续执行后续程序”，不能返回终止判定。只有在有意丢弃或重定向报文时例外。
+### Requirement: Pass-through returns continue the chain
+When a program attached to a shared hook passes a packet, it MUST return "continue to the next program", not a terminating verdict. The only exception is when it intentionally drops or redirects the packet.
 
-#### Scenario: WAN 入站的 ICMP 回应
-- **WHEN** 一台 LAN 主机 ping 外部地址，回应从 WAN 进入
-- **THEN** 回应先经 einat 还原成内网地址，再被 qosify 分类（qosify 的入方向统计增加），最后送达这台主机
+#### Scenario: ICMP reply on WAN ingress
+- **WHEN** a LAN host pings an external address and the reply enters from WAN
+- **THEN** the reply is first reverse-translated by einat to the internal address, then classified by qosify (qosify's ingress counters increase), and finally delivered to the host
 
-#### Scenario: 分片的 UDP 回应
-- **WHEN** 一台 LAN 主机收到一个经 WAN 进入、被分片的 UDP 回应
-- **THEN** 所有分片都被还原并送达，应用收到完整的数据
+#### Scenario: Fragmented UDP reply
+- **WHEN** a LAN host receives a fragmented UDP reply that enters through WAN
+- **THEN** all fragments are reverse-translated and delivered, and the application receives the complete data
 
-### Requirement: LAN 口上只有 dae
-在 LAN 侧的受绑定接口上，dae SHALL 是唯一的 tc 或 tcx 程序。
+### Requirement: Only dae on the LAN port
+On the LAN-side bound interfaces, dae SHALL be the only tc or tcx program.
 
-#### Scenario: 检查 LAN 口
-- **WHEN** 查看 br-lan 上挂载的全部 BPF 程序
-- **THEN** 只有 dae 的程序
+#### Scenario: Check the LAN port
+- **WHEN** all BPF programs attached to br-lan are inspected
+- **THEN** only dae programs are present
 
-### Requirement: 顺序与启动先后无关
-上述顺序 SHALL 在任何启动先后、任何组件重启、以及 PPPoE 重拨之后都保持成立。
+### Requirement: Order independent of startup order
+The order above SHALL hold under any startup order, after any component restart, and after a PPPoE redial.
 
-#### Scenario: 重启组件之后
-- **WHEN** 依次重启 qosify、einat、dae，再让 PPPoE 重拨一次
-- **THEN** 每一步完成后，WAN 口和 LAN 口的程序和顺序仍满足上面的要求
+#### Scenario: After restarting components
+- **WHEN** qosify, einat, and dae are restarted in turn, and then PPPoE redials once
+- **THEN** after each step, the programs and order on the WAN and LAN ports still meet the requirements above
 
-### Requirement: mark 位统一分配
-每个组件使用的报文 mark 位 SHALL 登记在仓库里的同一张分配表里，任意两个组件使用的位 MUST NOT 重叠。构建检查 SHALL 在配置中出现未登记或重叠的 mark 时失败。
+### Requirement: Centralized mark bit allocation
+The packet mark bits used by each component SHALL be registered in a single allocation table in the repository, and the bits used by any two components MUST NOT overlap. The build check SHALL fail when the config contains an unregistered or overlapping mark.
 
-#### Scenario: 配置了重叠的 mark
-- **WHEN** 某个组件的配置使用了另一个组件已登记的 mark 位
-- **THEN** 构建检查失败，并报出冲突的两个组件和对应的位
+#### Scenario: Overlapping mark configured
+- **WHEN** a component's config uses a mark bit already registered by another component
+- **THEN** the build check fails and reports the two conflicting components and the bit involved

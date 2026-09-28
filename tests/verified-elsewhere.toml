@@ -6,140 +6,140 @@
 
 [[scenario]]
 capability = "build/ci"
-requirement = "分阶段构建，每个 job 都在时限内"
-scenario = "冷缓存构建"
+requirement = "Staged build within job time limits"
+scenario = "Cold-cache build"
 by = "build.yml host-toolchain + firmware on a cold cache; timings in docs/ci.md"
 
 [[scenario]]
 capability = "build/ci"
-requirement = "分阶段构建，每个 job 都在时限内"
-scenario = "工具链缓存命中"
+requirement = "Staged build within job time limits"
+scenario = "Toolchain cache hit"
 by = "build.yml host-toolchain restores the toolchain cache; firmware builds on it"
 
 [[scenario]]
 capability = "build/ci"
-requirement = "按实际输入确定缓存"
-scenario = "只更新 packages feed"
+requirement = "Cache keyed on actual inputs"
+scenario = "Only the packages feed updated"
 by = "scripts/toolchain-key.sh hashes tools/, toolchain/, lang/golang, lang/rust, toolchain.seed and WRT_BUILD_INPUTS only"
 
 [[scenario]]
 capability = "build/ci"
-requirement = "按实际输入确定缓存"
-scenario = "工具链输入变化"
+requirement = "Cache keyed on actual inputs"
+scenario = "Toolchain inputs change"
 by = "scripts/toolchain-key.sh; build.yml host-toolchain rebuilds on a key miss"
 
 [[scenario]]
 capability = "build/ci"
-requirement = "产出全部 kmod"
-scenario = "仓库里有全部 kmod"
+requirement = "Build all kmods"
+scenario = "Repository contains all kmods"
 by = "build.yml firmware: ci profile with CONFIG_ALL_KMODS; artifact firmware-unsigned"
 
 [[scenario]]
 capability = "build/ci"
-requirement = "镜像与 kmod 出自同一次构建"
-scenario = "清单完整"
+requirement = "Image and kmods from the same build"
+scenario = "Complete manifest"
 by = "scripts/build.sh writes manifest.json in build.yml firmware; system-test compares it with the image"
 
 [[scenario]]
 capability = "build/ci"
-requirement = "构建阶段不需要任何密钥"
-scenario = "fork 仓库运行 CI"
+requirement = "Build stages need no secrets"
+scenario = "CI runs in a fork"
 by = "build.yml references no secret; a run in a fork without secrets (docs/ci.md)"
 
 # build/environment: facts about the pinned environment and the local setup.
 
 [[scenario]]
 capability = "build/environment"
-requirement = "版本固定的统一宿主环境"
-scenario = "本机和 CI 的工具版本一致"
+requirement = "Pinned common host environment"
+scenario = "Local and CI tool versions match"
 by = "just env-report in build.yml host-toolchain compared with the local VM (docs/ci.md)"
 
 [[scenario]]
 capability = "build/environment"
-requirement = "版本固定的统一宿主环境"
-scenario = "更新工具版本必须改 lock"
+requirement = "Pinned common host environment"
+scenario = "Tool updates require a lock change"
 by = "flake.lock pins nixpkgs and nixpkgs-unstable; env-report prints both revisions"
 
 [[scenario]]
 capability = "build/environment"
-requirement = "统一的构建入口"
-scenario = "一条命令完成完整构建"
+requirement = "Common build entry points"
+scenario = "Full build in one command"
 by = "just build dev on the local VM; build.yml firmware"
 
 [[scenario]]
 capability = "build/environment"
-requirement = "构建目录与仓库分离且位置可配置"
-scenario = "构建目录放在外接卷上"
+requirement = "Configurable build directory outside the repository"
+scenario = "Build directory on an external volume"
 by = "local VM: WRT_WORKDIR on the SSD volume (docs/dev-setup.md); require_workdir refuses paths inside the repository"
 
 # build/upstream-pinning: every fetch and patch run in CI re-proves these.
 
 [[scenario]]
 capability = "build/upstream-pinning"
-requirement = "上游源码固定到提交"
-scenario = "同一份 lock 得到同一份源码"
+requirement = "Upstream sources pinned to commits"
+scenario = "Same lock yields same sources"
 by = "scripts/fetch.sh dies unless every checkout is at its lock SHA; runs in both build.yml jobs"
 
 [[scenario]]
 capability = "build/upstream-pinning"
-requirement = "上游源码固定到提交"
-scenario = "feeds 配置也固定到提交"
+requirement = "Upstream sources pinned to commits"
+scenario = "Feeds configuration pinned to commits"
 by = "scripts/fetch.sh writes src-git <name> <url>^<sha> from upstream.lock"
 
 [[scenario]]
 capability = "build/upstream-pinning"
-requirement = "补丁按顺序应用，失败即停止"
-scenario = "补丁冲突"
+requirement = "Ordered patches, stop on failure"
+scenario = "Patch conflict"
 by = "scripts/patch.sh aborts git am and names the patch; build.yml stops at 'Fetch and patch sources'"
 
 [[scenario]]
 capability = "build/upstream-pinning"
-requirement = "补丁按顺序应用，失败即停止"
-scenario = "补丁全部应用成功"
+requirement = "Ordered patches, stop on failure"
+scenario = "All patches apply"
 by = "manifest.json openwrt_head is identical across builds of the same lock and patches"
 
 [[scenario]]
 capability = "build/upstream-pinning"
-requirement = "构建过程中不拉取远程脚本，也不就地改上游文本"
-scenario = "审计构建脚本"
+requirement = "No remote scripts or in-place upstream edits"
+scenario = "Audit build scripts"
 by = "check.yml: just check (forbidden-patterns)"
 
 [[scenario]]
 capability = "build/upstream-pinning"
-requirement = "构建时间戳可复现"
-scenario = "不同时间构建同一份 lock"
+requirement = "Reproducible build timestamp"
+scenario = "Same lock built at different times"
 by = "scripts/fetch.sh writes version.date from upstream.lock; get_source_date_epoch.sh reads it first"
 
 # firmware/toolchain: properties of the build, visible in its logs and outputs.
 
 [[scenario]]
 capability = "firmware/toolchain"
-requirement = "目标工具链版本"
-scenario = "检查工具链版本"
+requirement = "Target toolchain version"
+scenario = "Check toolchain version"
 by = "build.yml firmware: staging_dir/toolchain-aarch64_generic_gcc-15.*_musl"
 
 [[scenario]]
 capability = "firmware/toolchain"
-requirement = "针对大小核的优化参数"
-scenario = "检查编译命令"
+requirement = "Optimization flags for big.LITTLE cores"
+scenario = "Check compile command"
 by = "V=s build log of a target package (task 4.4; docs/validation/foundation.md)"
 
 [[scenario]]
 capability = "firmware/toolchain"
-requirement = "默认开启 LTO、mold 和 gc-sections"
-scenario = "个别软件包不兼容 LTO"
+requirement = "LTO, mold, and gc-sections by default"
+scenario = "Package incompatible with LTO"
 by = "docs/lto-optouts.md lists every no-lto opt-out with its patch in patches/packages"
 
 # testing/harness: properties of CI and of the device run.
 
 [[scenario]]
 capability = "testing/harness"
-requirement = "每次构建都在模拟器中运行"
-scenario = "用例失败"
+requirement = "Emulator run on every build"
+scenario = "Test failure"
 by = "build.yml system-test fails and publishes the JUnit report (task 11.6)"
 
 [[scenario]]
 capability = "testing/harness"
-requirement = "真机验证只需一条命令"
-scenario = "在真机上运行"
+requirement = "One-command device verification"
+scenario = "Run on the device"
 by = "just test-device <host> on the R4S (docs/validation/foundation-device.md)"

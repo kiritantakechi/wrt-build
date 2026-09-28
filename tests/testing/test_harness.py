@@ -67,7 +67,7 @@ def _coverage(openspec: Path, tests: Path, *args: str) -> subprocess.CompletedPr
     )
 
 
-@spec(CAPABILITY, "规格场景与测试一一对应", "生成覆盖报告")
+@spec(CAPABILITY, "One test per spec scenario", "Generate coverage report")
 def test_coverage_report(demo: tuple[Path, Path]) -> None:
     result = _coverage(*demo, "--change", "demo-change")
     assert "covered    demo/widget / Demo / covered one  demo/test_widget.py::test_covered" in (
@@ -78,7 +78,7 @@ def test_coverage_report(demo: tuple[Path, Path]) -> None:
     assert result.returncode == 1
 
 
-@spec(CAPABILITY, "规格场景与测试一一对应", "标记指向不存在的场景")
+@spec(CAPABILITY, "One test per spec scenario", "Marker names a missing scenario")
 def test_dangling_marker_fails(demo: tuple[Path, Path]) -> None:
     openspec, tests = demo
     module = tests / "demo" / "test_widget.py"
@@ -88,7 +88,7 @@ def test_dangling_marker_fails(demo: tuple[Path, Path]) -> None:
     assert "demo/test_widget.py::test_covered: @spec names no scenario" in result.stderr
 
 
-@spec(CAPABILITY, "同一套用例，两种目标", "分别在两种目标上运行")
+@spec(CAPABILITY, "One suite, two targets", "Run on each target")
 def test_both_targets_collect_the_same_tests() -> None:
     collected = [
         _python("-m", "pytest", "--collect-only", "-q", "--target-kind", kind, cwd=TESTS_DIR)
@@ -99,7 +99,7 @@ def test_both_targets_collect_the_same_tests() -> None:
     assert ids[0] == ids[1]
 
 
-@spec(CAPABILITY, "目标专属用例要注明原因", "在模拟器上运行仅真机用例")
+@spec(CAPABILITY, "Target-specific tests state a reason", "Device-only tests on the emulator")
 def test_device_only_tests_are_skipped_with_reason(tmp_path: Path) -> None:
     (tmp_path / "test_probe.py").write_text(
         "from wrt_tests import target\n\n\n"
@@ -134,7 +134,7 @@ def _wheel(directory: Path, name: str) -> Path:
     return wheel
 
 
-@spec(CAPABILITY, "Python 工具链由 uv 锁定", "锁文件与声明不一致")
+@spec(CAPABILITY, "Python toolchain locked by uv", "Lock file out of sync")
 def test_stale_lock_is_rejected(tmp_path: Path) -> None:
     # Every script syncs or runs the tests project in locked mode ...
     scripts = (TESTS_DIR.parent / "scripts").glob("*.sh")
@@ -161,7 +161,7 @@ def test_stale_lock_is_rejected(tmp_path: Path) -> None:
     assert "needs to be updated" in result.stderr
 
 
-@spec(CAPABILITY, "Python 工具链由 uv 锁定", "类型错误")
+@spec(CAPABILITY, "Python toolchain locked by uv", "Type error")
 def test_type_error_is_reported(tmp_path: Path) -> None:
     shutil.copy(TESTS_DIR / "ty.toml", tmp_path / "ty.toml")
     (tmp_path / "broken.py").write_text('count: int = "three"\n')

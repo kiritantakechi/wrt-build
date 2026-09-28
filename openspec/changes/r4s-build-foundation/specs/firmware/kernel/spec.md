@@ -2,74 +2,74 @@
 
 ## Purpose
 
-规定固件内核的版本、eBPF 数据面、容器和存储所需要的内核特性，以及默认的 TCP 拥塞控制算法。
+Define the firmware kernel's version, the kernel features that the eBPF datapath, containers, and storage require, and the default TCP congestion control algorithm.
 
 ## ADDED Requirements
 
-### Requirement: 内核版本跟随上游
-内核版本 SHALL 等于固定下来的上游提交里 rockchip target 默认选用的版本，目前是 6.18.y 系列。
+### Requirement: Kernel version follows upstream
+The kernel version SHALL equal the version that the rockchip target selects by default in the pinned upstream commit, currently the 6.18.y series.
 
-#### Scenario: 检查运行中的内核
-- **WHEN** 在设备上查看运行中的内核版本
-- **THEN** 版本号与这次构建所固定的上游提交中 rockchip target 选用的内核版本一致
+#### Scenario: Check running kernel
+- **WHEN** the running kernel version is inspected on the router
+- **THEN** the version matches the kernel version that the rockchip target selects in the upstream commit pinned for this build
 
-### Requirement: 提供 BTF
-内核 MUST 提供自身的 BTF 类型信息（`/sys/kernel/btf/vmlinux`），并为已加载的内核模块提供各自的 BTF。
+### Requirement: Provide BTF
+The kernel MUST provide its own BTF type information (`/sys/kernel/btf/vmlinux`), and BTF for each loaded kernel module.
 
-#### Scenario: 检查 BTF
-- **WHEN** 系统启动后查看 `/sys/kernel/btf/`
-- **THEN** `vmlinux` 存在且不为空，已加载的模块也有对应的 BTF 文件
+#### Scenario: Check BTF
+- **WHEN** `/sys/kernel/btf/` is inspected after boot
+- **THEN** `vmlinux` exists and is not empty, and loaded modules have their corresponding BTF files
 
-### Requirement: BPF 与 cgroup v2
-内核 SHALL 启用 BPF 系统调用、BPF JIT、BPF 事件、带 BPF 挂载能力的 cgroup，以及 tcx。系统 SHALL 只挂载统一的 cgroup v2 层级，MUST NOT 启用 v1 的内存控制器。
+### Requirement: BPF and cgroup v2
+The kernel SHALL enable the BPF syscall, the BPF JIT, BPF events, cgroups with BPF attach support, and tcx. The system SHALL mount only the unified cgroup v2 hierarchy, and MUST NOT enable the v1 memory controller.
 
-#### Scenario: 检查 cgroup 挂载
-- **WHEN** 系统启动后查看 cgroup 的挂载情况
-- **THEN** `/sys/fs/cgroup` 是 cgroup2，并且没有挂载任何 v1 控制器
+#### Scenario: Check cgroup mounts
+- **WHEN** the cgroup mounts are inspected after boot
+- **THEN** `/sys/fs/cgroup` is cgroup2, and no v1 controller is mounted
 
-#### Scenario: 能加载 tcx 程序
-- **WHEN** 在某个网口的 tcx 入口挂载一个 BPF 程序
-- **THEN** 挂载成功，`bpftool net show` 能列出它
+#### Scenario: Load a tcx program
+- **WHEN** a BPF program is attached at the tcx ingress of a network port
+- **THEN** the attach succeeds and `bpftool net show` lists it
 
-### Requirement: 根文件系统和 overlay 需要的内核功能都编进内核
-内核 SHALL 内置 EROFS（包括 lz4 解压），以及带压缩功能（包括 zstd）的 F2FS，不依赖任何可加载模块。
+### Requirement: Root and overlay filesystems built in
+The kernel SHALL build in EROFS (including lz4 decompression) and F2FS with compression (including zstd), without depending on any loadable module.
 
-#### Scenario: 不加载任何模块就能启动
-- **WHEN** 设备启动
-- **THEN** 根文件系统以 erofs 挂载成功，overlay 以 f2fs 带压缩挂载成功，过程中没有加载任何文件系统模块
+#### Scenario: Boot without loading modules
+- **WHEN** the router boots
+- **THEN** the root filesystem mounts as erofs and the overlay mounts as f2fs with compression, and no filesystem module is loaded along the way
 
-### Requirement: 同一个内核能在模拟器中启动
-内核 SHALL 内置 QEMU `virt` 平台所需的驱动：PL011 串口、通用 PCIe 主机控制器、virtio 块设备和网卡，以及 i6300esb 看门狗。这样出货内核不做任何修改就能在模拟器中启动并使用磁盘、网络和看门狗。这些驱动 MUST 编译进内核，不能作为模块。
+### Requirement: Same kernel boots in the emulator
+The kernel SHALL build in the drivers the QEMU `virt` platform needs: PL011 serial, the generic PCIe host controller, virtio block and network devices, and the i6300esb watchdog. The shipped kernel then boots in the emulator without modification and uses the disk, network, and watchdog. These drivers MUST be built into the kernel, not as modules.
 
-#### Scenario: 出货内核在模拟器中启动
-- **WHEN** 用从出货镜像中提取出来的内核启动 QEMU `virt` 机器
-- **THEN** 串口有输出，virtio 磁盘上的根文件系统被挂载，两块 virtio 网卡和看门狗设备都被识别
+#### Scenario: Shipped kernel boots in the emulator
+- **WHEN** a QEMU `virt` machine boots the kernel extracted from the shipped image
+- **THEN** the serial console produces output, the root filesystem on the virtio disk is mounted, and both virtio NICs and the watchdog device are detected
 
-### Requirement: 默认拥塞控制为 BBRv3
-系统默认的 TCP 拥塞控制 SHALL 是 BBRv3，默认队列规则 SHALL 是 fq。
+### Requirement: BBRv3 as default congestion control
+The system's default TCP congestion control SHALL be BBRv3, and the default queueing discipline SHALL be fq.
 
-#### Scenario: 检查拥塞控制设置
-- **WHEN** 系统启动后读取 `net.ipv4.tcp_congestion_control` 和 `net.core.default_qdisc`
-- **THEN** 两者分别是 `bbr` 和 `fq`，并且 `/proc/kallsyms` 里能找到 `tcp_bbr` 模块中 BBRv3 才有的回调 `bbr_skb_marked_lost` 和 `bbr_tso_segs`（OpenWrt 开启了 `MODULE_STRIPPED`，会去掉 `MODULE_VERSION`，所以看不到模块版本号）
+#### Scenario: Check congestion control settings
+- **WHEN** `net.ipv4.tcp_congestion_control` and `net.core.default_qdisc` are read after boot
+- **THEN** they are `bbr` and `fq` respectively, and `/proc/kallsyms` contains the BBRv3-only callbacks `bbr_skb_marked_lost` and `bbr_tso_segs` from the `tcp_bbr` module (OpenWrt enables `MODULE_STRIPPED`, which removes `MODULE_VERSION`, so the module version is not visible)
 
-#### Scenario: 本机发起的连接使用 BBR
-- **WHEN** 设备自己发起一条 TCP 连接
-- **THEN** `ss -ti` 显示这条连接的拥塞控制是 bbr
+#### Scenario: Router-originated connections use BBR
+- **WHEN** the router itself opens a TCP connection
+- **THEN** `ss -ti` shows bbr as the congestion control for that connection
 
-### Requirement: 内核源码只改 BBRv3
-修改内核源码的补丁 SHALL 只有 BBRv3 这一组，MUST NOT 包含 NAT、fullcone、shortcut-fe 或其他转发加速类补丁。
+### Requirement: BBRv3 is the only kernel source change
+The only patches that modify kernel source SHALL be the BBRv3 set, and they MUST NOT include NAT, fullcone, shortcut-fe, or other forwarding acceleration patches.
 
-#### Scenario: 审计内核补丁
-- **WHEN** 列出补丁队列中所有修改内核源码的补丁
-- **THEN** 其中只有 BBRv3 系列
+#### Scenario: Audit kernel patches
+- **WHEN** all patches in the patch queue that modify kernel source are listed
+- **THEN** only the BBRv3 series is among them
 
-### Requirement: 使用标准 vermagic
-内核模块的版本标识（vermagic）SHALL 按上游 OpenWrt 的标准方式计算，MUST NOT 被替换成与内核配置无关的固定值。
+### Requirement: Standard vermagic
+The kernel module version identifier (vermagic) SHALL be computed the standard upstream OpenWrt way, and MUST NOT be replaced with a fixed value unrelated to the kernel configuration.
 
-#### Scenario: 安装同一次构建的 kmod
-- **WHEN** 在设备上安装与镜像出自同一次构建的任意 kmod
-- **THEN** 安装成功，模块能正常加载
+#### Scenario: Install a kmod from the same build
+- **WHEN** any kmod from the same build as the image is installed on the router
+- **THEN** the installation succeeds and the module loads normally
 
-#### Scenario: 拒绝内核配置不同的 kmod
-- **WHEN** 尝试安装一次内核配置不同的构建所产出的 kmod
-- **THEN** 包管理器因为内核依赖不满足而拒绝安装
+#### Scenario: Reject a kmod with a different kernel config
+- **WHEN** installing a kmod produced by a build with a different kernel configuration is attempted
+- **THEN** the package manager refuses to install it because the kernel dependency is not satisfied

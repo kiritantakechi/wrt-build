@@ -23,7 +23,7 @@ def _mount(router: Router, mountpoint: str) -> tuple[str, str, str]:
     return source, kind, options
 
 
-@spec(CAPABILITY, "根文件系统使用 EROFS", "检查构建产物")
+@spec(CAPABILITY, "EROFS root filesystem", "Check build artifacts")
 @target("emulation", "reads the build outputs next to the emulated image")
 def test_build_outputs_are_erofs(build_output: Path) -> None:
     images = sorted(p.name for p in (build_output / "targets").glob("*.img*"))
@@ -32,14 +32,14 @@ def test_build_outputs_are_erofs(build_output: Path) -> None:
     assert not [name for name in images if "squashfs" in name or "ext4" in name]
 
 
-@spec(CAPABILITY, "根文件系统使用 EROFS", "检查设备上的挂载")
+@spec(CAPABILITY, "EROFS root filesystem", "Check mounts on the router")
 def test_rom_is_erofs(router: Router) -> None:
     _, kind, options = _mount(router, "/rom")
     assert kind == "erofs"
     assert options.split(",")[0] == "ro"
 
 
-@spec(CAPABILITY, "可写层是开启 zstd 压缩的 f2fs", "首次启动建立 overlay")
+@spec(CAPABILITY, "Writable layer is zstd-compressed f2fs", "First boot creates the overlay")
 def test_overlay_is_compressed_f2fs(router: Router) -> None:
     source, kind, options = _mount(router, "/overlay")
     assert kind == "f2fs"
@@ -53,7 +53,7 @@ def test_overlay_is_compressed_f2fs(router: Router) -> None:
     assert int(router.run(f"cat /sys/block/{loop}/loop/offset")) > 0
 
 
-@spec(CAPABILITY, "恢复出厂只清空可写层", "恢复出厂")
+@spec(CAPABILITY, "Factory reset clears only the writable layer", "Factory reset")
 @target("emulation", "erases the router's configuration")
 def test_factory_reset_only_clears_the_overlay(router: Router) -> None:
     rom = router.run(ROM_DIGEST)
@@ -66,7 +66,7 @@ def test_factory_reset_only_clears_the_overlay(router: Router) -> None:
     assert _mount(router, "/overlay")[1] == "f2fs"
 
 
-@spec(CAPABILITY, "镜像能直接启动", "刷写后启动")
+@spec(CAPABILITY, "Image boots directly", "Boot after flashing")
 @target("device", "the image has to be written to a microSD card in the R4S")
 def test_flashed_image_boots(router: Router) -> None:
     router.wait_ready()

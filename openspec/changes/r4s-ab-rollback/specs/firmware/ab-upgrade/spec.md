@@ -2,56 +2,56 @@
 
 ## Purpose
 
-规定升级只写入当前没在运行的槽位，并把配置带到新槽位；升级过程中出任何意外，都不会影响正在运行的系统。
+Defines that an upgrade writes only the slot that is not currently running and carries the config over to the new slot; nothing that goes wrong during an upgrade affects the running system.
 
 ## ADDED Requirements
 
-### Requirement: 只写入非活动槽位
-升级 SHALL 只写入非活动槽位的 boot 分区和 root 分区。升级 MUST NOT 修改当前活动槽位、U-Boot 区域或分区表。
+### Requirement: Write only the inactive slot
+An upgrade SHALL write only the inactive slot's boot and root partitions. An upgrade MUST NOT modify the active slot, the U-Boot area, or the partition table.
 
-#### Scenario: 从槽位 A 升级
-- **WHEN** 在槽位 A 上运行时执行升级
-- **THEN** 只有 boot-B 和 root-B 的内容发生变化，boot-A、root-A 和引导区域的校验和与升级前相同
+#### Scenario: Upgrade from slot A
+- **WHEN** an upgrade runs while the system is running on slot A
+- **THEN** only the contents of boot-B and root-B change, and the checksums of boot-A, root-A, and the boot area match those from before the upgrade
 
-#### Scenario: 升级写到一半断电
-- **WHEN** 写入非活动槽位的过程中断电
-- **THEN** 重新上电后设备仍然从原来的槽位正常启动
+#### Scenario: Power loss mid-upgrade
+- **WHEN** power is lost while the inactive slot is being written
+- **THEN** after power is restored, the device still boots normally from the original slot
 
-### Requirement: 新槽位从全新的 overlay 开始
-写入新系统之后，非活动槽位原有的 overlay SHALL 作废，新系统第一次启动时 SHALL 建立一个全新的 overlay，只包含迁移过来的配置。
+### Requirement: New slot starts with a fresh overlay
+After the new system is written, the inactive slot's existing overlay SHALL be discarded, and on its first boot the new system SHALL create a fresh overlay that contains only the migrated config.
 
-#### Scenario: 旧 overlay 中的残留文件
-- **WHEN** 槽位 B 原有的 overlay 里有一个用户文件，然后执行升级并进入槽位 B
-- **THEN** 新系统里这个文件不存在
+#### Scenario: Leftover file in the old overlay
+- **WHEN** slot B's existing overlay contains a user file, and an upgrade then runs and boots into slot B
+- **THEN** the file does not exist in the new system
 
-### Requirement: 配置迁移
-默认保留配置时，当前系统的配置备份 SHALL 被放到新槽位首次启动时能读到的位置，并在首次启动时恢复。选择不保留配置时，新槽位 SHALL 以出厂默认配置启动。
+### Requirement: Config migration
+When config is preserved (the default), the current system's config backup SHALL be placed where the new slot can read it on first boot, and restored on that first boot. When the user chooses not to preserve config, the new slot SHALL boot with the factory default config.
 
-#### Scenario: 保留配置升级
-- **WHEN** 用默认方式升级并进入新槽位
-- **THEN** 新系统的配置和升级前一致
+#### Scenario: Config-preserving upgrade
+- **WHEN** an upgrade runs the default way and boots into the new slot
+- **THEN** the new system's config matches the config from before the upgrade
 
-#### Scenario: 不保留配置升级
-- **WHEN** 指定不保留配置进行升级
-- **THEN** 新槽位以出厂默认配置启动
+#### Scenario: Upgrade without preserving config
+- **WHEN** an upgrade runs with config preservation turned off
+- **THEN** the new slot boots with the factory default config
 
-### Requirement: 写入完成后进入试运行
-写入成功后，升级 SHALL 把 `boot_slot` 指向新槽位，设置 `upgrade_available` 为 1、`bootcount` 为 0，然后重启。只有健康检查确认之后，新槽位才 SHALL 成为长期使用的槽位。
+### Requirement: Trial boot after writing
+After a successful write, the upgrade SHALL point `boot_slot` at the new slot, set `upgrade_available` to 1 and `bootcount` to 0, and then reboot. The new slot SHALL become the long-term slot only after the health check confirms it.
 
-#### Scenario: 升级完成后重启
-- **WHEN** 升级写入完成
-- **THEN** 设备重启进入新槽位，并处于试运行状态
+#### Scenario: Reboot after upgrade
+- **WHEN** the upgrade finishes writing
+- **THEN** the device reboots into the new slot in the trial boot state
 
-### Requirement: 拒绝不匹配的镜像
-升级 MUST 拒绝元数据与本设备不匹配的镜像，也 MUST 拒绝格式不是单槽升级镜像的文件。
+### Requirement: Reject mismatched images
+An upgrade MUST reject an image whose metadata does not match this device, and MUST reject any file that is not a single-slot upgrade image.
 
-#### Scenario: 其他设备的镜像
-- **WHEN** 用一个为其他设备构建的镜像执行升级
-- **THEN** 升级被拒绝，两个槽位都没有被写入
+#### Scenario: Image for another device
+- **WHEN** an upgrade is run with an image built for another device
+- **THEN** the upgrade is rejected and neither slot is written
 
-### Requirement: 手动切换槽位
-管理员 SHALL 能手动切换到另一个槽位，例如退回上一个版本。切换后以试运行状态启动那个槽位。
+### Requirement: Manual slot switch
+An administrator SHALL be able to switch to the other slot manually, for example to go back to the previous version. After the switch, that slot boots in the trial boot state.
 
-#### Scenario: 手动退回上一版本
-- **WHEN** 管理员在槽位 B 上执行切换命令
-- **THEN** 设备重启进入槽位 A，并处于试运行状态，通过健康检查后被确认
+#### Scenario: Manually roll back to the previous version
+- **WHEN** an administrator runs the switch command on slot B
+- **THEN** the device reboots into slot A in the trial boot state, and the slot is confirmed after it passes the health check

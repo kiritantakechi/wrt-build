@@ -1,35 +1,35 @@
-# r4s-build-foundation 验证
+# r4s-build-foundation validation
 
-## 自动化部分
+## Automated
 
-foundation 的每个规格场景都对应一个测试用例，或者在 `tests/verified-elsewhere.toml` 里登记了由哪个构建或 CI job 验证。对照关系以工具的输出为准，这里不另外维护表格：
+Every foundation spec scenario maps to a test, or is registered in `tests/verified-elsewhere.toml` as verified elsewhere, together with the build or CI job that verifies it. The tool output is authoritative for this mapping, and no separate table is kept here:
 
 ```sh
 nix develop -c sh -c 'cd tests && uv run spec-coverage --change r4s-build-foundation'
 ```
 
-在模拟器里对一次构建的出货镜像运行全部用例（本机虚拟机或 CI 的 `system-test` job）：
+Run all tests in the emulator against the shipped image of a build (in the local VM or the CI `system-test` job):
 
 ```sh
 nix develop -c just test dev      # or: just test ci
 ```
 
-报告写在 `tests/.reports/emulation.xml`。
+The report is written to `tests/.reports/emulation.xml`.
 
-## 真机部分
+## On the device
 
-只有一条命令。先把镜像写入 microSD 卡（写之前务必确认设备名）：
+This takes a single command. First write the image to a microSD card (double-check the device name before writing):
 
 ```sh
 gzip -dc openwrt-rockchip-armv8-friendlyarm_nanopi-r4s-erofs-sysupgrade.img.gz | sudo dd of=/dev/<sd> bs=4M conv=fsync
 ```
 
-电脑接到 R4S 的 LAN 口（靠近 USB 口的那个），用 DHCP 取得地址，然后在 macOS 或虚拟机上运行：
+Connect the computer to the R4S LAN port (the one next to the USB ports), get an address via DHCP, then run on macOS or in the VM:
 
 ```sh
 just test-device 10.0.0.1
 ```
 
-模拟器专属的用例（断电、故障安全按键、恢复出厂、升级这些会改动设备状态的操作）在真机上会显示为跳过，并写明原因。只有真机才能验证的场景是“刷写后启动”：从 SD 卡经 U-Boot 启动到用户态，并能在 LAN 上打开管理界面。
+Emulator-only tests (power loss, the failsafe button, factory reset, upgrades: operations that change device state) show up as skipped on the device, with the reason. The only device-only scenario is "boot after flashing": booting from the SD card through U-Boot to userspace, with the management UI reachable on the LAN.
 
-报告写在 `tests/.reports/device.xml`，结果存档到 `docs/validation/foundation-device.md`。
+The report is written to `tests/.reports/device.xml`, and the results are archived in `docs/validation/foundation-device.md`.

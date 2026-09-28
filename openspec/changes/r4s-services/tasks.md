@@ -1,52 +1,52 @@
 # Tasks
 
-## 1. 内核与模拟环境（design D10）
+## 1. Kernel and emulation environment (design D10)
 
-- [ ] 1.1 在 `config/kernel.config` 的 virt 驱动组里加入 `CONFIG_USB_PCI=y` 和 `CONFIG_USB_XHCI_PCI=y`，并用 `listnewconfig` 补全子选项。验证：构建后的内核配置校验通过；模拟器里 `lsusb -t` 能看到 xHCI 根集线器。
-- [ ] 1.2 扩展模拟器夹具：挂上 `qemu-xhci`；数据盘用 `usb-uas` 加 `scsi-hd`；通过 QMP 的 `device_add` 和 `device_del` 在指定端口插拔磁盘。验证：`tests/testing/test_emulation.py` 里新增的自检用例确认热插入的磁盘在 dmesg 里走的是 uas 驱动，拔出后设备消失。
-- [ ] 1.3 在 `wrt_tests/` 里实现测试 CA，以及由出货 rootfs 中 busybox 和 musl 拼成 OCI 镜像的工具；`inet` 里跑 distribution 镜像仓库和 headscale（内置 DERP）；新增 `wg-peer` 和 `ts-peer` 两个命名空间。相关工具（distribution、skopeo、samba 的 smbclient、wireguard-go、wireguard-tools、headscale、tailscale、curl）加进 flake 的测试工具组。验证：`tests/unit/test_oci.py` 在宿主上用 skopeo 检查生成的镜像，架构是 arm64；`tests/unit/test_net.py` 确认新命名空间的地址和路由正确。
+- [ ] 1.1 Add `CONFIG_USB_PCI=y` and `CONFIG_USB_XHCI_PCI=y` to the virt driver group in `config/kernel.config`, and fill in the sub-options with `listnewconfig`. Verification: the built kernel config passes validation; `lsusb -t` in the emulator shows the xHCI root hub.
+- [ ] 1.2 Extend the emulator fixture: attach `qemu-xhci`; use `usb-uas` plus `scsi-hd` for the data disk; plug and unplug disks on a given port through QMP `device_add` and `device_del`. Verification: a new self-test in `tests/testing/test_emulation.py` confirms that a hot-plugged disk uses the uas driver according to dmesg, and that the device disappears after removal.
+- [ ] 1.3 In `wrt_tests/`, implement the test CA and a tool that assembles an OCI image from busybox and musl in the shipped rootfs; run a distribution registry and headscale (with embedded DERP) in `inet`; add two namespaces, `wg-peer` and `ts-peer`. Add the related tools (distribution, skopeo, samba's smbclient, wireguard-go, wireguard-tools, headscale, tailscale, curl) to the flake's test tool group. Verification: `tests/unit/test_oci.py` inspects the generated image with skopeo on the host and confirms the architecture is arm64; `tests/unit/test_net.py` confirms that the new namespaces have correct addresses and routes.
 
-## 2. 数据盘
+## 2. Data disk
 
-- [ ] 2.1 新增 `config/services.seed`，内容见 design D9。验证：`just config ci` 的逐行校验通过。
-- [ ] 2.2 在自有 feed 里实现 `wrt-data init`：列出候选磁盘，要求输入完整的设备名确认；然后建 btrfs、建子卷、写 UCI fstab。验证：`test_data_disk.py` 在空白磁盘上执行初始化并重启，覆盖“检查挂载”场景；另有一条用例确认不输入确认时磁盘没有任何改动。
-- [ ] 2.3 设置持久日志：`log_file=/mnt/data/logs/messages`，`log_size=64M`。验证：由“重启后查看日志”的用例覆盖；另有一条用例确认不接数据盘时 SD 卡上没有出现这个日志文件。
-- [ ] 2.4 在自有 feed 里实现 `wrt-snap` 的 `now` 和 `prune`，外加每天执行一次的 cron。验证：由两个快照场景的用例覆盖（过期清理靠逐日调整系统时间）。
+- [ ] 2.1 Add `config/services.seed` with the contents listed in design D9. Verification: the line-by-line check in `just config ci` passes.
+- [ ] 2.2 Implement `wrt-data init` in the own feed: list candidate disks and require typing the full device name to confirm; then create the btrfs filesystem and subvolumes and write the UCI fstab. Verification: `test_data_disk.py` runs initialization on a blank disk and reboots, covering the "Check mounts" scenario; another test confirms that the disk is left untouched when no confirmation is entered.
+- [ ] 2.3 Set up persistent logs: `log_file=/mnt/data/logs/messages`, `log_size=64M`. Verification: covered by the "View logs after reboot" test; another test confirms that this log file does not appear on the SD card when no data disk is attached.
+- [ ] 2.4 Implement `wrt-snap` `now` and `prune` in the own feed, plus a daily cron job. Verification: covered by the tests for the two snapshot scenarios (expiry pruning is tested by advancing the system clock one day at a time).
 
-## 3. 依赖挂载的启动顺序与降级
+## 3. Startup ordering for mount-dependent services and degraded mode
 
-- [ ] 3.1 给 podman、`wrt-containers`、ksmbd 的 init 脚本加上 `procd_add_restart_mount_trigger`，并在挂载点不在时直接返回。验证：由“数据盘挂载得比较晚”的用例覆盖（开机 30 秒后通过 QMP 插入磁盘）。
-- [ ] 3.2 降级行为。验证：由“不接数据盘启动”的用例覆盖，其中复用 datapath 的探测确认 LAN 能上网、代理正常，并确认 A/B 健康检查通过。
+- [ ] 3.1 Add `procd_add_restart_mount_trigger` to the podman, `wrt-containers`, and ksmbd init scripts, and return immediately when the mount point is absent. Verification: covered by the "Data disk mounts late" test (the disk is inserted through QMP 30 seconds after boot).
+- [ ] 3.2 Degraded behavior. Verification: covered by the "Boot without the data disk" test, which reuses the datapath probes to confirm that the LAN has internet access and the proxy works, and confirms that the A/B health check passes.
 
-## 4. 容器
+## 4. Containers
 
-- [ ] 4.1 修改 `containers.conf`，设置 `firewall_driver = "none"`；修改 `storage.conf`，把 graphroot 放到数据盘。验证：由“拉取一个镜像”和“检查规则集”两个用例覆盖。
-- [ ] 4.2 用 uci-defaults 加入 fw4 的 `podman` 区域和转发规则，并核对 einat 的内网网段设置包含容器网段。验证：由“容器访问外网”的用例覆盖，其中容器用 busybox `nc` 从同一个源端口先后访问两个探测地址，看到的公网端口相同（证明经过了 einat）；另有两条用例确认 LAN 能访问容器、容器访问不了 LAN。
-- [ ] 4.3 写一个 fw4 redirect 的示例（容器端口开放到 WAN，端口不在 20000-29999 之内）。验证：由“对外开放容器端口”的用例覆盖，从 `inet` 访问。
-- [ ] 4.4 在自有 feed 里实现 `wrt-containers`：遍历 `pods/*.yaml`，比较哈希后执行 `podman kube play --replace`，挂着数据盘的挂载触发器。验证：由“开机自动启动”和“声明未改变”两个用例覆盖（后者比较容器 ID）。
-- [ ] 4.5 容器流量走代理。验证：由“容器访问代理目标”的用例覆盖；用例同时确认 podman0 出现后 dae 在它上面挂了程序。
+- [ ] 4.1 Modify `containers.conf` to set `firewall_driver = "none"`; modify `storage.conf` to put graphroot on the data disk. Verification: covered by the "Pull an image" and "Check the ruleset" tests.
+- [ ] 4.2 Add the fw4 `podman` zone and forwarding rules through uci-defaults, and verify that einat's internal network setting includes the container subnet. Verification: covered by the "Container reaches the internet" test, in which the container uses busybox `nc` to reach two probe addresses in turn from the same source port and sees the same public port (proving the traffic went through einat); two more tests confirm that the LAN can reach containers and that containers cannot reach the LAN.
+- [ ] 4.3 Write an example fw4 redirect (a container port exposed to the WAN, outside 20000-29999). Verification: covered by the "Expose a container port" test, accessed from `inet`.
+- [ ] 4.4 Implement `wrt-containers` in the own feed: iterate over `pods/*.yaml`, compare hashes, then run `podman kube play --replace`, with a mount trigger on the data disk. Verification: covered by the "Start on boot" and "Declaration unchanged" tests (the latter compares container IDs).
+- [ ] 4.5 Container traffic goes through the proxy. Verification: covered by the "Container reaches a proxied target" test; the test also confirms that once podman0 appears, dae attaches its programs to it.
 
-## 5. 文件共享
+## 5. File sharing
 
-- [ ] 5.1 用 uci-defaults 配置 ksmbd：只绑定 lan，最低协议 SMB3，不允许访客，共享放在 `/mnt/data/shares`；fw4 只在 lan 上放行 445。验证：由 file-sharing 规格的全部用例覆盖，用 smbclient 从 `client-a`、`inet`、`wg-peer`、`ts-peer` 分别连接，SMB1 用 `client max protocol = NT1` 强制协商。
+- [ ] 5.1 Configure ksmbd through uci-defaults: bind only to lan, minimum protocol SMB3, no guest access, shares under `/mnt/data/shares`; fw4 allows 445 only on lan. Verification: covered by all tests of the file-sharing spec, which connect with smbclient from `client-a`, `inet`, `wg-peer`, and `ts-peer`; SMB1 negotiation is forced with `client max protocol = NT1`.
 
 ## 6. VPN
 
-- [ ] 6.1 配置 WireGuard：wg0 放进 `wg` 区域，没有预置任何密钥。验证：由“远程设备接入”和“WireGuard 设备访问外网”两个用例覆盖，对端是 `wg-peer`。
-- [ ] 6.2 配置 Tailscale：使用 nftables 模式，宣告 LAN 子网路由；核对 tailscale 源码里用到的 mark，登记进 `config/marks.tsv`。验证：由“通过子网路由访问 LAN”“tailnet 设备访问代理目标”“检查分配表”三个用例覆盖，对端是登录到 headscale 的 `ts-peer`。
+- [ ] 6.1 Configure WireGuard: wg0 in the `wg` zone, with no preset keys. Verification: covered by the "Remote device connects" and "WireGuard device reaches the internet" tests, with `wg-peer` as the peer.
+- [ ] 6.2 Configure Tailscale: nftables mode, advertising the LAN subnet route; verify the marks used in the tailscale source and register them in `config/marks.tsv`. Verification: covered by the "Reach the LAN via subnet route", "Tailnet device reaches a proxied target", and "Check the allocation table" tests, with `ts-peer`, logged into headscale, as the peer.
 
-## 7. 监控
+## 7. Monitoring
 
-- [ ] 7.1 配置 node-exporter：`listen_interface 'lan'`，打开 cpu、meminfo、netdev、filesystem、hwmon 采集器。验证：由 monitoring 规格的用例覆盖；温度场景是仅真机用例。
+- [ ] 7.1 Configure node-exporter: `listen_interface 'lan'`, with the cpu, meminfo, netdev, filesystem, and hwmon collectors enabled. Verification: covered by the monitoring spec tests; the temperature scenario is a device-only test.
 
-## 8. 模拟器用例（全部在 `just test` 中运行）
+## 8. Emulator tests (all run in `just test`)
 
-- [ ] 8.1 `tests/storage/test_data_disk.py`：覆盖 data-disk 规格的全部场景。验证：用例全部通过。
-- [ ] 8.2 `tests/services/test_containers.py`：覆盖 containers 规格的全部场景；“检查镜像”场景读取镜像审计输出的软件包列表。验证：用例全部通过。
-- [ ] 8.3 `tests/services/test_file_sharing.py`、`test_vpn.py`、`test_monitoring.py`：覆盖对应规格的全部场景。验证：用例全部通过；`spec-coverage` 显示这个 change 除了仅真机的场景外，没有未覆盖的场景。
+- [ ] 8.1 `tests/storage/test_data_disk.py`: covers all scenarios of the data-disk spec. Verification: all tests pass.
+- [ ] 8.2 `tests/services/test_containers.py`: covers all scenarios of the containers spec; the "Check the image" scenario reads the package list from the image audit output. Verification: all tests pass.
+- [ ] 8.3 `tests/services/test_file_sharing.py`, `test_vpn.py`, `test_monitoring.py`: cover all scenarios of the corresponding specs. Verification: all tests pass; `spec-coverage` shows no uncovered scenarios in this change other than the device-only ones.
 
-## 9. 真机冒烟与文档
+## 9. Device smoke test and documentation
 
-- [ ] 9.1 编写 `@target("device")` 用例：温度指标；选定的 SSD 和硬盘盒在 UAS 模式下持续读写 1 小时，同时满速下载，dmesg 里没有 USB 复位或 UAS 错误；macOS Finder 读写共享（提示人工操作，记录大文件拷贝速率）。验证：在模拟器上运行时这些用例被跳过并显示原因。
-- [ ] 9.2 运行 `just test-device <host>`，结果存档到 `docs/validation/services-device.md`；如果 UAS 不稳定，记录 quirks 的处理办法。验证：报告全部通过。
-- [ ] 9.3 编写 `docs/services.md`：数据盘初始化、Pod 声明文件的写法、怎样用 fw4 开放端口、快照恢复的步骤。验证：`test_data_disk.py` 中“从快照恢复文件”的用例执行的正是文档里的命令，用例通过。
+- [ ] 9.1 Write the `@target("device")` tests: temperature metrics; sustained read/write on the selected SSD and enclosure in UAS mode for 1 hour while downloading at full speed, with no USB resets or UAS errors in dmesg; macOS Finder read/write to shares (the test prompts for manual steps and records the large-file copy throughput). Verification: when run in the emulator, these tests are skipped and show the reason.
+- [ ] 9.2 Run `just test-device <host>` and archive the results in `docs/validation/services-device.md`; if UAS is unstable, record the quirks workaround. Verification: the report shows all tests passing.
+- [ ] 9.3 Write `docs/services.md`: data disk initialization, how to write Pod declaration files, how to expose ports with fw4, and the steps to restore from a snapshot. Verification: the "Restore a file from a snapshot" test in `test_data_disk.py` runs exactly the commands from the document, and the test passes.

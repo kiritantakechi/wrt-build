@@ -2,34 +2,34 @@
 
 ## Purpose
 
-在 PPPoE 出口的上行方向用 cake 做整形，并按 DSCP 分类；下行不做整形，以保留 flowtable 的转发加速。
+Shape the upload direction of the PPPoE WAN interface with cake and classify by DSCP; do not shape the download direction, so flowtable forwarding acceleration is preserved.
 
 ## ADDED Requirements
 
-### Requirement: 只整形上行
-pppoe-wan 的出方向 SHALL 由 cake 按配置的上行带宽整形，并补偿 PPPoE 的封装开销。入方向 MUST NOT 整形，也 MUST NOT 为入方向整形创建 ifb 设备。qosify 为按 DNS 名称分类而创建的 `ifb-dns` 不做整形，不受这条限制。
+### Requirement: Shape upload only
+Egress on pppoe-wan SHALL be shaped by cake at the configured upload bandwidth, compensating for PPPoE encapsulation overhead. Ingress MUST NOT be shaped, and an ifb device MUST NOT be created for ingress shaping. The `ifb-dns` that qosify creates for classification by DNS name does no shaping and is exempt from this restriction.
 
-#### Scenario: 检查队列规则
-- **WHEN** 查看 pppoe-wan 的队列规则和系统里的网络设备
-- **THEN** pppoe-wan 的根队列是按配置带宽运行的 cake；系统里唯一的 ifb 设备是 `ifb-dns`，它上面没有 cake
+#### Scenario: Inspect queueing disciplines
+- **WHEN** the queueing disciplines of pppoe-wan and the network devices on the system are inspected
+- **THEN** the root qdisc of pppoe-wan is cake running at the configured bandwidth; the only ifb device on the system is `ifb-dns`, and it has no cake
 
-### Requirement: 按内网主机公平分配
-即使地址转换是由 einat 完成的，cake SHALL 仍能在各台 LAN 主机之间公平分配上行带宽。
+### Requirement: Fair sharing across internal hosts
+Even though address translation is done by einat, cake SHALL still share upload bandwidth fairly among LAN hosts.
 
-#### Scenario: 两台主机同时满速上传
-- **WHEN** 两台 LAN 主机同时以尽可能高的速率上传，持续 60 秒
-- **THEN** 两者的平均上行速率之差不超过 20%
+#### Scenario: Two hosts upload at full speed
+- **WHEN** two LAN hosts upload at the same time as fast as they can, for 60 seconds
+- **THEN** their average upload rates differ by no more than 20%
 
-### Requirement: 按 DSCP 分类
-qosify SHALL 按规则（端口、DNS 名称、大流量检测）把出方向流量分进 diffserv4 的各个档位。
+### Requirement: DSCP classification
+qosify SHALL classify egress traffic into the diffserv4 tins by rule (port, DNS name, bulk-flow detection).
 
-#### Scenario: 分类到语音档
-- **WHEN** 一条流量命中了被设为 voice 类的规则
-- **THEN** cake 的统计显示这条流量进入了语音档位
+#### Scenario: Classify into the voice tin
+- **WHEN** a flow matches a rule set to the voice class
+- **THEN** cake's statistics show that the flow entered the voice tin
 
-### Requirement: 重拨后恢复
-PPPoE 重拨或 WAN 接口被重建后，整形和分类 SHALL 在 60 秒内恢复。
+### Requirement: Recovery after redial
+After a PPPoE redial or a re-created WAN interface, shaping and classification SHALL recover within 60 seconds.
 
-#### Scenario: PPPoE 重拨
-- **WHEN** PPPoE 断开后重新拨号成功
-- **THEN** 60 秒内 pppoe-wan 上重新出现 cake 和 qosify 的分类器
+#### Scenario: PPPoE redial
+- **WHEN** PPPoE disconnects and then redials successfully
+- **THEN** within 60 seconds, cake and the qosify classifier reappear on pppoe-wan

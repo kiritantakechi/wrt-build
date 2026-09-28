@@ -2,40 +2,40 @@
 
 ## Context
 
-动机见 proposal.md。以下现状都在上游源码里核对过（OpenWrt main `1019293`）：
+For motivation, see proposal.md. The following current behavior was checked against the upstream source (OpenWrt main `1019293`):
 
-- **apk 索引的签名方式**：索引由 `apk mkndx --sign $(BUILD_KEY_APK_SEC)` 签名（`package/Makefile:86-95,195-200`）。私钥是 `$(TOPDIR)/private-key.pem`，文件不存在时会自动生成一把 prime256v1 密钥；公钥由私钥导出（`package/Makefile:77-81`，`rules.mk:350-351`）。
-- **构建密钥会被装进镜像**：base-files 在 `CONFIG_BUILDBOT` 没开时，会把构建公钥装进镜像的 `/etc/apk/keys/`（`package/base-files/Makefile:124-128`）。
-- **官方构建的做法**：打开 `CONFIG_BUILDBOT`，再用 `openwrt-keyring` 包提供发布公钥（`package/system/openwrt-keyring/Makefile:33-37`）。
-- **`CONFIG_BUILDBOT` 的其他副作用**：
-  - 在 `PER_FEED_REPO` 模式下，生成的软件源列表里会多出一条 kmods 路径（`include/feeds.mk:40-56`）。本设计会整个覆盖这份列表，所以没有影响。
-  - 工具链目录的 git 版本变化时会强制清空重建（`toolchain/Makefile:65-75`）。这与 foundation 设计里按工具链输入决定缓存的做法一致。
-- **固件签名**：`CONFIG_SIGN_FIRMWARE` 用 usign/ucert 给固件的元数据签名（`include/image-commands.mk:94,125`）。rockchip 的 `platform.sh` 要求固件带元数据（`REQUIRE_IMAGE_METADATA=1`）。
-- **上游 change 提供的前提**：
-  - `r4s-build-foundation` 产出未签名的产物和 `manifest.json`；
-  - `r4s-ab-rollback` 提供写非活动槽位和 `wrt-slot`；
-  - `r4s-services` 提供数据盘、podman 和声明式 Pod；
-  - `r4s-ebpf-datapath` 让容器流量经过 dae；
-  - foundation 的模拟环境和测试框架，以及后续 change 补齐的运营商、互联网和数据盘。
+- **How the apk index is signed**: The index is signed by `apk mkndx --sign $(BUILD_KEY_APK_SEC)` (`package/Makefile:86-95,195-200`). The private key is `$(TOPDIR)/private-key.pem`; if the file does not exist, a prime256v1 key is generated automatically. The public key is derived from the private key (`package/Makefile:77-81`, `rules.mk:350-351`).
+- **The build key is installed into the image**: When `CONFIG_BUILDBOT` is off, base-files installs the build public key into the image's `/etc/apk/keys/` (`package/base-files/Makefile:124-128`).
+- **What official builds do**: They enable `CONFIG_BUILDBOT` and provide the release public key through the `openwrt-keyring` package (`package/system/openwrt-keyring/Makefile:33-37`).
+- **Other side effects of `CONFIG_BUILDBOT`**:
+  - In `PER_FEED_REPO` mode, the generated feed list gains an extra kmods path (`include/feeds.mk:40-56`). This design overwrites the whole list, so this has no effect.
+  - When the git revision of the toolchain directory changes, the toolchain is forcibly cleaned and rebuilt (`toolchain/Makefile:65-75`). This matches the foundation design, which keys the cache on the toolchain inputs.
+- **Firmware signing**: `CONFIG_SIGN_FIRMWARE` uses usign/ucert to sign the firmware metadata (`include/image-commands.mk:94,125`). The rockchip `platform.sh` requires firmware to carry metadata (`REQUIRE_IMAGE_METADATA=1`).
+- **Prerequisites provided by earlier changes**:
+  - `r4s-build-foundation` produces unsigned artifacts and `manifest.json`;
+  - `r4s-ab-rollback` provides writing to the inactive slot and `wrt-slot`;
+  - `r4s-services` provides the data disk, podman, and declarative Pods;
+  - `r4s-ebpf-datapath` routes container traffic through dae;
+  - the foundation's emulation environment and test framework, plus the ISP, internet, and data disk that later changes add.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- 即使构建 job 被攻破，攻击者也拿不到能长期冒充发布者的密钥。
-- 设备端的更新完全不依赖路由器本机直连 GitHub。
-- 每周 bump 有一道验证闸门：从上一个正式版升级到候选版的完整过程，在 CI 的模拟器里自动演练，不需要真机。人工只负责批准签名和点合并。
-- 签名、发布、同步、推送的逻辑都在模拟器或宿主上有自动用例；CI 和测试调用的是同一份脚本，只是用的密钥不同。
+- Even if the build job is compromised, an attacker cannot obtain a key that lets them impersonate the publisher long term.
+- Device-side updates do not depend at all on the router connecting directly to GitHub.
+- The weekly bump has a verification gate: the full upgrade from the previous stable release to the candidate is rehearsed automatically in the CI emulator, with no device needed. Humans only approve the signing and click merge.
+- The signing, publishing, sync, and push logic all have automated tests in the emulator or on the host; CI and the tests call the same scripts and differ only in the keys they use.
 
 **Non-Goals:**
-- 在构建 job 被攻破的情况下，保证当次构建产物本身的完整性。这需要可复现构建加上第三方重建比对，不在本 change 范围内。
-- 自建软件源服务器或 CDN。
-- 多台设备的批量管理。
+- Guaranteeing the integrity of the current build's own artifacts when the build job is compromised. That requires reproducible builds plus comparison against third-party rebuilds, which is out of scope for this change.
+- Running our own package repository server or CDN.
+- Bulk management of multiple devices.
 
 ## Decisions
 
-### D1. 两种构建形态和信任锚
+### D1. Two build variants and the trust anchor
 
-- **CI 构建就是发布构建**：`config/ci.seed` 增加下面几项，不再单独设 release profile。于是 CI 构建的、模拟器测试的、签名发布的，始终是同一份镜像。两个 profile 形成对称：`dev` 信任本地构建密钥，`ci` 信任发布公钥。
+- **The CI build is the release build**: `config/ci.seed` adds the lines below, and there is no separate release profile. As a result, the image CI builds, the image the emulator tests, and the image that is signed and published are always the same. The two profiles are symmetric: `dev` trusts the local build key, and `ci` trusts the release public key.
 
 ```
 CONFIG_BUILDBOT=y
@@ -44,15 +44,15 @@ CONFIG_PACKAGE_wrt-keyring=y
 # CONFIG_SIGN_FIRMWARE is not set
 ```
 
-- **`wrt-keyring` 包**：放在自有 feed 里，安装 `/etc/apk/keys/wrt-release-<id>.pem`（apk 用的 EC 公钥）和 usign 公钥。支持同时放多把，用于轮换。
-- **构建过程中的签名**：构建时仍然会生成一把一次性的 apk 私钥，给构建内部的安装和建索引用。因为打开了 `BUILDBOT`，这把钥匙的公钥不会进镜像。构建时也不给固件签名。
-- **开发版**：dev profile 不开 `BUILDBOT`，沿用上游行为，镜像信任本地构建的密钥。这类镜像只用于调试，不会发布。
-- **对已有用例的影响**：foundation 里“安装同一次构建的 kmod”那条用例，改为使用 `signed_repo` 夹具。这个夹具用临时密钥把本次构建的仓库重新签名，并把临时公钥写进测试 overlay（见 D7）。
-- **备选方案**：
-  - 给 base-files 打补丁，跳过安装构建公钥。否决，因为上游已经有 `BUILDBOT` 这条现成的路径。
-  - 单独设一个 release profile。否决，因为那样 CI 测试的镜像和发布的镜像就不是同一份了。
+- **The `wrt-keyring` package**: Lives in the project's own feed and installs `/etc/apk/keys/wrt-release-<id>.pem` (the EC public key used by apk) and the usign public key. It can hold several keys at once for rotation.
+- **Signing during the build**: The build still generates a one-time apk private key for installs and indexing inside the build. Because `BUILDBOT` is enabled, that key's public key does not enter the image. The build does not sign the firmware either.
+- **Development builds**: The dev profile does not enable `BUILDBOT` and keeps the upstream behavior, so the image trusts the locally built key. These images are for debugging only and are never published.
+- **Impact on existing tests**: The foundation test "Install a kmod from the same build" switches to the `signed_repo` fixture. This fixture re-signs the current build's repository with an ephemeral key and writes the ephemeral public key into the test overlay (see D7).
+- **Alternatives**:
+  - Patch base-files to skip installing the build public key. Rejected, because upstream already provides the ready-made `BUILDBOT` path.
+  - Add a separate release profile. Rejected, because then the image CI tests and the image that is published would not be the same.
 
-### D2. 签名 job
+### D2. Signing job
 
 ```
 job sign  (needs: firmware; environment: release-signing -> required reviewer)
@@ -66,24 +66,24 @@ job sign  (needs: firmware; environment: release-signing -> required reviewer)
   5. upload signed set for upgrade-drill and publish
 ```
 
-- **签名工具的来源**：签名工具由 flake 用固定版本的源码自行构建，不使用构建 job 产出的宿主工具。那些工具出自可能被攻破的 job，拿来签名就等于绕开了隔离。
-- **同一份签名脚本**：`release-sign.sh` 只接收输入目录、输出目录和两把密钥。CI 传入正式密钥；测试传入临时密钥，覆盖篡改、轮换和信任锚这些场景。
-- **密钥存放**：两把私钥存为 `release-signing` 这个 environment 的 secrets，只有这个 environment 能读到。这个 environment 设置了必需的审批人，满足“每次签名都需要人工审批”。
-- **备选方案**：
-  - 在本机签名。探索阶段已经决定不用。
-  - 在构建 job 里签名。否决，理由见 proposal。
+- **Where the signing tools come from**: The flake builds the signing tools itself from pinned sources and does not use the host tools produced by the build job. Those tools come from a job that may be compromised, so signing with them would bypass the isolation.
+- **One signing script**: `release-sign.sh` takes only an input directory, an output directory, and the two keys. CI passes the production keys; tests pass ephemeral keys and cover the tampering, rotation, and trust anchor scenarios.
+- **Key storage**: Both private keys are stored as secrets of the `release-signing` environment, and only that environment can read them. The environment has required reviewers, which satisfies "every signing requires manual approval".
+- **Alternatives**:
+  - Sign on a local machine. Already ruled out during exploration.
+  - Sign in the build job. Rejected; see the proposal for the reasons.
 
-### D3. 发布
+### D3. Publishing
 
-`publish` job 在 `upgrade-drill` 通过之后执行（D5）。发布内容由 `scripts/release-publish.sh` 先组装成一个目录和一份 `release.json`（tag、是否预发布、说明文字、附件列表），最后一步才用 `gh release create` 上传。组装部分由宿主用例覆盖。
+The `publish` job runs after `upgrade-drill` passes (D5). `scripts/release-publish.sh` first assembles the release into a directory and a `release.json` (tag, prerelease flag, notes, attachment list); only the last step uploads it with `gh release create`. The assembly part is covered by host tests.
 
-- **一致性校验**：先核对 `manifest.json` 里的运行标识与全部产物一致，不一致就中止。
-- **Release 命名**：tag 为 `r<YYYYMMDD>-<openwrt短SHA>-<运行号>`；PR 构建发为 prerelease，主分支构建发为正式 release。
-- **附件**：出厂镜像、升级 tar、`repo.tar.zst`（按 apk 的仓库目录结构组织，包括 targets 和 packages）、`manifest.json`、`SHA256SUMS`。
-- **说明文字**：由 `upstream.lock` 和补丁队列的哈希自动生成。
-- **体积上限**：单个附件最大 2 GB，仓库归档预计在几百 MB 左右。
+- **Consistency check**: First confirm that the run identifier in `manifest.json` matches every artifact; abort on a mismatch.
+- **Release naming**: The tag is `r<YYYYMMDD>-<openwrt-short-sha>-<run-number>`. PR builds are published as prereleases, and main-branch builds as stable releases.
+- **Attachments**: The factory image, the upgrade tar, `repo.tar.zst` (organized in apk's repository directory layout, including targets and packages), `manifest.json`, and `SHA256SUMS`.
+- **Release notes**: Generated automatically from `upstream.lock` and the patch queue hash.
+- **Size limit**: Each attachment can be at most 2 GB; the repository archive is expected to be a few hundred MB.
 
-### D4. 设备端同步
+### D4. Device-side sync
 
 ```
 wrt-sync (procd service, mount trigger /mnt/data)
@@ -98,18 +98,18 @@ wrt-sync (procd service, mount trigger /mnt/data)
 cron: daily
 ```
 
-- **Releases 的地址可配置**：UCI 选项 `wrt-sync.main.api` 默认是 `https://api.github.com`，测试把它指向沙箱里的模拟服务。
-- **容器不需要被信任**：完整性由宿主这边用镜像里的发布公钥校验。所以同步容器可以用第三方的最小镜像，它只负责下载。
-- **原子切换**：新版本先下载到 `.incoming`，全部校验通过后才改 `current` 这个符号链接。
-- **apk 源列表**：`/etc/apk/repositories.d/distfeeds.list` 被覆盖，改为指向 `current` 下的本地仓库，路径是 `file` 形式的 `packages.adb`。
-- **本地升级**：`wrt-update` 调用 sysupgrade 升级到 `current` 里的升级 tar。
-- **签名强制检查**：`platform_check_image`（来自 A/B 那个 change）额外要求镜像必须带有效签名。在 `REQUIRE_IMAGE_METADATA` 的基础上，用 ucert 对照镜像里的公钥校验。
+- **Configurable Releases address**: The UCI option `wrt-sync.main.api` defaults to `https://api.github.com`; tests point it at a mock service in the sandbox.
+- **The container does not need to be trusted**: The host verifies integrity with the release public key in the image. So the sync container can use a minimal third-party image; its only job is downloading.
+- **Atomic switch**: A new release is first downloaded to `.incoming`, and the `current` symlink changes only after all checks pass.
+- **apk feed list**: `/etc/apk/repositories.d/distfeeds.list` is overwritten to point to the local repository under `current`, as a `file`-style `packages.adb` path.
+- **Local upgrade**: `wrt-update` calls sysupgrade to upgrade to the upgrade tar in `current`.
+- **Mandatory signature check**: `platform_check_image` (from the A/B change) additionally requires the image to carry a valid signature. On top of `REQUIRE_IMAGE_METADATA`, it uses ucert to verify against the public key in the image.
 
-### D5. 每周 bump
+### D5. Weekly bump
 
-- **定时工作流**：每周一执行，读取三个上游仓库 main 的 HEAD。有变化就更新 `upstream.lock`，用 GitHub App 或默认的 token 开 PR。PR 描述里写入新旧 SHA，以及 `git log --oneline` 的摘要，最多 50 行。
-- **PR 的检查**：foundation 的 CI 会在补丁冲突时失败，并写出冲突的补丁文件名。
-- **升级演练闸门**：分支保护要求 `upgrade-drill` 这个 job 通过。它在签名之后运行，用的是正式签名的产物和正式的信任锚：
+- **Scheduled workflow**: Runs every Monday and reads the HEAD of main in the three upstream repositories. If anything changed, it updates `upstream.lock` and opens a PR with a GitHub App or the default token. The PR description includes the old and new SHAs and a `git log --oneline` summary of at most 50 lines.
+- **PR checks**: The foundation CI fails on a patch conflict and reports the name of the conflicting patch file.
+- **Upgrade drill gate**: Branch protection requires the `upgrade-drill` job to pass. It runs after signing and uses the production-signed artifacts and the production trust anchor:
 
 ```
 build.yml   host-toolchain -> firmware (ci) -> system-test (emulation, ephemeral keys)
@@ -124,14 +124,14 @@ upgrade-drill (emulation):
   pass      = new slot confirmed; fail = rollback observed, job fails, nothing is published
 ```
 
-- **为什么不再需要真机验证**：真机验证原本要确认三件事：新镜像能被旧系统接受并写入、新系统能启动并通过健康检查、配置能迁移过去。演练在同一个出货镜像、同一套信任锚上完成了这三件事。模拟器覆盖不了的只有硬件链路，而这部分已经由 A/B 回滚兜底。
-- **备选方案**：
-  - 维护者在设备上验证后写入状态（原方案）。否决，因为每周都要一次真机操作。
-  - 让设备自动回报验证结果。否决，因为这需要设备持有能写 GitHub 状态的 token，增加攻击面。
+- **Why device verification is no longer needed**: Device verification was meant to confirm three things: the old system accepts and writes the new image, the new system boots and passes the health check, and the configuration carries over. The drill does all three on the same shipped image with the same trust anchor. The only thing the emulator cannot cover is the hardware path, and A/B rollback is already the safety net for that.
+- **Alternatives**:
+  - The maintainer verifies on the device and then writes a status (the original plan). Rejected, because it needs work on the device every week.
+  - The device reports verification results automatically. Rejected, because the device would need to hold a token that can write GitHub statuses, which increases the attack surface.
 
-### D6. 配置推送
+### D6. Config push
 
-- **私有仓库的结构**：
+- **Private repository layout**:
 
 ```
 wrt-config (private repo)
@@ -142,50 +142,50 @@ wrt-config (private repo)
   uci/*.uci.tmpl              uci batch templates, filled from secrets at push time
 ```
 
-- **命令**：`just config-init` 生成私有仓库的骨架；`just config-push <host>` 负责推送，私有仓库的位置由 `WRT_CONFIG_DIR` 指定。两者与脚本同名，符合 foundation 的“对象-动词”命名规则。推送依次执行：
-  1. 用 sops 解密到临时目录，退出时清理；
-  2. 渲染模板；
-  3. 在本机校验：`uci` 的语法检查，以及在设备上用 `dae validate` 做一次预校验。预校验在设备的临时目录里进行，不改动任何现有配置；
-  4. 计算每个服务的配置哈希，与设备上的记录比较，只推送并重载有变化的服务；
-  5. 通过 `ssh -o PasswordAuthentication=no` 把文件传到设备并执行 `uci batch`；
-  6. 如果某个服务重载失败，恢复它推送前的备份，再次重载，然后以非零状态退出。
-- **跨升级保留**：推送写入的路径（`/etc/dae/user/`、`/etc/config/*` 中相关的项、Pod YAML 以外的本地文件）追加到镜像的 `/etc/sysupgrade.conf`，保证 A/B 升级后仍然保留。
-- **为什么要加密**：私有仓库一旦泄露或误公开，明文密钥就全部暴露。sops 加 age 与 Nix 生态契合，解密只在工作站上进行。这一条是本设计补充的默认安全措施，探索阶段只确认过“密钥放在私有仓库”。
+- **Commands**: `just config-init` generates the private repository skeleton; `just config-push <host>` performs the push, with the private repository location given by `WRT_CONFIG_DIR`. Both share their names with their scripts, following the foundation's "object-verb" naming rule. The push runs these steps in order:
+  1. Decrypt with sops into a temporary directory, which is cleaned up on exit;
+  2. Render the templates;
+  3. Validate locally: `uci` syntax checks, plus a pre-validation with `dae validate` on the device. The pre-validation runs in a temporary directory on the device and changes no existing configuration;
+  4. Compute a configuration hash for each service, compare it with the record on the device, and push and reload only the services that changed;
+  5. Transfer the files to the device over `ssh -o PasswordAuthentication=no` and run `uci batch`;
+  6. If a service fails to reload, restore its pre-push backup, reload it again, and exit with a nonzero status.
+- **Preservation across upgrades**: The paths the push writes (`/etc/dae/user/`, the relevant entries in `/etc/config/*`, and local files other than the Pod YAML) are appended to the image's `/etc/sysupgrade.conf` so they survive A/B upgrades.
+- **Why encrypt**: If the private repository leaks or is made public by mistake, every plaintext secret is exposed. sops with age fits the Nix ecosystem, and decryption happens only on the workstation. This is a default security measure added by this design; exploration only confirmed "secrets live in a private repository".
 
-### D7. 验证方式
+### D7. Verification
 
-- **用例与规格一一对应**：
-  - `tests/release/test_signing.py`：一部分在宿主上运行，静态审计工作流（只有 `sign` 引用 `release-signing`，签名 job 的步骤只有下载、`sign-tools` 和 `release-sign.sh`），并用临时密钥驱动 `release-sign.sh`；另一部分在模拟器里确认设备拒绝其他密钥签名的索引。
-  - `tests/release/test_publishing.py`：宿主上驱动 `release-publish.sh`，覆盖附件、预发布与正式版的判断、运行标识不一致、说明文字。
-  - `tests/release/test_device_sync.py`：模拟器用例，`inet` 里跑一个模拟的 GitHub Releases API（HTTPS，测试 CA 签发），同时阻断路由器 WAN 地址到它的直连。
-  - `tests/release/test_upstream_bump.py`：宿主上用本地裸仓库充当三个上游，覆盖开 PR、不开 PR 和补丁冲突；升级演练的两个场景由 `upgrade-drill` 运行的用例标注。
-  - `tests/ops/test_config_push.py`：用一次性的配置仓库和 age 测试密钥，对模拟器里的路由器执行 `just config-push`。
-- **临时密钥夹具**：`wrt_tests/keys.py` 生成一次性的 apk EC 密钥和 usign 密钥，并提供两个夹具：
-  - `signed_repo`：用 `release-sign.sh` 重新签名本次构建的产物；
-  - `trust`：把对应的公钥写进路由器的测试 overlay，替换掉 `/etc/apk/keys` 里原有的公钥。
-- **演练用例**：`upgrade-drill` job 运行的用例带有 `@target("emulation")`，并用 pytest 的 `-m drill` 单独选出。`system-test` 用临时密钥跑同一组用例，所以演练逻辑本身每次提交都被测到，签名之后只是换成正式密钥和正式信任锚再跑一遍。
-- **GitHub 端的设置**：environment 的审批人和分支保护的必需检查项，属于 GitHub 仓库的设置，不在代码里。由 `scripts/github-audit.sh` 用 `gh api` 读取并核对，在 check 工作流里定期运行。
-- **真机**：本 change 没有仅真机的场景。
+- **Tests map one-to-one to specs**:
+  - `tests/release/test_signing.py`: One part runs on the host: it statically audits the workflows (only `sign` references `release-signing`, and the signing job's only steps are the download, `sign-tools`, and `release-sign.sh`) and drives `release-sign.sh` with ephemeral keys. The other part confirms in the emulator that the device rejects an index signed with another key.
+  - `tests/release/test_publishing.py`: Drives `release-publish.sh` on the host, covering the attachments, the prerelease versus stable decision, a run identifier mismatch, and the release notes.
+  - `tests/release/test_device_sync.py`: An emulator test. A mock GitHub Releases API runs in `inet` (HTTPS, with a certificate issued by the test CA), while direct connections from the router's WAN address to it are blocked.
+  - `tests/release/test_upstream_bump.py`: Uses local bare repositories on the host as the three upstreams and covers opening a PR, not opening a PR, and patch conflicts; the two upgrade drill scenarios are tagged by the tests that `upgrade-drill` runs.
+  - `tests/ops/test_config_push.py`: Runs `just config-push` against the router in the emulator, using a throwaway config repository and an age test key.
+- **Ephemeral key fixtures**: `wrt_tests/keys.py` generates a one-time apk EC key and usign key and provides two fixtures:
+  - `signed_repo`: re-signs the current build's artifacts with `release-sign.sh`;
+  - `trust`: writes the matching public keys into the router's test overlay, replacing the existing public keys in `/etc/apk/keys`.
+- **Drill tests**: The tests run by the `upgrade-drill` job carry `@target("emulation")` and are selected separately with pytest's `-m drill`. `system-test` runs the same tests with ephemeral keys, so the drill logic itself is tested on every commit; after signing, the same tests simply run again with the production keys and the production trust anchor.
+- **GitHub-side settings**: The environment reviewers and the branch protection required checks are GitHub repository settings, not code. `scripts/github-audit.sh` reads and checks them with `gh api`, and runs periodically in the check workflow.
+- **Device**: This change has no device-only scenarios.
 
 ## Risks / Trade-offs
 
-- **[构建 job 被攻破时，当次产物可能已被篡改]** 这是签名隔离防不住的。→ 长期可以靠可复现构建和第三方重建比对来发现；短期由人工审批加上阅读 diff 把关。
-- **[GitHub API 的速率限制或限流]** → 同步每天一次，并使用条件请求（ETag）。
-- **[`apk adbsign` 的参数和行为]** → `release-sign.sh` 的最后一步用 `wrt-keyring` 里的公钥做一次校验，校验不通过就判为失败；`test_signing.py` 覆盖这条路径。
-- **[演练用的上一个正式版本身有缺陷]** 例如旧版本的升级逻辑有 bug，演练就会一直失败。→ 这时由维护者判断，修复后发一个过渡版本；演练的基线始终是最新的正式版。
-- **[模拟器覆盖不了硬件链路]** → 由 A/B 回滚兜底：真机升级后如果起不来，会自动回到上一个槽位。
-- **[`BUILDBOT` 触发的工具链强制重建]** 只在工具链目录的 git 版本变化时发生，与缓存策略一致。
-- **[手工推送配置时出错]** → 推送前校验、只重载有变化的服务、失败时回滚，三者结合。
-- **[age 私钥丢失，密钥无法解密]** → 在工作站之外离线保存一份 age 密钥备份，写进 `docs/ops.md`。
+- **[If the build job is compromised, the current artifacts may already be tampered with]** Signing isolation cannot prevent this. → Long term, reproducible builds and comparison against third-party rebuilds can detect it; short term, manual approval plus reading the diff are the safeguard.
+- **[GitHub API rate limiting or throttling]** → Sync runs once a day and uses conditional requests (ETag).
+- **[Arguments and behavior of `apk adbsign`]** → The last step of `release-sign.sh` verifies with the public keys in `wrt-keyring` and treats a failed check as a failure; `test_signing.py` covers this path.
+- **[The previous stable release used for the drill is itself defective]** For example, if the old release's upgrade logic has a bug, the drill keeps failing. → The maintainer then decides, and ships an interim release after the fix; the drill baseline is always the latest stable release.
+- **[The emulator cannot cover the hardware path]** → A/B rollback is the safety net: if the device fails to boot after an upgrade, it automatically returns to the previous slot.
+- **[Forced toolchain rebuilds triggered by `BUILDBOT`]** They happen only when the git revision of the toolchain directory changes, which matches the caching strategy.
+- **[Mistakes when pushing configuration by hand]** → Pre-push validation, reloading only the services that changed, and rollback on failure work together.
+- **[Losing the age private key makes the secrets undecryptable]** → Keep an offline backup of the age key outside the workstation, documented in `docs/ops.md`.
 
 ## Migration Plan
 
-1. 生成发布用的 apk EC 密钥对和 usign 密钥对。私钥存进 `release-signing` environment 的 secrets，公钥放进 `wrt-keyring`。
-2. 建立私有配置仓库和 age 密钥，把现有配置迁移进去。
-3. 第一次正式发布后刷写出厂镜像（其中已包含 `wrt-keyring`），然后运行一次 `just test-device`。之后的更新都走同步加 `wrt-update`。
-4. 回退：`wrt-slot switch` 回到上一个槽位；本地仓库保留了最近 3 个版本，也可以指定用旧版本重新升级。
+1. Generate the release apk EC key pair and usign key pair. Store the private keys as secrets of the `release-signing` environment, and put the public keys into `wrt-keyring`.
+2. Set up the private config repository and the age key, and migrate the existing configuration into it.
+3. After the first stable release, flash the factory image (which already includes `wrt-keyring`) and run `just test-device` once. All later updates go through sync plus `wrt-update`.
+4. Rollback: `wrt-slot switch` returns to the previous slot; the local repository keeps the latest 3 releases, so you can also upgrade again to a specific older release.
 
 ## Open Questions
 
-- Release 的 tag 格式可以之后调整，不影响规格。
-- 同步容器具体用哪个基础镜像，实施时选一个最小且维护良好的镜像，不影响规格。
+- The Release tag format can be adjusted later without affecting the specs.
+- For the sync container's base image, pick a minimal, well-maintained image during implementation; this does not affect the specs.

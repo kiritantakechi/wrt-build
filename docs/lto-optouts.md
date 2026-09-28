@@ -1,11 +1,11 @@
-# LTO 退出登记
+# LTO opt-out register
 
-所有目标软件包默认开启 LTO（`CONFIG_USE_LTO=y`）。个别包在 LTO 下编不过时，只让这个包退出：在它的 Makefile 里写 `PKG_BUILD_FLAGS:=no-lto`。这个修改以补丁的形式放在 `patches/<feed>/`，同时登记到下表。登记表和补丁队列必须一一对应。
+All target packages build with LTO by default (`CONFIG_USE_LTO=y`). When a package fails to build under LTO, only that package opts out: add `PKG_BUILD_FLAGS:=no-lto` to its Makefile. The change lives as a patch in `patches/<feed>/` and is registered in the table below. The register and the patch queue must correspond one-to-one.
 
-| 包 | 所在仓库 | 补丁 | 失败现象 | 登记日期 |
+| Package | Repository | Patch | Failure | Date registered |
 |---|---|---|---|---|
-| （暂无） | | | | |
+| (none yet) | | | | |
 
-## 核对记录
+## Verification log
 
-- 2026-09-28，CI run 36371318405：ci profile 完整构建（全部 kmod，1222 个 kmod 包，共 1382 个软件包）在 LTO 下全部编译通过，没有需要退出的包。
+- 2026-09-28, CI run 36371318405: a full ci profile build (all kmods; 1222 kmod packages, 1382 packages in total) compiled entirely under LTO, and no package needed to opt out.

@@ -2,35 +2,35 @@
 
 ## Purpose
 
-规定每周跟进上游 main 的节奏：机器人开 PR 更新 lock 文件，CI 构建出候选版，在设备的备用槽位上验证通过后才合并。
+Defines the weekly cadence for tracking upstream main: a bot opens a PR to update the lock file, CI builds and signs a candidate, and the PR is merged only after the candidate passes an upgrade drill in the emulator.
 
 ## ADDED Requirements
 
-### Requirement: 每周自动开 PR
-机器人 SHALL 每周检查一次 openwrt、packages、luci 的 main 分支。有更新时 SHALL 开一个 PR 更新 `upstream.lock`，PR 描述里列出新旧 SHA 和上游提交摘要。三个仓库都没有更新时 MUST NOT 开 PR。
+### Requirement: Weekly automated PR
+The bot SHALL check the main branches of openwrt, packages, and luci once a week. When there are updates, it SHALL open a PR that updates `upstream.lock`, with the old and new SHAs and a summary of the upstream commits in the PR description. When none of the three repositories has updates, it MUST NOT open a PR.
 
-#### Scenario: 上游有更新
-- **WHEN** 到了每周检查的时间，并且上游有新的提交
-- **THEN** 出现一个更新 `upstream.lock` 的 PR，描述里有新旧 SHA 和上游提交摘要
+#### Scenario: Upstream has updates
+- **WHEN** the weekly check runs and upstream has new commits
+- **THEN** a PR that updates `upstream.lock` appears, with the old and new SHAs and a summary of the upstream commits in its description
 
-#### Scenario: 上游没有更新
-- **WHEN** 到了每周检查的时间，但三个仓库都没有新提交
-- **THEN** 不开 PR
+#### Scenario: Upstream has no updates
+- **WHEN** the weekly check runs but none of the three repositories has new commits
+- **THEN** no PR is opened
 
-### Requirement: 补丁打不上时明确失败
-如果 bump 之后补丁无法应用，PR 的 CI SHALL 失败，并在结果中写明冲突的补丁文件名。
+### Requirement: Fail clearly when patches do not apply
+If patches fail to apply after a bump, the PR's CI SHALL fail and name the conflicting patch file in the result.
 
-#### Scenario: BBRv3 补丁冲突
-- **WHEN** bump 之后 BBRv3 的某个补丁打不上
-- **THEN** PR 的检查失败，失败信息里写着冲突的补丁文件
+#### Scenario: BBRv3 patch conflict
+- **WHEN** a BBRv3 patch fails to apply after a bump
+- **THEN** the PR check fails, and the failure message names the conflicting patch file
 
-### Requirement: 升级演练通过之后才合并
-bump PR SHALL 带有一个必需的检查项“升级演练”。演练在模拟器中完成：启动最新正式版的出厂镜像，推送测试配置，同步这次签名后的候选版，用升级命令写入备用槽位并重启。只有新槽位通过健康检查被确认、并且配置仍然存在时，这个检查项才通过。检查项没有通过时，PR MUST NOT 被合并。
+### Requirement: Merge only after the upgrade drill passes
+A bump PR SHALL carry a required check, "upgrade drill". The drill runs in the emulator: boot the factory image of the latest stable release, push a test configuration, sync this signed candidate, write it to the inactive slot with the upgrade command, and reboot. The check passes only when the new slot passes the health check and is confirmed, and the configuration is still present. When the check does not pass, the PR MUST NOT be merged.
 
-#### Scenario: 候选版通不过健康检查
-- **WHEN** 候选版在演练中启动后一直没有通过健康检查
-- **THEN** 演练中的设备自动回到原来的槽位，检查项失败，PR 不能合并
+#### Scenario: Candidate fails the health check
+- **WHEN** the candidate boots in the drill and never passes the health check
+- **THEN** the device in the drill automatically returns to its original slot, the check fails, and the PR cannot be merged
 
-#### Scenario: 演练通过
-- **WHEN** 候选版在演练中通过健康检查并被确认，推送过的配置都还在
-- **THEN** 检查项通过，PR 可以合并
+#### Scenario: Drill passes
+- **WHEN** the candidate passes the health check in the drill and is confirmed, and all pushed configuration is still present
+- **THEN** the check passes and the PR can be merged

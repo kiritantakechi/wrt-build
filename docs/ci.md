@@ -1,37 +1,37 @@
 # CI
 
-两个工作流，都跑在 GitHub 托管的 ubuntu-24.04 runner 上（4 核 x86_64，单个 job 最长 6 小时）：
+There are two workflows, both on GitHub-hosted ubuntu-24.04 runners (4-core x86_64, 6 hours max per job):
 
-| 工作流 | job | 内容 | 缓存 |
+| Workflow | Job | What it does | Cache |
 |---|---|---|---|
-| `check.yml` | `check` | `nix develop .#quality -c just check`，每次推送都跑，不做路径过滤 | — |
-| `build.yml` | `host-toolchain` | fetch、patch，然后构建 tools 和交叉工具链 | 以 `scripts/toolchain-key.sh` 算出的键缓存 `staging_dir/{host,hostpkg,toolchain-*}` 和 `build_dir/host` |
-| `build.yml` | `firmware` | 恢复工具链，然后用 ci profile 构建（全部 kmod），产出未签名的产物和 `manifest.json` | `dl/` 和 ccache |
-| `build.yml` | `system-test` | 下载 firmware 的产物，`just test ci` 在模拟器里跑全部用例，再用 `spec-coverage` 核对覆盖；上传 JUnit 报告 | — |
+| `check.yml` | `check` | `nix develop .#quality -c just check`; runs on every push, with no path filter | — |
+| `build.yml` | `host-toolchain` | Fetch and patch, then build the tools and the cross toolchain | `staging_dir/{host,hostpkg,toolchain-*}` and `build_dir/host`, keyed by `scripts/toolchain-key.sh` |
+| `build.yml` | `firmware` | Restore the toolchain, then build with the ci profile (all kmods); produces unsigned artifacts and `manifest.json` | `dl/` and ccache |
+| `build.yml` | `system-test` | Download the firmware artifacts; `just test ci` runs all tests in the emulator, then `spec-coverage` checks coverage; uploads the JUnit report | — |
 
-`build.yml` 只在代码变化时运行（`openspec/`、`docs/` 和 Markdown 文件的改动不触发），而且同一分支上的新推送会取消还在运行的旧流水线。
+`build.yml` runs only when code changes (changes to `openspec/`, `docs/` and Markdown files do not trigger it), and a new push to the same branch cancels the older pipeline that is still running.
 
-工具链的缓存键只由这些输入决定：runner 的架构、openwrt 的 `tools/` 和 `toolchain/` 两个目录的 tree SHA、packages feed 的 `lang/golang` 和 `lang/rust` 两个目录的 tree SHA、`config/toolchain.seed`，以及构建环境的指纹 `WRT_BUILD_INPUTS`（构建包的 store 路径加上构建 profile，见 `flake.nix` 的 `buildInputsId`）。所以只改 packages 或 luci 的 SHA、或者往测试环境里加工具时，工具链缓存仍然命中。
+The toolchain cache key depends only on these inputs: the runner architecture, the tree SHAs of openwrt's `tools/` and `toolchain/` directories, the tree SHAs of the packages feed's `lang/golang` and `lang/rust` directories, `config/toolchain.seed`, and the build environment fingerprint `WRT_BUILD_INPUTS` (the store paths of the build packages plus the build profile; see `buildInputsId` in `flake.nix`). So changing only the packages or luci SHA, or adding tools to the test environment, still hits the toolchain cache.
 
-工作流里不引用任何 secret。
+The workflows reference no secrets.
 
-## 耗时记录
+## Timings
 
-| 日期 | run | 阶段 | 耗时 | 备注 |
+| Date | Run | Stage | Duration | Notes |
 |---|---|---|---|---|
-| 2026-09-28 | 早期试跑 | tools（冷缓存） | 约 43 分钟 | |
-| 2026-09-28 | 早期试跑 | 交叉工具链 GCC 15.3.0（冷缓存） | 约 35 分钟 | |
-| 2026-09-28 | 36371318405 | host-toolchain job 合计 | 83 分钟 | 其中构建 tools 和工具链 79 分 49 秒，打包并保存缓存 6 秒 |
-| 2026-09-28 | 36371318405 | firmware job 合计 | 103 分钟 | 其中构建 98 分 04 秒（ccache 为空、dl 缓存为空，全部 kmod） |
+| 2026-09-28 | early trial run | tools (cold cache) | about 43 min | |
+| 2026-09-28 | early trial run | cross toolchain GCC 15.3.0 (cold cache) | about 35 min | |
+| 2026-09-28 | 36371318405 | host-toolchain job total | 83 min | Building the tools and the toolchain: 79 min 49 s; packing and saving the cache: 6 s |
+| 2026-09-28 | 36371318405 | firmware job total | 103 min | Build: 98 min 04 s (empty ccache, empty dl cache, all kmods) |
 
-第一次冷缓存的完整流水线约 3 小时 6 分钟，两个构建 job 都远在 6 小时上限之内。
+The first full pipeline on a cold cache took about 3 hours 6 minutes; both build jobs are well within the 6-hour limit.
 
-## 缓存用量
+## Cache usage
 
-GitHub 仓库的缓存总额是 10 GB。
+The total cache quota for a GitHub repository is 10 GB.
 
-| 日期 | 工具链压缩包 | ccache | dl | Nix 安装器 | 合计 |
+| Date | Toolchain archive | ccache | dl | Nix installer | Total |
 |---|---|---|---|---|---|
 | 2026-09-28 | 776 MiB | 1243 MiB | 1456 MiB | 45 MiB | 3521 MiB |
 
-每次运行都会新存一份 ccache（键带 run ID），旧的由 GitHub 按最近最少使用淘汰。按现在的用量，工具链留在缓存里即可，不需要改存为 Release 附件（design D11 的退路）。
+Each run saves a new ccache (its key includes the run ID); GitHub evicts old ones least recently used first. At current usage the toolchain can stay in the cache, and there is no need to store it as a Release asset instead (the fallback in design D11).

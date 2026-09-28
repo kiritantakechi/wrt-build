@@ -1,31 +1,31 @@
-# 代码规范
+# Code standards
 
-所有规则都由 `just check` 强制执行，CI 里的 `check` 工作流也跑同一条命令，不过就失败。`just fmt` 负责格式化，它和 `just check` 里的格式检查一一对应。两条命令在 macOS 和 Linux 上都能运行，所需工具由 `nix develop .#quality` 提供；在 NixOS 上，它们会自动进入 `wrt-test-fhs` 运行，因为 uv 安装的 Python 工具是通用 Linux 二进制。
+Every rule is enforced by `just check`; the `check` workflow in CI runs the same command and fails if it does not pass. `just fmt` does the formatting and maps one-to-one onto the format checks in `just check`. Both commands run on macOS and Linux, with the tools provided by `nix develop .#quality`; on NixOS they automatically run inside `wrt-test-fhs`, because the Python tools that uv installs are generic Linux binaries.
 
-## 规则与检查
+## Rules and checks
 
-下表“检查名”一列就是 `scripts/check.sh` 输出的名字，两边一一对应。
+The "Check name" column in the table below uses the names that `scripts/check.sh` prints; the two correspond one-to-one.
 
-| 规则 | 检查名 | 格式化 |
+| Rule | Check name | Formatter |
 |---|---|---|
-| shell 脚本格式：POSIX 方言、tab 缩进、case 分支缩进（`.editorconfig`） | `shfmt` | `shfmt -w` |
-| shell 脚本静态检查：`shell=sh`，除 `require-double-brackets` 外的全部可选检查（`.shellcheckrc`） | `shellcheck` | — |
-| Nix 格式 | `nixfmt` | `nixfmt` |
-| GitHub Actions 工作流，包括其中 `run:` 块的 shellcheck | `actionlint` | — |
-| 全部文本：UTF-8、LF、文件末尾换行、没有行尾空格、缩进风格（`.editorconfig`） | `editorconfig-checker` | — |
-| 历史和待提交文件里都不能有密钥 | `gitleaks` | — |
-| 构建步骤不能执行或应用下载来的内容，不能用 `sed -i` 就地修改上游文件 | `forbidden-patterns` | — |
-| 脚本骨架，以及脚本和 just 命令按名字一一对应 | `skeleton` | — |
-| Python 格式（`tests/`） | `ruff-format` | `ruff format` |
-| Python 静态检查：`select = ["ALL"]`，排除项写在 `tests/ruff.toml` 里并注明原因 | `ruff-check` | — |
-| Python 类型检查：全部规则按 error 处理（`tests/ty.toml`） | `ty` | — |
-| 规格与用例的对应结构：标记指向存在的场景、一个场景只有一个用例、目录规则（设计 D13） | `spec-coverage` | — |
+| Shell script format: POSIX dialect, tab indentation, indented case branches (`.editorconfig`) | `shfmt` | `shfmt -w` |
+| Shell script static analysis: `shell=sh`, all optional checks except `require-double-brackets` (`.shellcheckrc`) | `shellcheck` | — |
+| Nix format | `nixfmt` | `nixfmt` |
+| GitHub Actions workflows, including shellcheck of their `run:` blocks | `actionlint` | — |
+| All text: UTF-8, LF, final newline, no trailing whitespace, indent style (`.editorconfig`) | `editorconfig-checker` | — |
+| No secrets in history or in files about to be committed | `gitleaks` | — |
+| Build steps must not execute or apply downloaded content, and must not modify upstream files in place with `sed -i` | `forbidden-patterns` | — |
+| Script skeleton, and one-to-one naming between scripts and just recipes | `skeleton` | — |
+| Python format (`tests/`) | `ruff-format` | `ruff format` |
+| Python static analysis: `select = ["ALL"]`, with exclusions listed in `tests/ruff.toml` together with their reasons | `ruff-check` | — |
+| Python type checking: all rules treated as errors (`tests/ty.toml`) | `ty` | — |
+| Spec-to-test structure: markers point to existing scenarios, one test per scenario, directory rules (design D13) | `spec-coverage` | — |
 
-不受这些规则约束的文件：`patches/` 和 `docs/upstream/`（保持上游补丁的原样），`.claude/`（工具生成），以及锁文件。OpenWrt 包的 `Makefile` 按上游惯例混用 tab 和两个空格，所以不检查缩进风格。
+Files exempt from these rules: `patches/` and `docs/upstream/` (upstream patches are kept verbatim), `.claude/` (tool-generated), and lock files. OpenWrt package `Makefile`s mix tabs and two spaces by upstream convention, so their indent style is not checked.
 
-## 脚本骨架
+## Script skeleton
 
-`scripts/` 下的每个脚本都按这个顺序组织：
+Every script under `scripts/` is organized in this order:
 
 ```sh
 #!/bin/sh
@@ -41,15 +41,15 @@ require_linux; require_workdir; ensure_fhs build "$@"   # only the guards it nee
 <main>
 ```
 
-- `<name>` 与文件名一致；第二行以句号结尾。
-- 脚本必须可执行。`lib.sh` 是被引用的库，不可执行，开头两行是 `# lib: ...` 和 `# Usage: ...`。
-- 命令替换的返回值不能被吞掉（shellcheck 的 `check-extra-masked-returns`）：先赋值给变量，再使用。
-- POSIX sh 没有局部变量。函数内部用到的变量名不要和调用者冲突；需要隔离时放进子 shell。
+- `<name>` matches the file name; the second line ends with a period.
+- Scripts must be executable. `lib.sh` is a sourced library and is not executable; its first two lines are `# lib: ...` and `# Usage: ...`.
+- The exit status of a command substitution must not be swallowed (shellcheck's `check-extra-masked-returns`): assign it to a variable first, then use the variable.
+- POSIX sh has no local variables. Variable names used inside a function must not clash with the caller's; when isolation is needed, use a subshell.
 
-## 命名
+## Naming
 
-- **流水线阶段**用单独的动词：`fetch`、`patch`、`config`、`build`、`test`、`check`、`fmt`。
-- **针对具体对象的操作**用“对象-动词”：`env-report`、`image-audit`、`runner-prepare`、`toolchain-key`、`toolchain-build`、`toolchain-pack`、`toolchain-unpack`、`workdir-mount`、`workdir-unmount`。
-- **成对的操作**名字对称：`mount`/`unmount`、`pack`/`unpack`、`check`/`fmt`。
-- **每个脚本都有同名的 just 命令**，反过来每个 just 命令（`default` 除外）都有同名脚本，由 `skeleton` 检查。just 命令按 `build`、`image`、`test`、`quality`、`ci`、`workdir` 分组。
-- **环境变量**统一用 `WRT_` 前缀。
+- **Pipeline stages** use a single verb: `fetch`, `patch`, `config`, `build`, `test`, `check`, `fmt`.
+- **Operations on a specific object** use "object-verb": `env-report`, `image-audit`, `runner-prepare`, `toolchain-key`, `toolchain-build`, `toolchain-pack`, `toolchain-unpack`, `workdir-mount`, `workdir-unmount`.
+- **Paired operations** have symmetric names: `mount`/`unmount`, `pack`/`unpack`, `check`/`fmt`.
+- **Every script has a just recipe of the same name**, and conversely every just recipe (except `default`) has a script of the same name; `skeleton` checks this. Just recipes are grouped into `build`, `image`, `test`, `quality`, `ci` and `workdir`.
+- **Environment variables** all use the `WRT_` prefix.

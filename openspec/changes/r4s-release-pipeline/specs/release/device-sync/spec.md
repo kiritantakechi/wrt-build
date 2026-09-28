@@ -2,55 +2,55 @@
 
 ## Purpose
 
-规定路由器怎样经代理把发布产物同步到数据盘上的本地仓库，以及 apk 和升级怎样使用这些本地产物。这样更新就不依赖路由器本机直连 GitHub 的质量。
+Defines how the router syncs release artifacts through the proxy to a local repository on the data disk, and how apk and upgrades use these local artifacts. This way, updates do not depend on the quality of the router's direct connection to GitHub.
 
 ## ADDED Requirements
 
-### Requirement: 经代理同步
-路由器上 SHALL 有一个同步容器，负责把发布产物下载到 `/mnt/data/repo`。它的流量经容器网桥由 dae 按规则分流，因此不依赖路由器本机流量能否直连 GitHub。
+### Requirement: Sync through the proxy
+The router SHALL run a sync container that downloads release artifacts to `/mnt/data/repo`. Its traffic passes through the container bridge and is routed by dae according to rules, so it does not depend on whether router-originated traffic can reach GitHub directly.
 
-#### Scenario: 本机无法直连 GitHub
-- **WHEN** 阻断路由器本机到 Releases 服务的直连后触发一次同步
-- **THEN** 同步仍然成功完成
+#### Scenario: Router cannot reach GitHub directly
+- **WHEN** direct connections from the router to the Releases service are blocked and a sync is triggered
+- **THEN** the sync still completes successfully
 
-### Requirement: 下载完整并校验之后才生效
-新的发布 SHALL 只有在全部文件下载完成，并且与构建清单中的校验和一致之后，才成为本地可用的版本。下载了一部分的发布 MUST NOT 对 apk 或升级命令可见。
+### Requirement: Activate only when complete and verified
+A new release SHALL become the locally available version only after all of its files are downloaded and match the checksums in the build manifest. A partially downloaded release MUST NOT be visible to apk or the upgrade command.
 
-#### Scenario: 同步中途被打断
-- **WHEN** 同步进行到一半时被中断
-- **THEN** apk 和升级命令看到的仍然是上一个完整的版本
+#### Scenario: Sync interrupted midway
+- **WHEN** a sync is interrupted halfway through
+- **THEN** apk and the upgrade command still see the previous complete release
 
-### Requirement: apk 使用本地仓库
-apk SHALL 从本地仓库安装软件包和 kmod，索引签名 MUST 用镜像里的发布公钥校验。
+### Requirement: apk uses the local repository
+apk SHALL install packages and kmods from the local repository, and the index signature MUST be verified with the release public key in the image.
 
-#### Scenario: WAN 断开时安装 kmod
-- **WHEN** WAN 断开时安装一个镜像里没有预装、但本地仓库里有的 kmod
-- **THEN** 安装成功，模块能加载
+#### Scenario: Install a kmod with WAN down
+- **WHEN** with the WAN down, a kmod that is not preinstalled in the image but is present in the local repository is installed
+- **THEN** the installation succeeds and the module loads
 
-### Requirement: 从本地文件升级
-升级命令 SHALL 用本地仓库里当前版本的升级镜像，写入非活动槽位。签名无效或者没有签名的镜像 MUST 被拒绝。
+### Requirement: Upgrade from local files
+The upgrade command SHALL write the upgrade image of the current release in the local repository to the inactive slot. An image with an invalid signature or no signature MUST be rejected.
 
-#### Scenario: 镜像被篡改
-- **WHEN** 本地的升级镜像被修改过一个字节，然后执行升级
-- **THEN** 升级被拒绝，两个槽位都没有被写入
+#### Scenario: Tampered image
+- **WHEN** one byte of the local upgrade image is modified and an upgrade is then run
+- **THEN** the upgrade is rejected and neither slot is written
 
-### Requirement: 候选版需要主动选择
-设备 SHALL 默认只同步正式版。只有管理员明确打开候选通道后，才 SHALL 同步预发布的候选版。
+### Requirement: Candidates require opt-in
+The device SHALL sync only stable releases by default. It SHALL sync prerelease candidates only after an administrator explicitly enables the candidate channel.
 
-#### Scenario: 默认通道
-- **WHEN** 同时存在一个更新的候选版和一个较旧的正式版，设备使用默认设置同步
-- **THEN** 只同步那个正式版
+#### Scenario: Default channel
+- **WHEN** a newer candidate and an older stable release both exist and the device syncs with the default settings
+- **THEN** only the stable release is synced
 
-### Requirement: 保留最近的版本
-本地仓库 SHALL 保留最近 3 个完整的版本，更早的版本自动删除。
+### Requirement: Keep the most recent releases
+The local repository SHALL keep the 3 most recent complete releases and delete older ones automatically.
 
-#### Scenario: 同步第 4 个版本
-- **WHEN** 本地已经有 3 个版本时又完成了一次同步
-- **THEN** 最早的那个版本被删除，本地仍然保留 3 个版本
+#### Scenario: Sync a fourth release
+- **WHEN** another sync completes while 3 releases are already present locally
+- **THEN** the oldest release is deleted and 3 releases remain locally
 
-### Requirement: 数据盘缺失时不影响运行
-数据盘不在时，同步和本地 apk 安装 SHALL 不可用，但已安装的系统 MUST 正常运行。
+### Requirement: Missing data disk does not affect operation
+When the data disk is absent, sync and local apk installation SHALL be unavailable, but the installed system MUST keep running normally.
 
-#### Scenario: 不接数据盘
-- **WHEN** 不接数据盘时执行软件包安装
-- **THEN** 命令报告本地仓库不可用，路由等核心功能不受影响
+#### Scenario: No data disk attached
+- **WHEN** a package installation is run with no data disk attached
+- **THEN** the command reports that the local repository is unavailable, and routing and other core functions are unaffected

@@ -2,45 +2,45 @@
 
 ## Purpose
 
-规定 WAN 侧的行为：PPPoE 拨号、TCP MSS 钳制、IPv6 前缀下发与防火墙，以及软件转发加速。
+Define WAN-side behavior: PPPoE dial-up, TCP MSS clamping, IPv6 prefix delegation and firewalling, and software forwarding acceleration.
 
 ## ADDED Requirements
 
-### Requirement: PPPoE 拨号
-WAN SHALL 通过 eth0 做 PPPoE 拨号。拨号凭据 SHALL 在运行时提供，MUST NOT 预置在固件镜像里。
+### Requirement: PPPoE dial-up
+WAN SHALL dial PPPoE over eth0. Dial-up credentials SHALL be provided at runtime and MUST NOT be preinstalled in the firmware image.
 
-#### Scenario: 镜像不含凭据
-- **WHEN** 检查固件镜像里的网络配置
-- **THEN** WAN 是 PPPoE 类型，用户名和密码都为空
+#### Scenario: Image contains no credentials
+- **WHEN** the network config in the firmware image is inspected
+- **THEN** WAN is of type PPPoE, and the username and password are both empty
 
-#### Scenario: 推送凭据后拨号
-- **WHEN** 把拨号凭据推送到设备上
-- **THEN** pppoe-wan 接口起来，并获得 ISP 分配的 IPv4 地址
+#### Scenario: Dial after pushing credentials
+- **WHEN** dial-up credentials are pushed to the device
+- **THEN** the pppoe-wan interface comes up and gets an IPv4 address assigned by the ISP
 
-### Requirement: MSS 钳制
-经 WAN 转发的 TCP 连接，其 SYN 报文中的 MSS SHALL 被钳制到与路径 MTU 相符的值。
+### Requirement: MSS clamping
+For TCP connections forwarded through WAN, the MSS in SYN packets SHALL be clamped to a value that matches the path MTU.
 
-#### Scenario: 内网主机建立 TCP 连接
-- **WHEN** 一台 LAN 主机经 WAN 建立 TCP 连接
-- **THEN** 对端收到的 MSS 不超过 1452
+#### Scenario: LAN host opens a TCP connection
+- **WHEN** a LAN host opens a TCP connection through WAN
+- **THEN** the MSS that the peer receives is at most 1452
 
-### Requirement: IPv6 前缀下发
-路由器 SHALL 通过 PPPoE 上的 DHCPv6-PD 获得 IPv6 前缀，并通过 RA 和 DHCPv6 分配给 LAN。LAN 主机 SHALL 获得全局 IPv6 地址，并且 MUST NOT 经过 NAT66。
+### Requirement: IPv6 prefix delegation
+The router SHALL obtain an IPv6 prefix through DHCPv6-PD over PPPoE and assign it to the LAN through RA and DHCPv6. LAN hosts SHALL get global IPv6 addresses and MUST NOT go through NAT66.
 
-#### Scenario: LAN 主机获得 IPv6
-- **WHEN** 一台 LAN 主机接入网络
-- **THEN** 它获得前缀内的全局 IPv6 地址，并能访问 IPv6 外网
+#### Scenario: LAN host gets IPv6
+- **WHEN** a LAN host joins the network
+- **THEN** it gets a global IPv6 address within the prefix and can reach the IPv6 internet
 
-### Requirement: IPv6 入站防火墙
-从 WAN 进入 LAN 的 IPv6 新连接 SHALL 默认被拒绝，只有显式放行的规则除外。
+### Requirement: IPv6 inbound firewall
+New IPv6 connections from WAN into LAN SHALL be rejected by default, except where a rule explicitly allows them.
 
-#### Scenario: 外部主动连接内网 IPv6 地址
-- **WHEN** 一台外部主机向某台 LAN 主机的全局 IPv6 地址主动发起 TCP 连接
-- **THEN** 连接被拒绝
+#### Scenario: External host connects to an internal IPv6 address
+- **WHEN** an external host initiates a TCP connection to a LAN host's global IPv6 address
+- **THEN** the connection is rejected
 
-### Requirement: 软件转发加速不绕过地址转换
-软件 flowtable SHALL 启用。已经被加速的流 MUST 仍然经过 einat 的地址转换。
+### Requirement: Software acceleration does not bypass NAT
+The software flowtable SHALL be enabled. Accelerated flows MUST still go through einat's address translation.
 
-#### Scenario: 下载期间检查加速和源地址
-- **WHEN** 一台 LAN 主机持续下载时，查看 flowtable 的加速情况和外部看到的源地址
-- **THEN** 这条流被加速处理，外部看到的源地址始终是路由器的 WAN 地址
+#### Scenario: Check acceleration and source address while downloading
+- **WHEN** a LAN host is downloading continuously, and the flowtable acceleration and the source address seen externally are inspected
+- **THEN** the flow is accelerated, and the source address seen externally is always the router's WAN address

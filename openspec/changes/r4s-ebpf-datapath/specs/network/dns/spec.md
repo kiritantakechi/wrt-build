@@ -2,34 +2,34 @@
 
 ## Purpose
 
-规定局域网的 DNS 链路：dnsmasq 负责 DHCP 和本地主机名，外部域名的查询交给 dae，由 dae 完成按域名分流所需的解析。
+Define the LAN DNS path: dnsmasq handles DHCP and local hostnames, and queries for external domains go to dae, which performs the resolution that domain-based splitting needs.
 
 ## ADDED Requirements
 
-### Requirement: dnsmasq 仍是 LAN 的 DNS 服务器
-DHCP SHALL 把路由器的 LAN 地址作为 DNS 服务器下发给客户端。本地主机名（`.lan`）的查询 SHALL 由 dnsmasq 自己回答。
+### Requirement: dnsmasq remains the LAN DNS server
+DHCP SHALL hand out the router's LAN address to clients as the DNS server. Queries for local hostnames (`.lan`) SHALL be answered by dnsmasq itself.
 
-#### Scenario: 查询本地主机名
-- **WHEN** 一台 LAN 客户端查询另一台客户端的 `<主机名>.lan`
-- **THEN** 得到对方的 LAN 地址，这次查询不经过 dae
+#### Scenario: Query a local hostname
+- **WHEN** a LAN client queries another client's `<hostname>.lan`
+- **THEN** it gets the other client's LAN address, and the query does not go through dae
 
-### Requirement: 外部域名交给 dae 解析
-dnsmasq SHALL 把所有非本地的查询转发给 dae 在回环地址上的 DNS 监听端口，由 dae 按它的上游规则解析。
+### Requirement: External domains resolved by dae
+dnsmasq SHALL forward all non-local queries to dae's DNS listener on the loopback address, and dae resolves them according to its upstream rules.
 
-#### Scenario: 查询外部域名
-- **WHEN** 一台 LAN 客户端查询一个外部域名
-- **THEN** 查询被转发到 dae，dae 的日志里有这条查询记录，客户端得到解析结果
+#### Scenario: Query an external domain
+- **WHEN** a LAN client queries an external domain
+- **THEN** the query is forwarded to dae, dae's log records the query, and the client gets a result
 
-### Requirement: dae 不可用时回落到上游 DNS
-当 dae 的 DNS 监听不可用时，dnsmasq SHALL 改用 WAN 上获得的上游 DNS 继续解析，不能让 LAN 断网。
+### Requirement: Fall back to upstream DNS without dae
+When dae's DNS listener is unavailable, dnsmasq SHALL keep resolving with the upstream DNS obtained on WAN, so the LAN is not cut off.
 
-#### Scenario: 停止 dae 后解析
-- **WHEN** 停止 dae 之后，LAN 客户端查询一个外部域名
-- **THEN** 仍然能得到解析结果
+#### Scenario: Resolve after dae stops
+- **WHEN** a LAN client queries an external domain after dae is stopped
+- **THEN** it still gets a result
 
-### Requirement: dae 的 DNS 端口不对外暴露
-dae 的 DNS 监听 MUST 只绑定在回环地址上，从 LAN 或 WAN 都 MUST NOT 能访问到它。
+### Requirement: dae DNS port not exposed
+dae's DNS listener MUST bind only to the loopback address, and it MUST NOT be reachable from LAN or WAN.
 
-#### Scenario: 从 LAN 访问 dae 的 DNS 端口
-- **WHEN** 从一台 LAN 客户端向路由器 LAN 地址上的 dae DNS 端口发送查询
-- **THEN** 查询得不到响应
+#### Scenario: Query dae's DNS port from LAN
+- **WHEN** a LAN client sends a query to the dae DNS port on the router's LAN address
+- **THEN** the query gets no response

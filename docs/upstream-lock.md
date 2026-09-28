@@ -1,44 +1,44 @@
 # upstream.lock
 
-`upstream.lock` 固定了构建所用的三个上游仓库。每行对应一个仓库，四列之间用空白分隔：
+`upstream.lock` pins the three upstream repositories the build uses. Each line is one repository, with four whitespace-separated columns:
 
 ```
 <name> <git-url> <commit-sha> <commit-epoch>
 ```
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `name` | `openwrt` 是主源码树，其余都是 feed：名字就是 `feeds/<name>`，也是 `patches/<name>/` |
-| `git-url` | 获取源码的地址（GitHub 镜像） |
-| `commit-sha` | 完整的 40 位提交 SHA，构建只会检出这个提交 |
-| `commit-epoch` | 这个提交的提交时间（Unix 秒）；`openwrt` 这一行的值就是构建的 `SOURCE_DATE_EPOCH` |
+| `name` | `openwrt` is the main source tree; the others are feeds, and the name is both `feeds/<name>` and `patches/<name>/` |
+| `git-url` | Where the source is fetched from (GitHub mirror) |
+| `commit-sha` | The full 40-character commit SHA; the build checks out only this commit |
+| `commit-epoch` | The commit time of this commit (Unix seconds); the value on the `openwrt` line is the build's `SOURCE_DATE_EPOCH` |
 
-## 各部分怎么使用这个文件
+## How each part uses this file
 
-- **`just fetch`**：
-  - 对每个仓库执行 `git fetch --depth 1 origin <sha>`，然后切到这个提交；
-  - 生成的 `feeds.conf` 每行都写成 `src-git <name> <url>^<sha>` 这种形式，另外再加一行自有 feed 的 `src-link wrtbuild`；
-  - 把 openwrt 的 `commit-epoch` 写进源码树里的 `version.date`，`scripts/get_source_date_epoch.sh` 会优先读取这个文件。
-- **`just patch`**：
-  - 先把所有仓库重置回 lock 里的提交；
-  - 再按文件名顺序对 `patches/<name>/*.patch` 执行 `git am`，并固定提交者的身份和时间。
-  - 因此同一份 lock 和补丁，不管什么时候、在哪台机器上应用，得到的源码树 SHA 都相同。
+- **`just fetch`**:
+  - runs `git fetch --depth 1 origin <sha>` for each repository, then checks out that commit;
+  - writes every line of the generated `feeds.conf` in the form `src-git <name> <url>^<sha>`, plus one `src-link wrtbuild` line for the project's own feed;
+  - writes the openwrt `commit-epoch` to `version.date` in the source tree, which `scripts/get_source_date_epoch.sh` reads first.
+- **`just patch`**:
+  - first resets every repository to its commit in the lock;
+  - then runs `git am` on `patches/<name>/*.patch` in file-name order, with a fixed committer identity and date.
+  - As a result, the same lock and patches yield the same source tree SHA, no matter when or on which machine they are applied.
 
-为什么 feed 不交给 `scripts/feeds update` 去获取：如果 feed 目录已经存在，并且配置里写的是 `^sha`，上游的 `scripts/feeds update` 会直接跳过，不做任何更新。这样一来，lock 里的 SHA 变了，本地的 feed 也不会跟着变。所以 `fetch` 自己检出每个 feed，之后只执行 `feeds update -i` 重建索引。
+Why feeds are not fetched by `scripts/feeds update`: if a feed directory already exists and the config says `^sha`, upstream `scripts/feeds update` skips it without updating anything. So when a SHA in the lock changes, the local feed would not follow. That is why `fetch` checks out each feed itself and afterwards only runs `feeds update -i` to rebuild the index.
 
-## 当前固定的版本
+## Currently pinned versions
 
-| 仓库 | SHA | 提交时间 |
+| Repository | SHA | Commit time |
 |---|---|---|
 | openwrt | `101929399c12644ac8c3fe9b11b83c93fe9ee755` | 2026-09-27 22:07:24 +0200 |
 | packages | `a637759c3aae15f112bff2f3a845c74ee331b978` | 2026-09-27 22:10:12 +0200 |
 | luci | `05dc750ddb5e5c4aacf4ae0635bbf8b14a494909` | 2026-09-27 16:42:14 UTC |
 
-luci 取的是 openwrt 那个提交之前，luci master 上的最后一个提交。
+luci is pinned to the last commit on luci master before that openwrt commit.
 
-## 更新
+## Updating
 
-更新只通过每周的 bump PR 进行（见 `r4s-release-pipeline`）。不要手动改 SHA 却不跑完整构建。改动 SHA 时，`commit-epoch` 也要一起更新：
+Updates happen only through the weekly bump PR (see `r4s-release-pipeline`). Do not change a SHA by hand without running a full build. When changing a SHA, update `commit-epoch` along with it:
 
 ```sh
 git -C <checkout> log -1 --format=%ct <sha>

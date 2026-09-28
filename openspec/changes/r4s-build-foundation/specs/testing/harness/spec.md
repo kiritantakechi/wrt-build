@@ -2,56 +2,56 @@
 
 ## Purpose
 
-用一套自动化系统测试把规格场景变成可重复执行的检查。同一份用例既能跑在模拟器上，也能跑在真机上，使真机验证缩减为一条命令外加少量硬件专属检查。
+Turn spec scenarios into repeatable checks with one automated system test suite. The same tests run both on the emulator and on the device, which reduces device verification to one command plus a few hardware-specific checks.
 
 ## ADDED Requirements
 
-### Requirement: 规格场景与测试一一对应
-每条能在系统层面测试的规格场景 SHALL 有且只有一个测试用例与之对应，并由用例的标记注明它对应的能力、需求和场景。测试框架 SHALL 能生成覆盖报告，列出没有对应用例的场景。
+### Requirement: One test per spec scenario
+Every spec scenario that can be tested at the system level SHALL have exactly one corresponding test, whose marker names the capability, requirement, and scenario it covers. The test framework SHALL be able to generate a coverage report that lists the scenarios without a test.
 
-#### Scenario: 生成覆盖报告
-- **WHEN** 对当前全部规格生成覆盖报告
-- **THEN** 报告列出每个场景对应的测试；所有没有用例、也没有标注“仅构建期验证”或“仅真机”的场景都会被单独列出
+#### Scenario: Generate coverage report
+- **WHEN** a coverage report is generated for all current specs
+- **THEN** the report lists the test for each scenario, and every scenario that has no test and is not marked "verified elsewhere" or "device-only" is listed separately
 
-#### Scenario: 标记指向不存在的场景
-- **WHEN** 某个用例标注的场景在规格中不存在
-- **THEN** 覆盖检查失败，并指出这个用例
+#### Scenario: Marker names a missing scenario
+- **WHEN** a test is marked with a scenario that does not exist in the specs
+- **THEN** the coverage check fails and names that test
 
-### Requirement: 同一套用例，两种目标
-测试套件 SHALL 在不修改任何用例的前提下，分别以模拟器和真机作为目标运行。选择目标只能通过目标描述文件完成。
+### Requirement: One suite, two targets
+The test suite SHALL run with the emulator and with the device as targets without modifying any test. The target is selected only through the target description file.
 
-#### Scenario: 分别在两种目标上运行
-- **WHEN** 分别执行 `just test` 和 `just test-device <host>`
-- **THEN** 两次运行收集到的用例集合相同；只有标注为某一目标专属的用例会在另一种目标上被跳过
+#### Scenario: Run on each target
+- **WHEN** `just test` and `just test-device <host>` are each run
+- **THEN** both runs collect the same set of tests; only tests marked as specific to one target are skipped on the other
 
-### Requirement: 目标专属用例要注明原因
-只能在真机上运行、或只能在模拟器上运行的用例，SHALL 带有对应的目标标记，并写明原因。在另一种目标上运行时，这些用例 SHALL 被跳过，并在报告中列出原因。
+### Requirement: Target-specific tests state a reason
+Tests that can run only on the device, or only on the emulator, SHALL carry the corresponding target marker together with a reason. On the other target, these tests SHALL be skipped, with the reason listed in the report.
 
-#### Scenario: 在模拟器上运行仅真机用例
-- **WHEN** 在模拟器目标上运行测试
-- **THEN** 仅真机的用例都显示为跳过，报告里有每一项被跳过的原因
+#### Scenario: Device-only tests on the emulator
+- **WHEN** tests run on the emulator target
+- **THEN** all device-only tests show as skipped, and the report gives the reason for each skipped test
 
-### Requirement: Python 工具链由 uv 锁定
-测试套件的 Python 环境 SHALL 由 `pyproject.toml` 和 `uv.lock` 完整定义，其中也包括 Python 解释器的版本。格式化和静态检查用 ruff，类型检查用 ty，两者都 MUST 通过。
+### Requirement: Python toolchain locked by uv
+The test suite's Python environment SHALL be fully defined by `pyproject.toml` and `uv.lock`, including the Python interpreter version. Formatting and static checks use ruff and type checking uses ty, and both MUST pass.
 
-#### Scenario: 锁文件与声明不一致
-- **WHEN** 修改了 `pyproject.toml` 中的依赖，但没有更新 `uv.lock`
-- **THEN** 以锁定模式同步环境失败
+#### Scenario: Lock file out of sync
+- **WHEN** a dependency in `pyproject.toml` is changed but `uv.lock` is not updated
+- **THEN** syncing the environment in locked mode fails
 
-#### Scenario: 类型错误
-- **WHEN** 某个测试文件存在类型错误
-- **THEN** 类型检查失败，并指出出错的位置
+#### Scenario: Type error
+- **WHEN** a test file contains a type error
+- **THEN** the type check fails and points to the location of the error
 
-### Requirement: 每次构建都在模拟器中运行
-CI SHALL 对每次固件构建运行模拟器测试。任何用例失败都 MUST 使整个流水线失败，结果 SHALL 以 JUnit 格式发布。
+### Requirement: Emulator run on every build
+CI SHALL run the emulator tests for every firmware build. Any failing test MUST fail the whole pipeline, and results SHALL be published in JUnit format.
 
-#### Scenario: 用例失败
-- **WHEN** 某次构建产出的镜像让一个用例失败
-- **THEN** CI 的测试阶段失败，JUnit 报告中显示这个用例和失败原因
+#### Scenario: Test failure
+- **WHEN** the image from a build makes a test fail
+- **THEN** the CI test stage fails, and the JUnit report shows that test and the failure reason
 
-### Requirement: 真机验证只需一条命令
-真机上的验证 SHALL 只需要一条命令就能运行全部可在真机执行的用例。硬件专属的检查 SHALL 同样以用例形式存在；需要人工操作的步骤（例如拔插电源）SHALL 由用例给出提示并等待确认。
+### Requirement: One-command device verification
+Device verification SHALL need only one command to run every test that can run on the device. Hardware-specific checks SHALL also exist as tests; steps that need manual action (for example unplugging and replugging power) SHALL be prompted by the test, which then waits for confirmation.
 
-#### Scenario: 在真机上运行
-- **WHEN** 在已刷入镜像的 R4S 上执行 `just test-device <host>`
-- **THEN** 全部适用的用例依次执行，需要人工操作时终端给出明确提示，最后输出与模拟器运行格式相同的报告
+#### Scenario: Run on the device
+- **WHEN** `just test-device <host>` is run against an R4S flashed with the image
+- **THEN** all applicable tests run in turn, the terminal gives a clear prompt whenever manual action is needed, and the final report has the same format as an emulator run

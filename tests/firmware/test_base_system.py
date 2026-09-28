@@ -47,12 +47,12 @@ def _installed(router: Router, *names: str) -> set[str]:
     }
 
 
-@spec(CAPABILITY, "LAN 默认地址", "全新安装")
+@spec(CAPABILITY, "Default LAN address", "Fresh install")
 def test_default_lan_address(router: Router) -> None:
     assert f"inet {DEFAULT_LAN}/24 " in router.run("ip -4 addr show dev br-lan")
 
 
-@spec(CAPABILITY, "LAN 默认地址", "进入故障安全模式")
+@spec(CAPABILITY, "Default LAN address", "Enter failsafe mode")
 @target("emulation", "types the failsafe key on the serial console")
 def test_failsafe_address(router: Router) -> None:
     emulator = router.emulator
@@ -67,7 +67,7 @@ def test_failsafe_address(router: Router) -> None:
     assert f"inet {DEFAULT_LAN}/" in router.run("ip -4 addr")
 
 
-@spec(CAPABILITY, "LAN 默认地址", "保留配置升级")
+@spec(CAPABILITY, "Default LAN address", "Config-preserving upgrade")
 @target("emulation", "upgrades the emulated disk with the image under test")
 def test_upgrade_keeps_the_lan_address(router: Router, emulation_source: dict[str, str]) -> None:
     router.run("uci set network.lan.ipaddr=10.0.0.3/24 && uci commit network")
@@ -84,7 +84,7 @@ def test_upgrade_keeps_the_lan_address(router: Router, emulation_source: dict[st
         assert router.run("uci get system.@system[0].zram_size_mb") == "512"
 
 
-@spec(CAPABILITY, "Web 管理界面", "访问管理界面")
+@spec(CAPABILITY, "Web management interface", "Open the management interface")
 def test_luci_in_simplified_chinese(router: Router) -> None:
     # LuCI keeps lang 'auto' and follows the browser; without a session it answers
     # with its login page and 403 (login required).
@@ -95,12 +95,12 @@ def test_luci_in_simplified_chinese(router: Router) -> None:
     assert "uhttpd" in router.run("ss -Hltnp 'sport = :80'")
 
 
-@spec(CAPABILITY, "Web 管理界面", "不包含 nginx 和 uwsgi")
+@spec(CAPABILITY, "Web management interface", "No nginx or uwsgi")
 def test_no_nginx_or_uwsgi(router: Router) -> None:
     assert _installed(router, "nginx", "uwsgi") == set()
 
 
-@spec(CAPABILITY, "交互 shell", "SSH 交互登录")
+@spec(CAPABILITY, "Interactive shell", "Interactive SSH login")
 def test_interactive_login_is_zsh_with_plugins(router: Router) -> None:
     output = router.login(
         'echo "@@ $(readlink /proc/$$/exe) '
@@ -109,13 +109,13 @@ def test_interactive_login_is_zsh_with_plugins(router: Router) -> None:
     assert _report(output) == "/usr/bin/zsh 1 1"
 
 
-@spec(CAPABILITY, "交互 shell", "非交互执行命令")
+@spec(CAPABILITY, "Interactive shell", "Non-interactive command")
 def test_remote_command_runs_in_ash(router: Router) -> None:
     assert router.run("readlink /proc/$$/exe") == "/bin/busybox"
     assert router.run('echo "${ZSH_VERSION:-none}"') == "none"
 
 
-@spec(CAPABILITY, "交互 shell", "zsh 不可用")
+@spec(CAPABILITY, "Interactive shell", "zsh unavailable")
 def test_login_stays_in_ash_without_zsh(router: Router) -> None:
     router.run("chmod -x /usr/bin/zsh")
     try:
@@ -125,26 +125,26 @@ def test_login_stays_in_ash_without_zsh(router: Router) -> None:
     assert _report(output) == "/bin/busybox"
 
 
-@spec(CAPABILITY, "交互 shell", "手动进入 bash")
+@spec(CAPABILITY, "Interactive shell", "Enter bash manually")
 def test_bash_login_stays_in_bash(router: Router) -> None:
     output = router.login('bash -l\necho "@@ $(readlink /proc/$$/exe)"\nexit\nexit\n')
     assert _report(output) == "/bin/bash"
 
 
-@spec(CAPABILITY, "内存压缩交换", "检查交换设备")
+@spec(CAPABILITY, "Compressed memory swap", "Check swap device")
 def test_zram_swap(router: Router) -> None:
     swaps = router.run("cat /proc/swaps")
     assert re.search(r"^/dev/zram0\s+partition\s+1048572\s", swaps, re.MULTILINE), swaps
     assert "[zstd]" in router.run("cat /sys/block/zram0/comp_algorithm")
 
 
-@spec(CAPABILITY, "镜像不预置密码", "检查影子密码文件")
+@spec(CAPABILITY, "No preset password", "Check shadow file")
 def test_no_preset_root_password(router: Router) -> None:
     # /rom holds the image as shipped, whatever the administrator set since.
     assert router.run("awk -F: '$1 == \"root\" { print $2 }' /rom/etc/shadow") == ""
 
 
-@spec(CAPABILITY, "不包含的组件", "检查安装的软件包和可执行文件")
+@spec(CAPABILITY, "Excluded components", "Check installed packages and executables")
 def test_excluded_components(router: Router) -> None:
     assert _installed(router, *EXCLUDED_PACKAGES) == set()
     assert router.returncode("ls /proc/lrng_type /proc/sys/kernel/random/lrng_type") != 0

@@ -1,4 +1,4 @@
-"""firmware/toolchain: optimisation comes from configuration, not from build system patches."""
+"""firmware/toolchain: optimization comes from configuration, not from build system patches."""
 
 from pathlib import Path
 
@@ -8,7 +8,7 @@ CAPABILITY = "firmware/toolchain"
 PATCHES = Path(__file__).resolve().parents[2] / "patches" / "openwrt"
 
 
-@spec(CAPABILITY, "只靠配置实现优化，不改构建系统", "审计补丁队列")
+@spec(CAPABILITY, "Optimization through configuration only", "Audit patch queue")
 def test_patch_queue_leaves_target_mk_alone() -> None:
     changed = {
         line.split()[3].removeprefix("b/")

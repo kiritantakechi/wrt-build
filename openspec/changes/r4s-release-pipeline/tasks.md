@@ -1,45 +1,45 @@
 # Tasks
 
-## 1. 信任锚与构建形态
+## 1. Trust anchor and build variants
 
-- [ ] 1.1 生成发布用的 apk EC 密钥对（prime256v1）和 usign 密钥对。私钥存进 GitHub `release-signing` environment 的 secrets，并给这个 environment 设置必需的审批人。验证：`scripts/github-audit.sh` 读出这个 environment 和它的审批规则；仓库文件里没有任何私钥（`just check` 里的 gitleaks 扫描通过）。
-- [ ] 1.2 在自有 feed 里新增 `wrt-keyring`，安装 apk 公钥和 usign 公钥，支持多把。验证：`test_signing.py` 的“检查镜像中的信任锚”用例读取镜像审计的输出，只看到这些公钥。
-- [ ] 1.3 在 `config/ci.seed` 里加入 `BUILDBOT`、去掉 `openwrt-keyring`、加入 `wrt-keyring`、不开 `SIGN_FIRMWARE`（design D1）。验证：CI 构建出的镜像里 `/etc/apk/keys` 只有发布公钥，没有 `local-*` 或 `openwrt-*` 开头的公钥。
-- [ ] 1.4 用 flake 构建签名工具 `.#sign-tools`（apk-tools v3、usign、ucert、fwtool，都用固定版本的源码）。验证：`nix run .#sign-tools -- --version` 能列出这四个工具的版本。
-- [ ] 1.5 在 `wrt_tests/keys.py` 实现临时密钥，以及 `signed_repo` 和 `trust` 两个夹具；把 foundation 里安装 kmod 的用例改为使用 `signed_repo`。验证：`tests/unit/test_keys.py` 用生成的密钥签名、验签一次；`firmware/test_kernel.py` 在 ci 构建上仍然通过。
+- [ ] 1.1 Generate the release apk EC key pair (prime256v1) and usign key pair. Store the private keys as secrets of the GitHub `release-signing` environment, and set required reviewers on that environment. Verification: `scripts/github-audit.sh` reads back the environment and its approval rules; no repository file contains a private key (the gitleaks scan in `just check` passes).
+- [ ] 1.2 Add `wrt-keyring` to the project's own feed; it installs the apk public key and the usign public key and supports multiple keys. Verification: the "Check trust anchors in the image" test in `test_signing.py` reads the image audit output and sees only these public keys.
+- [ ] 1.3 In `config/ci.seed`, add `BUILDBOT`, remove `openwrt-keyring`, add `wrt-keyring`, and leave `SIGN_FIRMWARE` off (design D1). Verification: in the image built by CI, `/etc/apk/keys` contains only the release public keys and no keys starting with `local-*` or `openwrt-*`.
+- [ ] 1.4 Build the signing tools `.#sign-tools` with the flake (apk-tools v3, usign, ucert, fwtool, all from pinned sources). Verification: `nix run .#sign-tools -- --version` lists the versions of all four tools.
+- [ ] 1.5 Implement ephemeral keys and the `signed_repo` and `trust` fixtures in `wrt_tests/keys.py`; switch the foundation test that installs a kmod to `signed_repo`. Verification: `tests/unit/test_keys.py` signs and verifies once with a generated key; `firmware/test_kernel.py` still passes on the ci build.
 
-## 2. 签名与发布
+## 2. Signing and publishing
 
-- [ ] 2.1 实现 `scripts/release-sign.sh`：核对清单中的 sha256，用 `apk adbsign` 签索引，用 usign、ucert、fwtool 签镜像，用传入的公钥做一次校验，写出 `SHA256SUMS`。验证：`tests/release/test_signing.py` 用临时密钥覆盖“产物与清单不一致”“签名后的软件包索引”“轮换过渡期”三个场景。
-- [ ] 2.2 编写 `sign` job，只引用 `release-signing` environment，步骤只有下载产物、`nix run .#sign-tools` 和 `release-sign.sh`。验证：`test_signing.py` 中的工作流审计用例覆盖“检查构建 job 的权限”和“检查签名 job 执行的内容”；“没有批准”的场景由 GitHub 的 environment 保护保证，登记在 `verified-elsewhere.toml` 里，由 `github-audit.sh` 核对。
-- [ ] 2.3 实现 `scripts/release-publish.sh`：核对运行标识，组装附件和 `release.json`（tag、是否预发布、说明文字），最后调用 `gh release create`。编写 `publish` job，排在 `upgrade-drill` 之后。验证：`tests/release/test_publishing.py` 覆盖 publishing 规格的全部场景（上传步骤以组装结果为准，不真的调用 GitHub）。
-- [ ] 2.4 实现 `scripts/github-audit.sh`，核对 environment 的审批人和分支保护的必需检查项（包括 `upgrade-drill`），加进 check 工作流的定时任务。验证：在本仓库上运行，输出与预期一致；在一个故意缺少审批人的测试仓库上运行时失败。
+- [ ] 2.1 Implement `scripts/release-sign.sh`: check the sha256 values in the manifest, sign the indexes with `apk adbsign`, sign the images with usign, ucert, and fwtool, verify once with the supplied public keys, and write `SHA256SUMS`. Verification: `tests/release/test_signing.py` uses ephemeral keys to cover three scenarios: "Artifact does not match the manifest", "Signed package index", and "Rotation transition period".
+- [ ] 2.2 Write the `sign` job, which references only the `release-signing` environment and whose only steps are downloading the artifacts, `nix run .#sign-tools`, and `release-sign.sh`. Verification: the workflow audit tests in `test_signing.py` cover "Check build job permissions" and "Check what the signing job runs"; the "No approval" scenario is guaranteed by GitHub environment protection, registered in `verified-elsewhere.toml`, and checked by `github-audit.sh`.
+- [ ] 2.3 Implement `scripts/release-publish.sh`: check the run identifier, assemble the attachments and `release.json` (tag, prerelease flag, notes), and finally call `gh release create`. Write the `publish` job, ordered after `upgrade-drill`. Verification: `tests/release/test_publishing.py` covers every scenario in the publishing spec (the upload step is judged by the assembled output, without actually calling GitHub).
+- [ ] 2.4 Implement `scripts/github-audit.sh`, which checks the environment reviewers and the branch protection required checks (including `upgrade-drill`), and add it to the scheduled run of the check workflow. Verification: running it on this repository gives the expected output; running it on a test repository that deliberately lacks reviewers fails.
 
-## 3. 设备端同步与升级
+## 3. Device-side sync and upgrade
 
-- [ ] 3.1 在自有 feed 里实现 `wrt-sync`：一个 procd 服务加挂载触发器，在容器里下载、在宿主上校验，然后原子切换 `current`，只保留 3 个版本，支持 stable 和 candidate 两个通道，Releases 的地址可配置；另附一个 Pod YAML 和每天执行的 cron。验证：由 `test_device_sync.py` 中关于同步的各个场景覆盖。
-- [ ] 3.2 覆盖 apk 的源列表，指向本地的 `current`。验证：由“WAN 断开时安装 kmod”和“不接数据盘”两个用例覆盖。
-- [ ] 3.3 实现 `wrt-update`，并在 `platform_check_image` 里强制校验签名。验证：由“镜像被篡改”的用例覆盖；另有一条用例确认没有签名的镜像同样被拒绝。
-- [ ] 3.4 在 `wrt_tests/` 里实现模拟的 GitHub Releases API：放在 `inet` 里，用测试 CA 签发的证书提供 HTTPS，数据来自一个目录下的 `release.json` 和附件；支持中途断开连接，用来测试被打断的同步。验证：`tests/unit/test_releases.py` 用 curl 访问它，列表、下载和断开都符合预期。
+- [ ] 3.1 Implement `wrt-sync` in the project's own feed: a procd service plus a mount trigger that downloads in a container, verifies on the host, then atomically switches `current`, keeps only 3 releases, supports the stable and candidate channels, and has a configurable Releases address; it also ships a Pod YAML and a daily cron job. Verification: covered by the sync scenarios in `test_device_sync.py`.
+- [ ] 3.2 Overwrite the apk feed list to point to the local `current`. Verification: covered by the "Install a kmod with WAN down" and "No data disk attached" tests.
+- [ ] 3.3 Implement `wrt-update`, and enforce signature verification in `platform_check_image`. Verification: covered by the "Tampered image" test; an additional test confirms that an unsigned image is rejected as well.
+- [ ] 3.4 Implement a mock GitHub Releases API in `wrt_tests/`: it lives in `inet`, serves HTTPS with a certificate issued by the test CA, and takes its data from a `release.json` and attachments in a directory; it can drop connections midway, to test interrupted syncs. Verification: `tests/unit/test_releases.py` accesses it with curl, and listing, downloading, and disconnecting all behave as expected.
 
-## 4. 每周 bump 与升级演练
+## 4. Weekly bump and upgrade drill
 
-- [ ] 4.1 实现 `scripts/upstream-bump.sh` 和定时工作流：检查三个上游仓库，有更新就开 PR，PR 描述里写上新旧 SHA 和提交摘要；没有更新就不开。验证：`tests/release/test_upstream_bump.py` 用本地裸仓库充当上游，覆盖“上游有更新”和“上游没有更新”两个场景（开 PR 那一步只检查生成的标题和描述）；补丁冲突的场景用一个与补丁冲突的假上游驱动 `patch.sh`，确认失败信息里有补丁文件名。
-- [ ] 4.2 编写 `upgrade-drill` job 和 `-m drill` 用例：拿到最新正式版的出厂镜像（还没有正式版时，用本次构建的出厂镜像），推送测试配置，同步候选版，执行 `wrt-update`，然后等待健康检查确认。`system-test` 用临时密钥跑同一组用例。验证：“演练通过”在 `system-test` 中通过；“候选版通不过健康检查”的用例在保留的配置里放一个一定失败的检查项，确认设备回到原槽位、用例判定演练失败。
-- [ ] 4.3 设置分支保护，把 `upgrade-drill` 设为必需检查项。验证：`github-audit.sh` 能核对到这一项；一个演练失败的 PR 不能合并。
-- [ ] 4.4 编写 `docs/release-flow.md`：bump PR → 签名审批 → 升级演练 → 候选版发布 → 合并 → 主分支签名审批 → 演练 → 正式版发布 → 设备同步和 `wrt-update`。验证：第一次真实的 bump 按文档走完，每一步的链接记录在 `docs/validation/release.md`。
+- [ ] 4.1 Implement `scripts/upstream-bump.sh` and the scheduled workflow: check the three upstream repositories and, when there are updates, open a PR with the old and new SHAs and a commit summary in the PR description; open none when there are no updates. Verification: `tests/release/test_upstream_bump.py` uses local bare repositories as the upstreams and covers the "Upstream has updates" and "Upstream has no updates" scenarios (the PR-opening step checks only the generated title and description); the patch conflict scenario drives `patch.sh` with a fake upstream that conflicts with a patch and confirms that the failure message includes the patch file name.
+- [ ] 4.2 Write the `upgrade-drill` job and the `-m drill` tests: take the factory image of the latest stable release (or this build's factory image if there is no stable release yet), push the test configuration, sync the candidate, run `wrt-update`, and wait for the health check to confirm. `system-test` runs the same tests with ephemeral keys. Verification: "Drill passes" passes in `system-test`; the "Candidate fails the health check" test puts a check that always fails into the preserved configuration and confirms that the device returns to its original slot and the test judges the drill as failed.
+- [ ] 4.3 Configure branch protection to make `upgrade-drill` a required check. Verification: `github-audit.sh` detects this check; a PR whose drill fails cannot be merged.
+- [ ] 4.4 Write `docs/release-flow.md`: bump PR → signing approval → upgrade drill → candidate release → merge → main-branch signing approval → drill → stable release → device sync and `wrt-update`. Verification: the first real bump follows the document end to end, and the link for each step is recorded in `docs/validation/release.md`.
 
-## 5. 配置推送
+## 5. Config push
 
-- [ ] 5.1 实现 `scripts/config-init.sh`（对应 `just config-init`），生成私有仓库 `wrt-config` 的骨架（`.sops.yaml`、`secrets`、`dae`、`pods`、`uci` 模板），并生成 age 密钥；`sops`、`age` 加进 flake 的两种 devShell。验证：`test_config_push.py` 对生成的骨架和一个填好测试密钥的夹具仓库运行 gitleaks，全部历史里都找不到明文密钥；离线备份 age 密钥的方法写进 `docs/ops.md`。
-- [ ] 5.2 实现 `scripts/config-push.sh`（对应 `just config-push <host>`）：解密、渲染模板、本机校验、在设备上预校验 dae 配置、按哈希只重载有变化的服务、失败时回滚、只用 SSH 密钥认证。验证：`tests/ops/test_config_push.py` 对模拟器里的路由器推送，覆盖 config-push 规格中除“升级到另一个槽位”以外的全部场景。
-- [ ] 5.3 把推送写入的路径追加到镜像的 `/etc/sysupgrade.conf`。验证：由“升级到另一个槽位”的用例覆盖（推送后做一次保留配置的 A/B 升级）。
+- [ ] 5.1 Implement `scripts/config-init.sh` (backing `just config-init`), which generates the skeleton of the private repository `wrt-config` (`.sops.yaml`, `secrets`, `dae`, `pods`, `uci` templates) and an age key; add `sops` and `age` to both flake devShells. Verification: `test_config_push.py` runs gitleaks on the generated skeleton and on a fixture repository filled with test secrets and finds no plaintext secrets in the full history; the method for backing up the age key offline is documented in `docs/ops.md`.
+- [ ] 5.2 Implement `scripts/config-push.sh` (backing `just config-push <host>`): decrypt, render templates, validate locally, pre-validate the dae configuration on the device, reload only the services that changed according to the hashes, roll back on failure, and authenticate only with SSH keys. Verification: `tests/ops/test_config_push.py` pushes to the router in the emulator and covers every scenario in the config-push spec except "Upgrade to the other slot".
+- [ ] 5.3 Append the paths written by the push to the image's `/etc/sysupgrade.conf`. Verification: covered by the "Upgrade to the other slot" test (a config-preserving A/B upgrade after a push).
 
-## 6. 模拟器与宿主用例汇总
+## 6. Emulator and host test summary
 
-- [ ] 6.1 `tests/release/test_device_sync.py`：覆盖 device-sync 规格的全部场景。其中“本机无法直连”由 `isp` 阻断路由器 WAN 地址到模拟 Releases 服务的流量；“同步中途被打断”由模拟服务断开连接；“保留最近的版本”连续发布 4 个版本。验证：用例全部通过。
-- [ ] 6.2 运行 `spec-coverage`。验证：这个 change 没有未覆盖的场景，只有“没有批准”一项登记在 `verified-elsewhere.toml`。
+- [ ] 6.1 `tests/release/test_device_sync.py`: covers every scenario in the device-sync spec. For "Router cannot reach GitHub directly", `isp` blocks traffic from the router's WAN address to the mock Releases service; for "Sync interrupted midway", the mock service drops the connection; for "Keep the most recent releases", 4 releases are published in a row. Verification: all tests pass.
+- [ ] 6.2 Run `spec-coverage`. Verification: this change has no uncovered scenarios, and only "No approval" is registered in `verified-elsewhere.toml`.
 
-## 7. 首次上线
+## 7. First rollout
 
-- [ ] 7.1 按 design 的 Migration Plan 生成正式密钥、完成第一次正式发布、在真机上刷写出厂镜像并推送配置，然后运行 `just test-device <host>`。验证：报告全部通过，结果存档到 `docs/validation/release.md`；设备上 `wrt-sync` 能同步到这次发布。
+- [ ] 7.1 Following the design's Migration Plan, generate the production keys, complete the first stable release, flash the factory image on the device and push the configuration, then run `just test-device <host>`. Verification: the report passes in full and the results are archived in `docs/validation/release.md`; `wrt-sync` on the device can sync this release.

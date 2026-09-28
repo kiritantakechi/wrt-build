@@ -2,53 +2,53 @@
 
 ## Purpose
 
-规定发布签名的隔离、审批和签名对象，并规定设备只信任发布公钥。这样即使构建过程中执行的第三方代码被投毒，也拿不到可以长期冒充发布者的密钥。
+Defines the isolation, approval, and targets of release signing, and requires devices to trust only the release public keys. This way, even if third-party code executed during the build is poisoned, it cannot obtain a key that can impersonate the publisher long term.
 
 ## ADDED Requirements
 
-### Requirement: 构建和签名相互隔离
-签名 SHALL 在一个独立的 job 里完成。这个 job 只运行由仓库固定版本、从第一方源码构建的签名工具，MUST NOT 执行任何软件包的构建脚本或第三方依赖。构建 job MUST NOT 能访问签名密钥。
+### Requirement: Build and signing are isolated
+Signing SHALL happen in a separate job. That job runs only signing tools pinned by the repository and built from first-party sources, and MUST NOT execute any package build scripts or third-party dependencies. The build job MUST NOT have access to the signing keys.
 
-#### Scenario: 检查构建 job 的权限
-- **WHEN** 检查构建 job 的定义和运行环境
-- **THEN** 其中没有引用任何签名密钥，运行时也读不到签名密钥
+#### Scenario: Check build job permissions
+- **WHEN** the build job's definition and runtime environment are inspected
+- **THEN** they reference no signing keys, and no signing key is readable at runtime
 
-#### Scenario: 检查签名 job 执行的内容
-- **WHEN** 查看签名 job 的执行日志
-- **THEN** 只执行了固定版本的签名工具，对下载来的产物做了校验和签名，没有编译任何软件包
+#### Scenario: Check what the signing job runs
+- **WHEN** the signing job's execution log is inspected
+- **THEN** only the pinned signing tools ran, verifying and signing the downloaded artifacts, and no package was compiled
 
-### Requirement: 每次签名都需要人工审批
-每次签名 SHALL 需要仓库维护者明确批准。没有批准时 MUST NOT 产出签名后的产物。
+### Requirement: Every signing requires manual approval
+Each signing SHALL require explicit approval from a repository maintainer. Without approval, signed artifacts MUST NOT be produced.
 
-#### Scenario: 没有批准
-- **WHEN** 构建完成后，维护者没有批准签名
-- **THEN** 签名 job 一直停在等待状态，不产出任何签名后的产物
+#### Scenario: No approval
+- **WHEN** the build completes and the maintainer does not approve signing
+- **THEN** the signing job stays in the waiting state and produces no signed artifacts
 
-### Requirement: 签名对象
-签名 job SHALL 用发布用的 apk 密钥签名全部软件包索引，并用发布用的固件密钥签名出厂镜像和升级镜像。签名前 MUST 核对这些产物与构建清单中的校验和一致。
+### Requirement: Signing targets
+The signing job SHALL sign all package indexes with the release apk key, and sign the factory image and the upgrade image with the release firmware key. Before signing, it MUST verify that these artifacts match the checksums in the build manifest.
 
-#### Scenario: 产物与清单不一致
-- **WHEN** 某个待签名产物的校验和与构建清单中的记录不同
-- **THEN** 签名中止，不产出任何签名后的产物
+#### Scenario: Artifact does not match the manifest
+- **WHEN** the checksum of an artifact to be signed differs from the record in the build manifest
+- **THEN** signing aborts and produces no signed artifacts
 
-#### Scenario: 签名后的软件包索引
-- **WHEN** 一台只装了发布公钥的设备读取签名后的软件包索引
-- **THEN** 索引签名校验通过
+#### Scenario: Signed package index
+- **WHEN** a device with only the release public key installed reads the signed package index
+- **THEN** the index signature verifies
 
-### Requirement: 设备只信任发布公钥
-固件镜像 SHALL 只包含发布公钥作为软件包和固件的信任锚，MUST NOT 包含构建过程中临时生成的密钥，也 MUST NOT 包含 OpenWrt 官方的公钥。
+### Requirement: Devices trust only release keys
+The firmware image SHALL contain only the release public keys as the trust anchor for packages and firmware. It MUST NOT contain keys generated temporarily during the build, and MUST NOT contain the official OpenWrt public keys.
 
-#### Scenario: 检查镜像中的信任锚
-- **WHEN** 列出镜像里的 `/etc/apk/keys` 和固件签名公钥目录
-- **THEN** 里面只有本项目的发布公钥
+#### Scenario: Check trust anchors in the image
+- **WHEN** `/etc/apk/keys` and the firmware signing public key directory in the image are listed
+- **THEN** they contain only this project's release public keys
 
-#### Scenario: 用其他密钥签名的软件包索引
-- **WHEN** 设备读取一个用其他密钥签名的软件包索引
-- **THEN** 包管理器拒绝使用这个索引
+#### Scenario: Index signed with another key
+- **WHEN** the device reads a package index signed with another key
+- **THEN** the package manager refuses to use the index
 
-### Requirement: 支持密钥轮换
-信任锚 SHALL 支持同时存放多把发布公钥，这样轮换密钥时，新旧两把钥匙签名的产物在过渡期内都被接受。
+### Requirement: Key rotation support
+The trust anchor SHALL support holding several release public keys at once, so that during a key rotation, artifacts signed by either the old or the new key are accepted throughout the transition period.
 
-#### Scenario: 轮换过渡期
-- **WHEN** 镜像里同时装有旧、新两把发布公钥
-- **THEN** 分别用这两把密钥签名的软件包索引都能通过校验
+#### Scenario: Rotation transition period
+- **WHEN** the image contains both the old and the new release public keys
+- **THEN** package indexes signed with either key pass verification

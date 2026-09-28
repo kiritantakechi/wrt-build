@@ -19,7 +19,7 @@ BPF_OBJECT = "/tmp/wrt_pass.o"  # noqa: S108 (a path on the router)
 VIRTIO_NICS = ("eth0 (WAN)", "eth1 (LAN)")
 
 
-@spec(CAPABILITY, "内核版本跟随上游", "检查运行中的内核")
+@spec(CAPABILITY, "Kernel version follows upstream", "Check running kernel")
 def test_running_kernel_is_the_packaged_one(router: Router) -> None:
     packaged = re.search(
         r"^kernel-(\d+\.\d+\.\d+)~", router.run("apk list -I kernel"), re.MULTILINE
@@ -28,7 +28,7 @@ def test_running_kernel_is_the_packaged_one(router: Router) -> None:
     assert router.run("uname -r") == packaged.group(1)
 
 
-@spec(CAPABILITY, "提供 BTF", "检查 BTF")
+@spec(CAPABILITY, "Provide BTF", "Check BTF")
 def test_btf_for_kernel_and_modules(router: Router) -> None:
     assert int(router.run("wc -c < /sys/kernel/btf/vmlinux")) > 0
     modules = router.run("cut -d' ' -f1 /proc/modules").split()
@@ -39,14 +39,14 @@ def test_btf_for_kernel_and_modules(router: Router) -> None:
     assert missing == ""
 
 
-@spec(CAPABILITY, "BPF 与 cgroup v2", "检查 cgroup 挂载")
+@spec(CAPABILITY, "BPF and cgroup v2", "Check cgroup mounts")
 def test_cgroup2_only(router: Router) -> None:
     mounts = [line.split() for line in router.run("cat /proc/mounts").splitlines()]
     assert ["/sys/fs/cgroup", "cgroup2"] in [fields[1:3] for fields in mounts]
     assert [fields for fields in mounts if fields[2] == "cgroup"] == []
 
 
-@spec(CAPABILITY, "BPF 与 cgroup v2", "能加载 tcx 程序")
+@spec(CAPABILITY, "BPF and cgroup v2", "Load a tcx program")
 def test_tcx_program_attaches(router: Router, tmp_path: Path) -> None:
     program = tmp_path / "wrt_pass.o"
     program.write_bytes(tcx_object("wrt_pass"))
@@ -62,7 +62,7 @@ def test_tcx_program_attaches(router: Router, tmp_path: Path) -> None:
         router.run("rm -f /sys/fs/bpf/wrt_pass")
 
 
-@spec(CAPABILITY, "根文件系统和 overlay 需要的内核功能都编进内核", "不加载任何模块就能启动")
+@spec(CAPABILITY, "Root and overlay filesystems built in", "Boot without loading modules")
 def test_filesystems_are_built_in(router: Router) -> None:
     filesystems = router.run("cat /proc/filesystems").split()
     modules = router.run("cut -d' ' -f1 /proc/modules").split()
@@ -74,7 +74,7 @@ def test_filesystems_are_built_in(router: Router) -> None:
     assert ["/overlay", "f2fs"] in mounts
 
 
-@spec(CAPABILITY, "同一个内核能在模拟器中启动", "出货内核在模拟器中启动")
+@spec(CAPABILITY, "Same kernel boots in the emulator", "Shipped kernel boots in the emulator")
 @target("emulation", "checks the emulator's virtual devices")
 def test_virt_devices(router: Router) -> None:
     assert "console=ttyAMA0" in router.run("cat /proc/cmdline").split()
@@ -91,7 +91,7 @@ def test_virt_devices(router: Router) -> None:
     assert router.returncode("[ -c /dev/watchdog0 ]") == 0
 
 
-@spec(CAPABILITY, "默认拥塞控制为 BBRv3", "检查拥塞控制设置")
+@spec(CAPABILITY, "BBRv3 as default congestion control", "Check congestion control settings")
 def test_bbr3_is_the_default(router: Router) -> None:
     assert router.run("sysctl -n net.ipv4.tcp_congestion_control") == "bbr"
     assert router.run("sysctl -n net.core.default_qdisc") == "fq"
@@ -99,7 +99,7 @@ def test_bbr3_is_the_default(router: Router) -> None:
     assert set(BBR3_ONLY_SYMBOLS) <= symbols
 
 
-@spec(CAPABILITY, "默认拥塞控制为 BBRv3", "本机发起的连接使用 BBR")
+@spec(CAPABILITY, "BBRv3 as default congestion control", "Router-originated connections use BBR")
 def test_local_connection_uses_bbr(router: Router) -> None:
     # Hold a connection from the router to its own web server open, then look at it.
     info = router.run(
@@ -108,7 +108,7 @@ def test_local_connection_uses_bbr(router: Router) -> None:
     assert re.search(r"\bbbr\b", info), info
 
 
-@spec(CAPABILITY, "内核源码只改 BBRv3", "审计内核补丁")
+@spec(CAPABILITY, "BBRv3 is the only kernel source change", "Audit kernel patches")
 def test_only_bbr3_patches_the_kernel() -> None:
     changed = {
         line.split()[3].removeprefix("b/")
@@ -121,7 +121,7 @@ def test_only_bbr3_patches_the_kernel() -> None:
     assert {path for path in kernel if not BBR3_PATCH.match(path)} == set()
 
 
-@spec(CAPABILITY, "使用标准 vermagic", "安装同一次构建的 kmod")
+@spec(CAPABILITY, "Standard vermagic", "Install a kmod from the same build")
 @target("emulation", "serves the build's package repository from the runner")
 def test_kmod_of_the_same_build_loads(router: Router, repository: str) -> None:
     router.run(f"apk add --repository {repository}/targets/packages/packages.adb kmod-dummy")
@@ -129,7 +129,7 @@ def test_kmod_of_the_same_build_loads(router: Router, repository: str) -> None:
     assert "dummy" in router.run("cut -d' ' -f1 /proc/modules").split()
 
 
-@spec(CAPABILITY, "使用标准 vermagic", "拒绝内核配置不同的 kmod")
+@spec(CAPABILITY, "Standard vermagic", "Reject a kmod with a different kernel config")
 def test_kmod_of_another_kernel_is_refused(router: Router) -> None:
     # A kmod depends on kernel=<version>~<vermagic>; a virtual package with the
     # running version but another vermagic has exactly the dependency of a kmod

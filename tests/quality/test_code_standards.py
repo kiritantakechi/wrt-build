@@ -57,7 +57,7 @@ def _break_indentation(path: Path) -> None:
     path.write_text(broken)
 
 
-@spec(CAPABILITY, "统一格式化", "提交了未格式化的代码")
+@spec(CAPABILITY, "Uniform formatting", "Unformatted code committed")
 def test_unformatted_shell_fails(repo: Path) -> None:
     _break_indentation(repo / "scripts" / "fetch.sh")
     result = _run(repo, "check.sh", "shfmt")
@@ -66,7 +66,7 @@ def test_unformatted_shell_fails(repo: Path) -> None:
     assert re.search(r"^\+\t", result.stdout, re.MULTILINE), result.stdout
 
 
-@spec(CAPABILITY, "静态检查全部通过", "引入静态检查告警")
+@spec(CAPABILITY, "All static checks pass", "New static check warning")
 def test_shellcheck_warning_fails(repo: Path) -> None:
     with (repo / "scripts" / "fmt.sh").open("a") as script:
         script.write("echo $HOME\n")
@@ -76,7 +76,7 @@ def test_shellcheck_warning_fails(repo: Path) -> None:
     assert "SC2250" in result.stdout
 
 
-@spec(CAPABILITY, "统一的脚本骨架", "新增脚本")
+@spec(CAPABILITY, "Common script skeleton", "New script added")
 def test_new_script_without_skeleton_fails(repo: Path) -> None:
     script = repo / "scripts" / "thing-probe.sh"
     header = (
@@ -90,7 +90,7 @@ def test_new_script_without_skeleton_fails(repo: Path) -> None:
     assert "scripts/thing-probe.sh: no just recipe named thing-probe" in result.stderr
 
 
-@spec(CAPABILITY, "对称命名", "只有一半的操作")
+@spec(CAPABILITY, "Symmetric naming", "Unpaired operation")
 def test_paired_operations_are_complete() -> None:
     recipes = set(
         subprocess.run(
@@ -108,7 +108,7 @@ def test_paired_operations_are_complete() -> None:
                     assert f"{recipe.removesuffix(one)}{other}" in recipes, recipe
 
 
-@spec(CAPABILITY, "一条命令检查和格式化", "检查后再格式化")
+@spec(CAPABILITY, "One command to check and format", "Format then check")
 def test_fmt_then_check_passes(repo: Path) -> None:
     _break_indentation(repo / "scripts" / "fetch.sh")
     flake = repo / "flake.nix"

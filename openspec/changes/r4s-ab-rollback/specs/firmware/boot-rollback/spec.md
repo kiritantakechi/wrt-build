@@ -2,54 +2,54 @@
 
 ## Purpose
 
-决定每次启动用哪个槽位；新系统连续启动都没能被确认时，自动退回另一个槽位；把内核卡死和内核 panic 转成可以计数的重启。
+Decides which slot each boot uses; falls back to the other slot automatically when a new system boots repeatedly without being confirmed; and turns kernel hangs and kernel panics into reboots that can be counted.
 
 ## ADDED Requirements
 
-### Requirement: 按持久变量选择槽位
-引导程序 SHALL 按持久保存的 `boot_slot` 变量启动对应槽位。这个变量不存在或值无效时 SHALL 启动槽位 A。当前槽位 SHALL 通过内核命令行传给 Linux。
+### Requirement: Slot selection from a persistent variable
+The bootloader SHALL boot the slot named by the persistently stored `boot_slot` variable. When this variable is missing or has an invalid value, the bootloader SHALL boot slot A. The current slot SHALL be passed to Linux on the kernel command line.
 
-#### Scenario: 选择槽位 B
-- **WHEN** `boot_slot` 为 `b` 时启动
-- **THEN** 根文件系统来自 root-B，内核命令行里标明当前槽位是 b
+#### Scenario: Select slot B
+- **WHEN** the device boots with `boot_slot` set to `b`
+- **THEN** the root filesystem comes from root-B, and the kernel command line identifies the current slot as b
 
-#### Scenario: 持久变量缺失或已损坏
-- **WHEN** 持久环境里没有 `boot_slot`，或者整块环境变量已损坏
-- **THEN** 系统从槽位 A 启动
+#### Scenario: Persistent variable missing or corrupted
+- **WHEN** the persistent environment has no `boot_slot`, or the whole environment block is corrupted
+- **THEN** the system boots from slot A
 
-### Requirement: 启动逻辑不能被持久环境覆盖
-只有 `boot_slot`、`bootcount`、`upgrade_available` 这几个运行时变量 SHALL 从持久环境读取。选槽和回滚逻辑 MUST 来自引导程序本身，不能被持久环境里的同名变量替换。
+### Requirement: Persistent environment cannot override boot logic
+Only the runtime variables `boot_slot`, `bootcount`, and `upgrade_available` SHALL be read from the persistent environment. The slot selection and rollback logic MUST come from the bootloader itself and cannot be replaced by same-named variables in the persistent environment.
 
-#### Scenario: 持久环境里写入了自定义启动命令
-- **WHEN** 有人往持久环境里写入一条自定义的启动命令后重启
-- **THEN** 引导程序仍然使用自己内置的选槽逻辑
+#### Scenario: Custom boot command in persistent environment
+- **WHEN** someone writes a custom boot command into the persistent environment and reboots
+- **THEN** the bootloader still uses its own built-in slot selection logic
 
-### Requirement: 试运行计数与自动回滚
-`upgrade_available` 为 1 时，每次启动 SHALL 把 `bootcount` 加一。`bootcount` 超过 3 时，引导程序 SHALL 把 `boot_slot` 切换到另一个槽位，清除 `upgrade_available` 和 `bootcount`，然后启动那个槽位。`upgrade_available` 为 0 时 MUST NOT 增加 `bootcount`，也 MUST NOT 为了计数而写 SD 卡。
+### Requirement: Trial boot counting and automatic rollback
+When `upgrade_available` is 1, every boot SHALL increment `bootcount`. When `bootcount` exceeds 3, the bootloader SHALL switch `boot_slot` to the other slot, clear `upgrade_available` and `bootcount`, and then boot that slot. When `upgrade_available` is 0, the bootloader MUST NOT increment `bootcount` and MUST NOT write to the SD card for counting.
 
-#### Scenario: 新槽位连续启动失败
-- **WHEN** 新槽位处于试运行状态，并且连续三次启动都没有被确认
-- **THEN** 第四次启动时引导程序切回原来的槽位，并且 `upgrade_available` 被清为 0
+#### Scenario: New slot fails repeatedly
+- **WHEN** the new slot is in the trial boot state and three consecutive boots go unconfirmed
+- **THEN** on the fourth boot the bootloader switches back to the original slot, and `upgrade_available` is cleared to 0
 
-#### Scenario: 正常运行时不计数
-- **WHEN** `upgrade_available` 为 0 时重启
-- **THEN** `bootcount` 保持不变，引导程序没有写入环境变量
+#### Scenario: No counting during normal operation
+- **WHEN** the device reboots with `upgrade_available` at 0
+- **THEN** `bootcount` stays the same, and the bootloader does not write the environment
 
-#### Scenario: 当前槽位加载失败
-- **WHEN** 当前槽位的内核无法加载
-- **THEN** 引导程序在同一次上电中改为尝试另一个槽位；两个槽位都失败时停在引导程序里，不会无限循环
+#### Scenario: Current slot fails to load
+- **WHEN** the current slot's kernel cannot be loaded
+- **THEN** the bootloader tries the other slot within the same power cycle; if both slots fail, it stops in the bootloader instead of looping forever
 
-### Requirement: 卡死和 panic 都会变成重启
-硬件看门狗 SHALL 在内核开始运行前启动，并一直保持工作，直到用户态接管。用户态在规定时间内没有接管时，看门狗 SHALL 让设备复位。内核 panic 后 SHALL 在 10 秒内自动重启。
+### Requirement: Hangs and panics become reboots
+The hardware watchdog SHALL start before the kernel begins running and stay active until userspace takes over. If userspace does not take over within the set time, the watchdog SHALL reset the device. After a kernel panic, the device SHALL reboot automatically within 10 seconds.
 
-#### Scenario: 内核 panic
-- **WHEN** 系统运行中触发内核 panic
-- **THEN** 设备在 10 秒内重启；如果当时处于试运行状态，`bootcount` 加一
+#### Scenario: Kernel panic
+- **WHEN** a kernel panic occurs while the system is running
+- **THEN** the device reboots within 10 seconds, and `bootcount` is incremented if it was in the trial boot state
 
-#### Scenario: 启动早期卡死
-- **WHEN** 内核在用户态启动之前卡住
-- **THEN** 看门狗超时后设备复位
+#### Scenario: Early boot hang
+- **WHEN** the kernel hangs before userspace starts
+- **THEN** the device resets after the watchdog times out
 
-#### Scenario: 用户态迟迟没有接管
-- **WHEN** 内核启动了，但用户态在规定时间内一直没有打开看门狗
-- **THEN** 设备复位
+#### Scenario: Userspace never takes over
+- **WHEN** the kernel has booted, but userspace does not open the watchdog within the set time
+- **THEN** the device resets

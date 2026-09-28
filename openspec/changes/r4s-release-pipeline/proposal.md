@@ -2,60 +2,60 @@
 
 ## Why
 
-这条发布流程要解决五个问题：
+This release pipeline addresses five problems:
 
-- **签名和分发必须自己做。** 内核是自编的，kmod 和固件都只能由本项目签名、分发。
-- **从 GitHub 直接拉更新不可靠。** dae 只绑 LAN，路由器本机流量走直连，在国内直接从 GitHub 拉更新不稳定。
-- **签名密钥不能碰第三方代码。** 构建时会执行大量第三方 Go 和 Rust 代码，签名密钥不能出现在执行这些代码的 job 里。
-- **跟进上游需要可控的节奏。** 每周跟进 main，需要一个风险低的“验证后再合并”流程。
-- **运行时密钥不能公开。** PPPoE 账号、dae 订阅、WireGuard 私钥、Tailscale 认证这些东西，不能出现在公开仓库或镜像里。
+- **Signing and distribution must be done in-house.** The kernel is self-built, so only this project can sign and distribute the kmods and firmware.
+- **Pulling updates directly from GitHub is unreliable.** dae binds only to the LAN and router-originated traffic goes out directly, so pulling updates straight from GitHub is unstable in mainland China.
+- **Signing keys must not touch third-party code.** The build executes a large amount of third-party Go and Rust code, and the signing keys must not be present in any job that runs that code.
+- **Tracking upstream needs a controlled cadence.** Tracking main every week requires a low-risk "verify, then merge" process.
+- **Runtime secrets must not be public.** PPPoE accounts, dae subscriptions, WireGuard private keys, and Tailscale authentication must not appear in the public repository or in images.
 
 ## What Changes
 
-- **构建形态**：CI 构建即发布构建（`ci` profile 打开 `BUILDBOT` 并换上自有公钥），所以模拟器测的就是将要签名发布的那一份镜像。
-- **签名**
-  - CI 里设一个独立的签名 job，只对构建产物签名，不执行任何第三方代码。
-  - apk 仓库和固件的签名密钥放在 GitHub 的受保护环境（environment）里，每次签名都需要人工审批。
-  - 签名工具（apk-tools、usign、ucert、fwtool）由 Nix 用固定版本的源码单独构建，不用构建 job 产出的二进制。
-  - 仿照官方做法：打开 `CONFIG_BUILDBOT`，让构建时临时生成的密钥不进镜像；再由自有的 `wrt-keyring` 包提供发布公钥，并且不带 OpenWrt 官方的公钥。
-  - 签名逻辑集中在一个脚本里，CI 用正式密钥，测试用临时密钥。
-- **发布**：签名后的单槽升级镜像、出厂镜像，以及含全部 kmod 的 apk 仓库，一起发布到 GitHub Releases。
-- **设备端同步**
-  - 路由器上跑一个容器，它的流量经 podman0 走 dae 代理，负责把 Release 产物同步到 `/mnt/data/repo`。
-  - apk 从这个本地仓库装包，sysupgrade 也从本地文件写入非活动槽位。
-  - 签名公钥预置在镜像里。
-  - 数据盘不在时，只是不能装包和升级，已经装好的系统照常运行。
-- **每周跟进上游**
-  - 机器人每周更新一次 `upstream.lock` 并开 PR。
-  - 签名之后，CI 在模拟器里做一次升级演练：从上一个正式版同步、升级到候选版，健康检查确认后才允许合并。每周不需要真机操作。
-  - 如果 BBRv3 等补丁打不上，CI 立即失败。
-- **配置推送**
-  - 私有配置仓库保存密钥和运行时配置，包括 config.dae。密钥用 sops + age 加密后再提交，只在工作站上解密。
-  - 推送脚本经 SSH 写入路由器，并触发对应服务重载。
-  - 公开仓库和镜像里都不出现任何密钥。
+- **Build variant**: The CI build is the release build (the `ci` profile enables `BUILDBOT` and swaps in the project's own public key), so the emulator tests exactly the image that will be signed and released.
+- **Signing**
+  - CI gets a separate signing job that only signs build artifacts and executes no third-party code.
+  - The signing keys for the apk repository and the firmware are kept in a GitHub protected environment, and every signing requires manual approval.
+  - The signing tools (apk-tools, usign, ucert, fwtool) are built separately by Nix from pinned sources, not taken from binaries produced by the build job.
+  - Following the official approach: enable `CONFIG_BUILDBOT` so the key generated temporarily at build time stays out of the image, then provide the release public key through the project's own `wrt-keyring` package, which does not include the official OpenWrt public keys.
+  - The signing logic lives in a single script; CI uses the production keys and tests use ephemeral keys.
+- **Publishing**: The signed single-slot upgrade image, the factory image, and the apk repository containing all kmods are published together to GitHub Releases.
+- **Device-side sync**
+  - A container runs on the router; its traffic goes through the dae proxy via podman0, and it syncs Release artifacts to `/mnt/data/repo`.
+  - apk installs packages from this local repository, and sysupgrade writes the inactive slot from a local file.
+  - The signing public key is preinstalled in the image.
+  - When the data disk is absent, only package installation and upgrades are unavailable; the installed system keeps running normally.
+- **Weekly upstream tracking**
+  - A bot updates `upstream.lock` once a week and opens a PR.
+  - After signing, CI runs an upgrade drill in the emulator: starting from the previous stable release, it syncs and upgrades to the candidate, and the merge is allowed only after the health check confirms it. No work on the device is needed each week.
+  - If patches such as BBRv3 fail to apply, CI fails immediately.
+- **Config push**
+  - A private config repository holds secrets and runtime configuration, including config.dae. Secrets are encrypted with sops + age before they are committed and are decrypted only on the workstation.
+  - A push script writes to the router over SSH and triggers a reload of the affected services.
+  - No secrets appear in the public repository or in images.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `release/signing`：签名 job 的隔离方式、密钥存放位置和审批流程。
-- `release/publishing`：发布哪些产物、发布到哪里，以及产物的组织方式。
-- `release/device-sync`：设备端经代理把产物同步到本地仓库，以及 apk 和 sysupgrade 如何使用本地产物。
-- `release/upstream-bump`：每周更新 lock 文件的 PR、验证后合并的节奏，以及补丁打不上时的处理。
-- `ops/config-push`：私有配置仓库，以及密钥与运行时配置的推送和生效方式。
+- `release/signing`: How the signing job is isolated, where the keys are stored, and the approval process.
+- `release/publishing`: Which artifacts are published, where they are published, and how they are organized.
+- `release/device-sync`: How the device syncs artifacts through the proxy to a local repository, and how apk and sysupgrade use the local artifacts.
+- `release/upstream-bump`: The weekly lock file update PR, the verify-then-merge cadence, and how patches that fail to apply are handled.
+- `ops/config-push`: The private config repository, and how secrets and runtime configuration are pushed and applied.
 
 ### Modified Capabilities
 
-（无。）
+(None.)
 
 ## Impact
 
-- **GitHub**：Actions、受保护环境（environment）、Releases、定时工作流和开 PR 的机器人。
-- **新增**：私有配置仓库，以及对应的 `just config-init` 和 `just config-push`。
-- **验证方式**：签名、发布组装和上游 bump 由宿主用例覆盖；设备同步、升级和配置推送在模拟器里对出货镜像执行，Releases 服务由沙箱模拟。本 change 没有仅真机的场景，首次上线时统一跑一次 `just test-device`。
-- **设备端**：同步容器、本地 apk 仓库的配置、预置的签名公钥。
-- **依赖其他 change**：
-  - `r4s-build-foundation`：CI 和构建产物。
-  - `r4s-ab-rollback`：写入备用槽位和回滚。
-  - `r4s-services`：数据盘和 podman。
-  - `r4s-ebpf-datapath`：容器流量经 dae 代理。
+- **GitHub**: Actions, protected environments, Releases, scheduled workflows, and a bot that opens PRs.
+- **New**: The private config repository, plus the corresponding `just config-init` and `just config-push`.
+- **Verification**: Signing, release assembly, and the upstream bump are covered by host tests; device sync, upgrade, and config push run in the emulator against the shipped image, with the Releases service mocked in the sandbox. This change has no device-only scenarios; a single `just test-device` run is done at first rollout.
+- **Device side**: The sync container, the local apk repository configuration, and the preinstalled signing public key.
+- **Depends on other changes**:
+  - `r4s-build-foundation`: CI and build artifacts.
+  - `r4s-ab-rollback`: Writing the inactive slot, and rollback.
+  - `r4s-services`: The data disk and podman.
+  - `r4s-ebpf-datapath`: Container traffic through the dae proxy.

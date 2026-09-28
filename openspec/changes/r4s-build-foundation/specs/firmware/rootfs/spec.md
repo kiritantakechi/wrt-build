@@ -2,38 +2,38 @@
 
 ## Purpose
 
-规定根分区里文件系统的格式和行为：只读、压缩的 EROFS 根文件系统，加上一层写入时压缩的 f2fs overlay。
+Define the format and behavior of the filesystems in the root partition: a read-only, compressed EROFS root filesystem, plus an f2fs overlay that compresses on write.
 
 ## ADDED Requirements
 
-### Requirement: 根文件系统使用 EROFS
-固件镜像的根文件系统 SHALL 是用 lz4hc 压缩的 EROFS。构建 MUST NOT 生成 squashfs 或 ext4 的根文件系统镜像。
+### Requirement: EROFS root filesystem
+The firmware image's root filesystem SHALL be EROFS compressed with lz4hc. The build MUST NOT produce squashfs or ext4 root filesystem images.
 
-#### Scenario: 检查构建产物
-- **WHEN** 查看构建产物目录
-- **THEN** 只有基于 EROFS 的镜像，没有 squashfs 或 ext4 根文件系统镜像
+#### Scenario: Check build artifacts
+- **WHEN** the build artifacts directory is inspected
+- **THEN** it contains only EROFS-based images, and no squashfs or ext4 root filesystem images
 
-#### Scenario: 检查设备上的挂载
-- **WHEN** 设备启动后查看挂载信息
-- **THEN** 只读根（`/rom`）的文件系统类型是 erofs
+#### Scenario: Check mounts on the router
+- **WHEN** the mount information is inspected after the router boots
+- **THEN** the filesystem type of the read-only root (`/rom`) is erofs
 
-### Requirement: 可写层是开启 zstd 压缩的 f2fs
-可写的 overlay SHALL 位于同一个根分区里、紧跟在 EROFS 之后，使用带压缩特性格式化的 f2fs，并以 zstd 压缩挂载。
+### Requirement: Writable layer is zstd-compressed f2fs
+The writable overlay SHALL live in the same root partition, directly after EROFS, use f2fs formatted with the compression feature, and be mounted with zstd compression.
 
-#### Scenario: 首次启动建立 overlay
-- **WHEN** 新刷入的镜像第一次启动
-- **THEN** `/overlay` 被创建为 f2fs，挂载选项里包含 zstd 压缩
+#### Scenario: First boot creates the overlay
+- **WHEN** a freshly flashed image boots for the first time
+- **THEN** `/overlay` is created as f2fs, and its mount options include zstd compression
 
-### Requirement: 恢复出厂只清空可写层
-恢复出厂设置 SHALL 只清空 overlay，EROFS 根文件系统的内容 MUST 保持不变。
+### Requirement: Factory reset clears only the writable layer
+A factory reset SHALL clear only the overlay, and the contents of the EROFS root filesystem MUST remain unchanged.
 
-#### Scenario: 恢复出厂
-- **WHEN** 执行恢复出厂设置并重启
-- **THEN** 配置回到出厂状态，重新建立空的 overlay，EROFS 内容与刷入时完全一致
+#### Scenario: Factory reset
+- **WHEN** a factory reset is performed and the router reboots
+- **THEN** the configuration returns to the factory state, an empty overlay is recreated, and the EROFS contents are identical to those at flash time
 
-### Requirement: 镜像能直接启动
-构建产出的 SD 卡镜像 SHALL 在写入 microSD 卡后，让 NanoPi R4S 4GB 直接启动到用户态，不需要任何手工步骤。
+### Requirement: Image boots directly
+Once written to a microSD card, the SD card image the build produces SHALL boot the NanoPi R4S 4GB straight to userspace, with no manual steps.
 
-#### Scenario: 刷写后启动
-- **WHEN** 把镜像写入 microSD 卡，插进 R4S 上电
-- **THEN** 系统启动完成，LAN 口可以访问管理界面
+#### Scenario: Boot after flashing
+- **WHEN** the image is written to a microSD card, the card is inserted into the R4S, and the R4S is powered on
+- **THEN** the system finishes booting, and the management interface is reachable from the LAN port
