@@ -38,6 +38,13 @@
 - **WHEN** 设备启动
 - **THEN** 根文件系统以 erofs 挂载成功，overlay 以 f2fs 带压缩挂载成功，过程中没有加载任何文件系统模块
 
+### Requirement: 同一个内核能在模拟器中启动
+内核 SHALL 内置 QEMU `virt` 平台所需的驱动：PL011 串口、通用 PCIe 主机控制器、virtio 块设备和网卡，以及 i6300esb 看门狗。这样出货内核不做任何修改就能在模拟器中启动并使用磁盘、网络和看门狗。这些驱动 MUST 编译进内核，不能作为模块。
+
+#### Scenario: 出货内核在模拟器中启动
+- **WHEN** 用从出货镜像中提取出来的内核启动 QEMU `virt` 机器
+- **THEN** 串口有输出，virtio 磁盘上的根文件系统被挂载，两块 virtio 网卡和看门狗设备都被识别
+
 ### Requirement: 默认拥塞控制为 BBRv3
 系统默认的 TCP 拥塞控制 SHALL 是 BBRv3，默认队列规则 SHALL 是 fq。
 
