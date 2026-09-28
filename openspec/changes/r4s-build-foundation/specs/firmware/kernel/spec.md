@@ -43,7 +43,7 @@
 
 #### Scenario: 检查拥塞控制设置
 - **WHEN** 系统启动后读取 `net.ipv4.tcp_congestion_control` 和 `net.core.default_qdisc`
-- **THEN** 两者分别是 `bbr` 和 `fq`，并且 `tcp_bbr` 模块报告的版本是 3
+- **THEN** 两者分别是 `bbr` 和 `fq`，并且 `/proc/kallsyms` 里能找到 `tcp_bbr` 模块中 BBRv3 才有的回调 `bbr_skb_marked_lost` 和 `bbr_tso_segs`（OpenWrt 开启了 `MODULE_STRIPPED`，会去掉 `MODULE_VERSION`，所以看不到模块版本号）
 
 #### Scenario: 本机发起的连接使用 BBR
 - **WHEN** 设备自己发起一条 TCP 连接

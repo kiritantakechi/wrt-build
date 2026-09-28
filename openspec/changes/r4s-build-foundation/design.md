@@ -172,7 +172,7 @@ CONFIG_PACKAGE_zsh-plugins=y
 2. **`patches/openwrt/0002-generic-add-BBRv3-for-6.18.patch`**
    - 把 sbwml 的 20 个 `010-bbr3-*.patch` 原样加到 `target/linux/generic/hack-6.18/`。
    - 第 0019 个必须保留：它修改的是通用的 `net/ipv4/bpf_tcp_ca.c`，BBRv3 把 `min_tso_segs` 改成了 `tso_segs` 并新增了 `skb_marked_lost`，缺了它 BPF struct_ops 就编译不过。
-   - 继续用上游的 `kmod-tcp-bbr` 打包，模块文件仍然是 `tcp_bbr.ko`。第 0016 个补丁定义了 `BBR_VERSION 3` 和 `MODULE_VERSION`，所以可以在设备上核对版本号。
+   - 继续用上游的 `kmod-tcp-bbr` 打包，模块文件仍然是 `tcp_bbr.ko`。第 0016 个补丁虽然定义了 `BBR_VERSION 3` 和 `MODULE_VERSION`，但 OpenWrt 开启了 `CONFIG_MODULE_STRIPPED`，模块里的版本信息会被删掉，`modinfo` 和 `/sys/module/tcp_bbr/version` 都看不到。所以改为核对 BBRv3 才有的 `tcp_congestion_ops` 回调：`bbr_skb_marked_lost` 和 `bbr_tso_segs`（v1 里是 `bbr_min_tso_segs`）。构建时查模块的符号表，上机后查 `/proc/kallsyms`。
    - `kmod-tcp-bbr` 自带的 sysctl 已经会设置 `tcp_congestion_control=bbr`。另外在 `files/etc/sysctl.d/13-default-qdisc.conf` 里写上 `net.core.default_qdisc=fq`。`sch_fq` 由 `kmod-sched` 提供（`netsupport.mk:1010`）。
 
 ### D8. overlay 压缩通过启动参数打开

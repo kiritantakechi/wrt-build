@@ -110,6 +110,11 @@
             # LTO-aware archiver for host builds (see gccLtoTools); target builds
             # set their own AR/NM/RANLIB from the cross toolchain.
             export AR=gcc-ar NM=gcc-nm RANLIB=gcc-ranlib
+            # bubblewrap runs us in a user namespace where chown to an unmapped
+            # uid fails with EINVAL. fakeroot tries the real chown first and only
+            # ignores EPERM, so rootfs installation (apk under fakeroot) failed
+            # with "failed to preserve owner". Make fakeroot skip the real chown.
+            export FAKEROOTDONTTRYCHOWN=1
             export WRT_FHS=1
           '';
           runScript = "bash";

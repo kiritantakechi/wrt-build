@@ -60,6 +60,9 @@ define Package/zsh-plugins/install
 		$(PKG_BUILD_DIR)/syntax-highlighting/.version \
 		$(PKG_BUILD_DIR)/syntax-highlighting/.revision-hash \
 		$(1)/usr/share/zsh/plugins/zsh-syntax-highlighting/
+	# Upstream ships its test suite inside highlighters/; it is not needed at runtime.
+	rm -rf $(1)/usr/share/zsh/plugins/zsh-syntax-highlighting/highlighters/*/test-data \
+		$(1)/usr/share/zsh/plugins/zsh-syntax-highlighting/highlighters/README.md
 endef
 
 $(eval $(call BuildPackage,zsh-plugins))

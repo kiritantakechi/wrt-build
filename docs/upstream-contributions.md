@@ -1,5 +1,7 @@
 # 上游贡献
 
+向任何不属于本人的仓库提交 PR、issue 或推送，都必须先得到明确同意。这里的补丁只在本地准备好，是否提交、什么时候提交由维护者决定。
+
 | # | 仓库 | 补丁 | 状态 | 链接 |
 |---|---|---|---|---|
 | 1 | openwrt/openwrt | `docs/upstream/0001-build-make-the-EROFS-compression-selectable.patch` | 已准备，尚未提交（等待确认） | — |

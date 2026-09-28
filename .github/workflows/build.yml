@@ -7,7 +7,9 @@ name: build
 on:
   push:
     branches: [main]
+    paths-ignore: ["openspec/**", "docs/**", "**/*.md"]
   pull_request:
+    paths-ignore: ["openspec/**", "docs/**", "**/*.md"]
   workflow_dispatch:
 
 permissions:

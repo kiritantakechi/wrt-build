@@ -21,7 +21,13 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/wrt-audit.XXXXXX")
 trap 'rm -rf "$work"' EXIT INT TERM
 
 case "$image" in
-*.gz) gzip -dc "$image" >"$work/disk.img" ;;
+*.gz)
+	# sysupgrade images carry fwtool metadata after the gzip stream; gzip then
+	# reports "trailing garbage ignored" with exit status 2, which is expected.
+	rc=0
+	gzip -dc "$image" >"$work/disk.img" 2>/dev/null || rc=$?
+	[ "$rc" -eq 0 ] || [ "$rc" -eq 2 ] || die "cannot decompress $image"
+	;;
 *) cp "$image" "$work/disk.img" ;;
 esac
 
@@ -45,9 +51,16 @@ has_pkg() { printf '%s\n' "$installed" | grep -qx -- "$1"; }
 for pkg in urngd opkg nginx nginx-ssl nginx-full uwsgi libpcre shortcut-fe natflow lrng upx; do
 	if has_pkg "$pkg"; then bad "package $pkg is installed"; else pass "package $pkg absent"; fi
 done
-for pkg in uhttpd uhttpd-mod-ucode luci-i18n-base-zh-cn zram-swap zsh zsh-plugins kmod-tcp-bbr; do
+for pkg in uhttpd ucode luci-base luci-i18n-base-zh-cn zram-swap zsh zsh-plugins kmod-tcp-bbr; do
 	if has_pkg "$pkg"; then pass "package $pkg installed"; else bad "package $pkg missing"; fi
 done
+
+# LuCI runs as a ucode CGI script under uhttpd (upstream default).
+if head -n 1 "$root/www/cgi-bin/luci" 2>/dev/null | grep -q ucode; then
+	pass "LuCI served by uhttpd through the ucode CGI entry"
+else
+	bad "LuCI ucode CGI entry /www/cgi-bin/luci missing"
+fi
 
 upx=$(find "$root" -type f \( -path '*/bin/*' -o -path '*/sbin/*' -o -path '*/lib/*' \) \
 	-exec grep -l 'UPX!' {} + 2>/dev/null || true)

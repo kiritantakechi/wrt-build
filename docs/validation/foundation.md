@@ -19,7 +19,7 @@
 | 5 | LuCI 简体中文 | 浏览器打开 `http://10.0.0.1` | uhttpd 提供页面，界面是中文 | |
 | 6 | BTF | `ls -l /sys/kernel/btf/vmlinux` | 文件存在且非空 | |
 | 7 | 只有 cgroup2 | `mount \| grep cgroup` | 只有 `cgroup2`，没有 v1 控制器 | |
-| 8 | BBRv3 + fq | `sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc; cat /sys/module/tcp_bbr/version` | 依次是 `bbr`、`fq`、`3` | |
+| 8 | BBRv3 + fq | `sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc; grep -E 'bbr_(skb_marked_lost\|tso_segs)' /proc/kallsyms` | 依次是 `bbr`、`fq`，并且能找到这两个符号（BBRv3 才有；OpenWrt 会去掉模块版本号，所以不看版本） | |
 | 9 | 本机连接用 BBR | 执行 `wget -O /dev/null <大文件>` 时，另开一个终端运行 `ss -ti` | 这条连接显示 `bbr` | |
 | 10 | zram | `swapon; cat /sys/block/zram0/comp_algorithm` | 有 1 GiB 的 zram，当前压缩算法是 `[zstd]` | |
 | 11 | 恢复出厂只清空 overlay | 写一个文件到 `/etc/`，记下 `/rom` 的校验和，执行 `firstboot -y && reboot` | 文件消失，`/rom` 的校验和不变 | |
