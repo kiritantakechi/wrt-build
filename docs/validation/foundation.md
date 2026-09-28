@@ -26,6 +26,7 @@
 | 12 | SSH 交互登录进 zsh | `ssh root@10.0.0.1`，然后 `echo $ZSH_VERSION` | 有输出，两个插件都已加载 | |
 | 13 | 非交互命令用 ash | 在电脑上运行 `ssh root@10.0.0.1 'echo $0; echo ${ZSH_VERSION:-none}'` | 输出 `ash`（或 `-ash`）和 `none` | |
 | 14 | zsh 不可用时退回 ash | `mv /usr/bin/zsh /usr/bin/zsh.off` 之后重新登录，测完再改回来 | 能登录，停在 ash | |
+| 14b | bash 可用且不会被切走 | 登录后执行 `bash -l`，然后 `echo $BASH_VERSION ${ZSH_VERSION:-none}` | 输出 bash 版本号和 `none` | |
 | 15 | 不需要文件系统模块 | `lsmod \| grep -E 'erofs\|f2fs'` | 没有输出，说明两者都编进了内核 | |
 | 16 | 内核版本 | `uname -r` | 与固定提交中 rockchip 所用的内核版本一致（6.18.y） | |
 

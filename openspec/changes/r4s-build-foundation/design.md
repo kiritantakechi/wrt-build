@@ -151,6 +151,7 @@ CONFIG_PACKAGE_luci=y
 CONFIG_LUCI_LANG_zh_Hans=y
 # CONFIG_PACKAGE_urngd is not set
 CONFIG_PACKAGE_zram-swap=y
+CONFIG_PACKAGE_bash=y
 CONFIG_PACKAGE_zsh=y
 CONFIG_PACKAGE_zsh-plugins=y
 ```
@@ -187,6 +188,7 @@ CONFIG_PACKAGE_zsh-plugins=y
   - `files/etc/profile.d/99-zsh.sh` 只在交互式登录 shell 里生效：`$-` 含 `i`、标准输入是终端、zsh 可执行时，才执行 `exec /usr/bin/zsh -l`。
   - 非交互式的 SSH 命令不会读 `/etc/profile`，所以不会进 zsh。
   - 登录 shell 保持 ash。
+  - 镜像同时带 bash，供需要时手动使用。切换脚本只在当前 shell 是 ash 时生效（`$BASH_VERSION` 和 `$ZSH_VERSION` 都为空），所以 `bash -l` 读到 `/etc/profile` 也不会被切走。
 - **zsh 插件**：自有 feed 里的 `zsh-plugins` 包把 zsh-autosuggestions 和 zsh-syntax-highlighting 固定到指定标签并校验哈希，由全局 zshrc 加载。
 - **zram**：用一个 uci-defaults 脚本设置 `system.@system[0].zram_size_mb=1024` 和 `zram_comp_algo=zstd`，只在这两项尚未设置时才写入，这样保留配置升级时不会覆盖用户的设置。依据：`zram.init:17-69` 就是读这两个选项。
 

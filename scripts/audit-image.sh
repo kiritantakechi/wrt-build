@@ -51,7 +51,7 @@ has_pkg() { printf '%s\n' "$installed" | grep -qx -- "$1"; }
 for pkg in urngd opkg nginx nginx-ssl nginx-full uwsgi libpcre shortcut-fe natflow lrng upx; do
 	if has_pkg "$pkg"; then bad "package $pkg is installed"; else pass "package $pkg absent"; fi
 done
-for pkg in uhttpd ucode luci-base luci-i18n-base-zh-cn zram-swap zsh zsh-plugins kmod-tcp-bbr; do
+for pkg in uhttpd ucode luci-base luci-i18n-base-zh-cn zram-swap bash zsh zsh-plugins kmod-tcp-bbr; do
 	if has_pkg "$pkg"; then pass "package $pkg installed"; else bad "package $pkg missing"; fi
 done
 

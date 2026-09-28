@@ -33,7 +33,7 @@ LuCI SHALL 由 uhttpd 配合 ucode 提供，默认界面语言 SHALL 是简体�
 - **THEN** 其中没有 nginx，也没有 uwsgi
 
 ### Requirement: 交互 shell
-root 的登录 shell SHALL 是 `/bin/ash`。交互式登录会话在 zsh 可用时 SHALL 自动切换到 zsh，并加载 autosuggestions 和 syntax-highlighting 两个插件；zsh 不可用时 MUST 留在 ash。非交互式执行命令时 MUST NOT 启动 zsh。
+root 的登录 shell SHALL 是 `/bin/ash`。交互式登录会话在 zsh 可用时 SHALL 自动切换到 zsh，并加载 autosuggestions 和 syntax-highlighting 两个插件；zsh 不可用时 MUST 留在 ash。非交互式执行命令时 MUST NOT 启动 zsh。镜像 SHALL 同时提供 bash，用户可以手动进入；以登录方式启动的 bash MUST NOT 被切换到 zsh。
 
 #### Scenario: SSH 交互登录
 - **WHEN** 通过 SSH 以 root 交互方式登录
@@ -46,6 +46,10 @@ root 的登录 shell SHALL 是 `/bin/ash`。交互式登录会话在 zsh 可用�
 #### Scenario: zsh 不可用
 - **WHEN** zsh 可执行文件不存在或无法执行
 - **THEN** 交互登录仍然成功，停留在 ash
+
+#### Scenario: 手动进入 bash
+- **WHEN** 登录后执行 `bash -l`
+- **THEN** 进入 bash 会话，并且不会被切换到 zsh
 
 ### Requirement: 内存压缩交换
 系统 SHALL 提供一个 1 GiB、用 zstd 压缩的 zram 交换设备。

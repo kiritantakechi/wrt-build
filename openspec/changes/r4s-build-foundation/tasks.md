@@ -37,6 +37,7 @@
 
 - [x] 6.1 在自有 feed 里新增 `zsh-plugins` 包，把 autosuggestions 和 syntax-highlighting 固定到指定标签并校验哈希，同时提供全局 zshrc 来加载它们。验证：解开生成的 apk，两个插件和 zshrc 都在预期路径。
 - [x] 6.2 新增 `files/etc/profile.d/99-zsh.sh`，只在交互式登录且 zsh 可执行时 `exec zsh -l`。验证：上机在 8.1 核对三种情况——SSH 交互登录进 zsh；`ssh host cmd` 由 ash 执行；把 zsh 挪走之后仍能登录进 ash。
+- [x] 6.5 镜像加入 bash（默认交互 shell 仍是 zsh），切换脚本只在 ash 登录时生效。验证：`just config dev` 的逐行校验通过；镜像审计显示 bash 已安装；上机在 8.1 核对 `bash -l` 停留在 bash。
 - [ ] 6.3 新增一个 uci-defaults 脚本，只在 zram 的两个选项未设置时，写入 `zram_size_mb=1024` 和 `zram_comp_algo=zstd`。验证：全新安装后 `swapon` 显示 1 GiB 的 zram；手动改成 512 后做一次保留配置升级，值仍然是 512。
 - [x] 6.4 实现镜像审计（对应 `just audit-image`），检查以下几项：不含 urngd、nginx、uwsgi、opkg、libpcre（PCRE1）、LRNG、shortcut-fe、natflow；没有带 UPX 标记的可执行文件；`/etc/shadow` 里 root 没有密码哈希；已装 luci 的 zh-cn 语言包。验证：对 5.1 产出的镜像运行，审计通过。
 
@@ -49,6 +50,6 @@
 
 ## 8. 上机验证与上游贡献
 
-- [ ] 8.1 把单槽镜像写入 microSD 卡，在 R4S 上启动，逐条核对以下规格场景：`/rom` 是 erofs；`/overlay` 是 f2fs 且带 zstd；LAN 是 10.0.0.1；故障安全模式可以访问；LuCI 为简体中文；`/sys/kernel/btf/vmlinux` 存在；只有 cgroup2；BBR 和 fq 生效，`/proc/kallsyms` 里有 BBRv3 的回调；有 1 GiB 的 zram；恢复出厂只清空 overlay；三种 shell 场景。验证：每条场景的结果记录在 `docs/validation/foundation.md`，全部通过。
+- [ ] 8.1 把单槽镜像写入 microSD 卡，在 R4S 上启动，逐条核对以下规格场景：`/rom` 是 erofs；`/overlay` 是 f2fs 且带 zstd；LAN 是 10.0.0.1；故障安全模式可以访问；LuCI 为简体中文；`/sys/kernel/btf/vmlinux` 存在；只有 cgroup2；BBR 和 fq 生效，`/proc/kallsyms` 里有 BBRv3 的回调；有 1 GiB 的 zram；恢复出厂只清空 overlay；四种 shell 场景（含 `bash -l`）。验证：每条场景的结果记录在 `docs/validation/foundation.md`，全部通过。
 - [ ] 8.2 kmod 兼容性测试。验证：在设备上安装同一次构建产出的任意一个 kmod，能成功加载；改一处内核配置另外构建一次，拿它产出的 kmod 来装，apk 会拒绝。
 - [ ] 8.3 （提交前必须得到你的明确同意）向上游 openwrt 提交 `include/image.mk:110` 的修正（`docs/upstream/0001-build-make-the-EROFS-compression-selectable.patch`）。不能只把 `CONFIG_EROFS_FS_ZIP_LZMA` 改名为 `CONFIG_KERNEL_EROFS_FS_ZIP_LZMA`：后者没有提示项、开启 EROFS 时默认为 y，只改名会让所有 EROFS 构建静默改用 LZMA。补丁改为新增一个压缩算法的选择项，默认 lz4hc。验证：PR 链接记录在 `docs/upstream-contributions.md`。
