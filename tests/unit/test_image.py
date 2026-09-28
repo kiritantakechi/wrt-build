@@ -1,4 +1,4 @@
-"""Unit tests of wrt_tests.image: reading a sysupgrade image without a device."""
+"""Unit tests of wrt_tests.image: reading a sysupgrade image from bytes and listings."""
 
 import gzip
 import io
@@ -9,8 +9,8 @@ import pytest
 from wrt_tests.image import (
     SECTOR,
     emulator_bootargs,
-    fit_kernel_index,
     gunzip_first_member,
+    parse_fit,
     read_mbr,
     script_text,
 )
@@ -70,21 +70,58 @@ def test_emulator_bootargs_rewrites_console_earlycon_and_root() -> None:
     )
 
 
-FIT_LISTING = """FIT description: ARM64 OpenWrt FIT (Flattened Image Tree)
- Image 0 (fdt-1)
-  Type:         Flat Device Tree
- Image 1 (kernel-1)
+# Shortened ``dumpimage -l`` listings of the two FITs in a shipped image.
+KERNEL_FIT = """FIT description: ARM64 OpenWrt FIT (Flattened Image Tree)
+ Image 0 (kernel-1)
   Description:  ARM64 OpenWrt Linux-6.18.52
   Type:         Kernel Image
   Compression:  lzma compressed
+ Image 1 (fdt-1)
+  Type:         Flat Device Tree
  Default Configuration: 'config-1'
+ Configuration 0 (config-1)
+  Description:  OpenWrt friendlyarm_nanopi-r4s
+  Kernel:       kernel-1
+  FDT:          fdt-1
+"""
+UBOOT_FIT = """FIT description: FIT image for U-Boot with bl31 (TF-A)
+ Image 0 (u-boot)
+  Type:         Standalone Program
+ Image 1 (atf-1)
+  Type:         Firmware
+  OS:           ARM Trusted Firmware
+ Default Configuration: 'config-1'
+ Configuration 0 (config-1)
+  Kernel:       unavailable
+  Firmware:     atf-1
+  Compatible:   friendlyarm,nanopi-r4s
+                rockchip,rk3399
+  Loadables:    u-boot
+                atf-2
 """
 
 
-def test_fit_kernel_index_finds_the_kernel_image() -> None:
-    assert fit_kernel_index(FIT_LISTING) == 1
+def test_parse_fit_selects_images_by_the_default_configuration() -> None:
+    fit = parse_fit(KERNEL_FIT)
+    assert (fit.selected("Kernel").index, fit.selected("FDT").index) == (0, 1)
+    assert fit.selected("Kernel")["Compression"] == "lzma compressed"
 
 
-def test_fit_kernel_index_rejects_a_fit_without_kernel() -> None:
-    with pytest.raises(LookupError, match="no kernel"):
-        fit_kernel_index(FIT_LISTING.replace("Kernel Image", "Ramdisk Image"))
+def test_parse_fit_reads_list_properties() -> None:
+    fit = parse_fit(UBOOT_FIT)
+    assert fit.configuration.properties["Compatible"] == [
+        "friendlyarm,nanopi-r4s",
+        "rockchip,rk3399",
+    ]
+    assert fit.configuration.properties["Loadables"] == ["u-boot", "atf-2"]
+    assert fit.selected("Firmware")["OS"] == "ARM Trusted Firmware"
+
+
+def test_parse_fit_rejects_an_unavailable_image() -> None:
+    with pytest.raises(LookupError, match="selects no Kernel image"):
+        parse_fit(UBOOT_FIT).selected("Kernel")
+
+
+def test_parse_fit_requires_a_default_configuration() -> None:
+    with pytest.raises(LookupError, match="no default configuration"):
+        parse_fit(KERNEL_FIT.replace(" Default Configuration: 'config-1'\n", ""))

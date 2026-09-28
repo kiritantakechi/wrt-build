@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the format and behavior of the filesystems in the root partition: a read-only, compressed EROFS root filesystem, plus an f2fs overlay that compresses on write.
+Define the boot chain in front of the root partition and the format and behavior of the filesystems in it: a read-only, compressed EROFS root filesystem, plus an f2fs overlay that compresses on write.
 
 ## ADDED Requirements
 
@@ -31,9 +31,9 @@ A factory reset SHALL clear only the overlay, and the contents of the EROFS root
 - **WHEN** a factory reset is performed and the router reboots
 - **THEN** the configuration returns to the factory state, an empty overlay is recreated, and the EROFS contents are identical to those at flash time
 
-### Requirement: Image boots directly
-Once written to a microSD card, the SD card image the build produces SHALL boot the NanoPi R4S 4GB straight to userspace, with no manual steps.
+### Requirement: Complete R4S boot chain
+The SD card image the build produces SHALL carry everything the NanoPi R4S 4GB needs to boot it with no manual steps: the RK3399 loader at sector 64, a U-Boot FIT for the R4S with TF-A at sector 16384, and on the boot partition a script that boots the kernel FIT from partition 1 with its root on partition 2 of the same card. The kernel FIT's default configuration SHALL carry the R4S device tree with both network ports enabled. The emulator runs the kernel and root filesystem of this image; this requirement covers the parts in front of them that only the RK3399 can run.
 
-#### Scenario: Boot after flashing
-- **WHEN** the image is written to a microSD card, the card is inserted into the R4S, and the R4S is powered on
-- **THEN** the system finishes booting, and the management interface is reachable from the LAN port
+#### Scenario: Inspect the boot chain
+- **WHEN** the sysupgrade image is inspected
+- **THEN** sector 64 holds an RK3399 SD boot loader; sector 16384 holds a U-Boot FIT whose default configuration is compatible with `friendlyarm,nanopi-r4s` and loads TF-A; the boot script loads `kernel.img` from partition 1, takes the root from partition 2 and boots it; and the kernel FIT's device tree is compatible with `friendlyarm,nanopi-r4s` and `rockchip,rk3399`, with the GMAC and the PCIe controller enabled

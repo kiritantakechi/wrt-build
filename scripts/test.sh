@@ -30,4 +30,4 @@ LG_BOOTARGS=$(cat "${LG_EMU_DIR}/bootargs")
 export LG_EMU_DIR LG_BOOTARGS
 info "emulator files in ${LG_EMU_DIR}"
 exec unshare --user --map-root-user --net --mount --pid --mount-proc --fork -- \
-	uv run --no-sync pytest --lg-env targets/emulation.yaml --target-kind emulation "$@"
+	uv run --no-sync pytest --lg-env targets/emulation.yaml "$@"

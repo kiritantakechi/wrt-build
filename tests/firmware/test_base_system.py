@@ -5,7 +5,7 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from wrt_tests import spec, target
+from wrt_tests import spec
 
 if TYPE_CHECKING:
     from wrt_tests.router import Router
@@ -53,10 +53,8 @@ def test_default_lan_address(router: Router) -> None:
 
 
 @spec(CAPABILITY, "Default LAN address", "Enter failsafe mode")
-@target("emulation", "types the failsafe key on the serial console")
 def test_failsafe_address(router: Router) -> None:
     emulator = router.emulator
-    assert emulator is not None
     since = emulator.console.mark()
     router.detach("sleep 1; reboot")
     emulator.console.wait_for(FAILSAFE_PROMPT, since=since, timeout=BOOT_TIMEOUT)
@@ -68,7 +66,6 @@ def test_failsafe_address(router: Router) -> None:
 
 
 @spec(CAPABILITY, "Default LAN address", "Config-preserving upgrade")
-@target("emulation", "upgrades the emulated disk with the image under test")
 def test_upgrade_keeps_the_lan_address(router: Router, emulation_source: dict[str, str]) -> None:
     router.run("uci set network.lan.ipaddr=10.0.0.3/24 && uci commit network")
     # The zram defaults are only filled in while unset (uci-defaults), so an

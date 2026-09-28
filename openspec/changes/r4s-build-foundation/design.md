@@ -35,7 +35,7 @@ See the Why section of proposal.md for motivation. This design depends on the fo
 **Goals:**
 - From the same lock, the local machine and CI get exactly the same source tree, configuration, and build timestamp.
 - Produce a single-slot SD image and a full kmod repository from the same build.
-- Verify as many spec scenarios as possible automatically against the shipped image in the emulator; the device is left with one command plus a few hardware-specific checks.
+- Verify every spec scenario automatically: against the shipped image in the emulator, or statically in the shipped image for what only the RK3399 runs; no step needs the device.
 - Code standards are machine-checkable and enforced in CI.
 
 **Non-Goals:**
@@ -214,7 +214,7 @@ require_linux; require_workdir; ensure_fhs "$@"   # only the guards the script n
 
 - **Naming rules**:
   - Pipeline stages are single verbs: `fetch`, `patch`, `config`, `build`, `test`, `check`, `fmt`.
-  - Operations on a specific object use "object-verb": `workdir-mount`/`workdir-unmount`, `toolchain-key`/`toolchain-build`/`toolchain-pack`/`toolchain-unpack`, `image-audit`, `env-report`, `runner-prepare`; `test-device` is the device counterpart of `test`.
+  - Operations on a specific object use "object-verb": `workdir-mount`/`workdir-unmount`, `toolchain-key`/`toolchain-build`/`toolchain-pack`/`toolchain-unpack`, `image-audit`, `env-report`, `runner-prepare`.
   - just recipe names match script names and are grouped with `[group(...)]`.
   - Environment variables all use the `WRT_` prefix.
 - **One command to check**: `just check` only checks and never modifies; `just fmt` formats. Both run on macOS, with their tools provided by the platform's devShell.
@@ -226,12 +226,12 @@ tests/
   pyproject.toml  uv.lock  .python-version     project and dependencies (python 3.14, uv-managed)
   pytest.toml  ruff.toml  ty.toml              one configuration file per tool
   conftest.py                                  fixtures: shell, ssh, emulator, net
-  targets/emulation.yaml  targets/r4s.yaml     labgrid environments (symmetric)
+  targets/emulation.yaml                       labgrid environment of the emulated R4S
   wrt_tests/                                   helpers: spec markers, coverage, emu, net
   <domain>/test_<capability>.py                one module per spec capability, e.g.
       firmware/test_rootfs.py      <-> specs/firmware/rootfs
       testing/test_emulation.py    <-> specs/testing/emulation
-  unit/test_<helper>.py                        unit tests of wrt_tests/, no target, no @spec
+  unit/test_<helper>.py                        unit tests of wrt_tests/, no emulator, no @spec
 ```
 
 - **Directory rules**:
@@ -243,13 +243,10 @@ tests/
   - Each test is annotated with `@spec("firmware/rootfs", "<requirement>", "<scenario>")` for the scenario it covers.
   - `uv run spec-coverage` parses the specs under `openspec/` and the collected tests, and reports which scenarios have no test.
   - Scenarios verified elsewhere, by the build or CI itself (for example build/ci), are recorded in `tests/verified-elsewhere.toml` together with what verifies them.
-- **Target selection**:
-  - A test is marked `@target("emulation")` or `@target("device")` for a dedicated target, with a reason. Unmarked tests run on both targets.
-  - `just test` uses `emulation.yaml`; `just test-device <host>` uses `r4s.yaml`.
-  - Power control on the device uses labgrid's `ManualPowerDriver`, which prompts for manual action when power must be cut.
-- **Reports**: both targets output JUnit and a terminal summary in the same format, written to `tests/.reports/emulation.xml` and `device.xml` respectively.
-- **Router interface**: `wrt_tests.router.Router` offers the same methods on both targets: `run`, `returncode`, `login` (a real interactive login), `put`, `http`, `reboot`, `wait_ready`, `moved_to` (temporarily use another LAN address). Only `reset` differs: the emulator returns to the snapshot, while the device does nothing, so tests on the device must restore the state they change themselves.
-- **Compiler-free BPF object**: the test that checks tcx needs a BPF program. Apple's clang has no BPF backend, and device tests can be started from macOS, so `wrt_tests/bpf.py` writes this two-instruction program directly as an ELF object file.
+- **One target**: every system test runs against the emulated R4S (`just test`, `targets/emulation.yaml`). There is no device target: no verification step needs an R4S, and what only the RK3399 can run is checked statically in the shipped image instead (D14).
+- **Reports**: JUnit and a terminal summary, written to `tests/.reports/emulation.xml`.
+- **Router interface**: `wrt_tests.router.Router` offers `run`, `returncode`, `login` (a real interactive login), `put`, `http`, `reboot`, `wait_ready`, `moved_to` (temporarily use another LAN address), and `reset`, which returns the emulator to its post-boot snapshot.
+- **BPF test program**: the test that checks tcx compiles a two-line C program with the host clang (`--target=bpf`), which the test environment carries anyway because it contains the build environment.
 
 ### D14. Emulation environment
 
@@ -285,21 +282,21 @@ sandbox: unshare --user --map-root-user --net --mount (rootless)
   - "Boot complete" is detected by procd's `- init complete -` in `logread`. procd logs through ulog, and once logd is up it no longer writes to the kernel log, so waiting for this line in `dmesg` never succeeds.
   - `ssh` and `scp` in the test environment use one fixed configuration (`-F`): each image has different host keys, and inside the sandbox the host's config files may belong to an unmapped user, which OpenSSH refuses to read.
   - The board script derives MACs from the CID of the SD card (`mmcblk1`). The emulator has no such device, so this step prints an arithmetic error and is skipped, and the ports keep the fixed MACs set by QEMU. All other port role assignment is the same as on the device.
-- **What the emulator cannot cover and is left to the device**:
-  - The RK3399 BootROM, TPL/SPL, and U-Boot booting from the SD card;
-  - The drivers of the two physical ports (stmmac, r8169) and interrupt affinity;
-  - A real reset by the DesignWare watchdog;
-  - USB3 UAS;
-  - Throughput and temperature.
+- **What the emulator cannot run, and how it is covered instead** (no verification step needs the device):
+  - The RK3399 boot ROM, TPL/SPL and U-Boot: the boot chain test inspects the loader at sector 64, the U-Boot FIT at sector 16384 and the boot script in the shipped image (firmware/rootfs, "Complete R4S boot chain"). `r4s-ab-rollback` adds a U-Boot built for QEMU from the same source, which runs its slot logic.
+  - The R4S device tree and the drivers of the two ports (dwmac-rk, r8169): the boot chain test checks the device tree in the kernel FIT, and the kernel test checks that both drivers register at boot (firmware/kernel, "Drivers for the R4S ports").
+  - The DesignWare watchdog: `r4s-ab-rollback` checks the U-Boot and kernel configuration that arms it, and runs the reset path with the emulated i6300esb.
+  - USB3 UAS: `r4s-services` attaches an emulated `usb-uas` disk, which uses the same driver.
+  - Throughput, temperature readings and interrupt affinity: not verified; no requirement depends on a measured value.
 
-  These all exist as `@target("device")` tests.
+  What remains is the first boot of an image on real hardware, which no step runs before a release; see Risks.
 
 ## Risks / Trade-offs
 
 - **[BBRv3 fails to apply on a 6.18.y update]** CI stops immediately when a patch fails; we can temporarily return to the previous lock and then rebase the patches.
 - **[virt drivers grow the kernel]** Expected at about 100-300 KB, to be measured during implementation. The R4S has no matching devices, so these drivers are never probed.
 - **[The overlay misses a sub-option and the kernel config stalls]** Fill in with `listnewconfig` during implementation; post-build line-by-line verification catches config drift.
-- **[Differences between emulator and device mistaken as covered]** The coverage report lists device-only scenarios separately; the board identity matches but the hardware nodes differ, and this is documented.
+- **[A failure only real hardware shows]** The emulator shares the kernel, root filesystem and board scripts with the R4S, but not the boot ROM, U-Boot, device tree or port drivers. Static checks of the shipped image cover their presence and configuration (D14), and after `r4s-ab-rollback` an image that fails to boot falls back to the previous slot on its own.
 - **[Nested user namespaces unavailable]** Already confirmed working in the OrbStack VM; CI relies on `prepare-runner.sh` to lift the AppArmor restriction, to be confirmed again when implementing `system-test`.
 - **[ty is still at 0.0.x]** The version is pinned by `uv.lock`; ty upgrades are handled in the weekly bump, and false positives are recorded in pyproject.
 - **[TCG is slow]** Each module boots the VM once and tests are restored from a snapshot; the target duration of the `system-test` job is under 30 minutes.

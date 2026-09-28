@@ -1,9 +1,7 @@
-"""The device under test, with one interface on both targets (design D13).
+"""The emulated router under test (design D13).
 
-Commands run over SSH in both cases: on the emulator the runner reaches the LAN
-address from inside the sandbox, on the device it reaches the LAN directly. Only
-``reset`` differs: the emulator returns to its post-boot snapshot, the device
-keeps its state, so device tests leave it as they found it.
+Commands run over SSH: the runner reaches the router's LAN address from inside the
+sandbox. ``reset`` returns the emulator to its post-boot snapshot.
 """
 
 import re
@@ -33,10 +31,10 @@ READY_MARK = "- init complete -"
 
 
 class Router:
-    """Run commands on the router and wait for it; the same on emulator and device."""
+    """Run commands on the router and wait for it."""
 
-    def __init__(self, target: Target, emulator: Emulator | None) -> None:
-        """Bind to the SSHDriver of ``target``; ``emulator`` is None on the device."""
+    def __init__(self, target: Target, emulator: Emulator) -> None:
+        """Bind to the SSHDriver of ``target``; ``emulator`` is the machine it runs on."""
         self.target = target
         self.emulator = emulator
         self.ssh: SSHDriver = target.get_driver("SSHDriver", activate=False)
@@ -169,10 +167,9 @@ class Router:
             service.address = self.address = original
 
     def reset(self) -> None:
-        """Return to the state right after boot: the emulator's snapshot; no-op on the device."""
-        if self.emulator is not None:
-            self.disconnect()
-            self.emulator.restore()
+        """Return to the state right after boot, the emulator's snapshot."""
+        self.disconnect()
+        self.emulator.restore()
 
 
 def _port_open(address: str, port: int) -> bool:

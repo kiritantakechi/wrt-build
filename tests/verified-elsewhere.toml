@@ -130,16 +130,10 @@ requirement = "LTO, mold, and gc-sections by default"
 scenario = "Package incompatible with LTO"
 by = "docs/lto-optouts.md lists every no-lto opt-out with its patch in patches/packages"
 
-# testing/harness: properties of CI and of the device run.
+# testing/harness: a property of CI.
 
 [[scenario]]
 capability = "testing/harness"
 requirement = "Emulator run on every build"
 scenario = "Test failure"
 by = "build.yml system-test fails and publishes the JUnit report (task 11.6)"
-
-[[scenario]]
-capability = "testing/harness"
-requirement = "One-command device verification"
-scenario = "Run on the device"
-by = "just test-device <host> on the R4S (docs/validation/foundation-device.md)"

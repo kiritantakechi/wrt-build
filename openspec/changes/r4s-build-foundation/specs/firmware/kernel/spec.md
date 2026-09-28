@@ -45,6 +45,13 @@ The kernel SHALL build in the drivers the QEMU `virt` platform needs: PL011 seri
 - **WHEN** a QEMU `virt` machine boots the kernel extracted from the shipped image
 - **THEN** the serial console produces output, the root filesystem on the virtio disk is mounted, and both virtio NICs and the watchdog device are detected
 
+### Requirement: Drivers for the R4S ports
+The kernel SHALL register the drivers of both R4S network ports at boot with no manual step: the RK3399 GMAC driver (dwmac-rk) for the WAN port and the RTL8111 driver (r8169) for the LAN port. The emulator has neither device, so the drivers are checked while they wait for their devices.
+
+#### Scenario: Port drivers registered
+- **WHEN** the drivers registered with the kernel are listed after boot
+- **THEN** the platform bus lists the RK3399 GMAC driver and the PCI bus lists the r8169 driver
+
 ### Requirement: BBRv3 as default congestion control
 The system's default TCP congestion control SHALL be BBRv3, and the default queueing discipline SHALL be fq.
 

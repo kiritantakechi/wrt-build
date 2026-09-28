@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Boot the shipped image itself in QEMU as an R4S, with a repeatable network topology and fault injection, so that most functionality can be verified without the device.
+Boot the shipped image itself in QEMU as an R4S, with a repeatable network topology and fault injection, so that every system-level scenario is verified without the device.
 
 ## ADDED Requirements
 

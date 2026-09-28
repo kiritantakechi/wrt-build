@@ -1,9 +1,10 @@
-"""Read the pieces of a shipped sysupgrade image that the emulator boots (design D14).
+"""Read the pieces of a shipped sysupgrade image (design D14).
 
-Everything here is a pure function over bytes, so the unit tests cover it without
-an image: the gzip stream is followed by fwtool metadata, the disk has an MBR, and
-the boot partition holds a legacy U-Boot script whose ``setenv bootargs`` line is
-the template of the kernel command line.
+Everything here is a pure function over bytes or text, so the unit tests cover it
+without an image: the gzip stream is followed by fwtool metadata, the disk has an
+MBR, the boot partition holds a legacy U-Boot script whose ``setenv bootargs`` line
+is the template of the kernel command line, and U-Boot and the kernel are FITs,
+read from their ``dumpimage -l`` listings.
 """
 
 import re
@@ -123,17 +124,68 @@ def emulator_bootargs(script: str, partuuid: str, console: str = "ttyAMA0") -> s
     return " ".join(arguments)
 
 
-_FIT_IMAGE = re.compile(r"^ Image (?P<index>\d+) \(")
-_FIT_KERNEL = re.compile(r"^\s+Type:\s+Kernel Image\s*$")
+_FIT_NODE = re.compile(r"^ (?P<kind>Image|Configuration) (?P<index>\d+) \((?P<name>[^)]+)\)$")
+_FIT_DEFAULT = re.compile(r"^ Default Configuration: '(?P<name>[^']+)'$")
+_FIT_PROPERTY = re.compile(r"^  (?P<key>\S[^:]*):\s+(?P<value>.*?)\s*$")
+_FIT_CONTINUATION = re.compile(r"^ {3,}(?P<value>\S.*?)\s*$")
 
 
-def fit_kernel_index(listing: str) -> int:
-    """Return the index of the kernel image in a ``dumpimage -l`` listing of a FIT."""
-    index: int | None = None
+@dataclass(frozen=True, slots=True)
+class FitNode:
+    """One image or configuration of a FIT, with its listed properties."""
+
+    index: int
+    name: str
+    properties: dict[str, list[str]]
+
+    def __getitem__(self, key: str) -> str:
+        """Return the first value of a property; lists (Compatible, Loadables) have more."""
+        return self.properties[key][0]
+
+
+@dataclass(frozen=True, slots=True)
+class Fit:
+    """The images and configurations of a FIT, keyed by name."""
+
+    images: dict[str, FitNode]
+    configurations: dict[str, FitNode]
+    default: str
+
+    @property
+    def configuration(self) -> FitNode:
+        """Return the default configuration, the one bootm and SPL boot."""
+        return self.configurations[self.default]
+
+    def selected(self, key: str) -> FitNode:
+        """Return the image the default configuration selects as ``key`` (Kernel, FDT, ...)."""
+        name = self.configuration.properties.get(key, [""])[0]
+        if name not in self.images:
+            msg = f"configuration {self.default} selects no {key} image"
+            raise LookupError(msg)
+        return self.images[name]
+
+
+def parse_fit(listing: str) -> Fit:
+    """Parse a ``dumpimage -l`` listing of a FIT.
+
+    Nodes start at one space of indent, their properties at two, and the further
+    values of a list property (Compatible, Loadables) are indented deeper still.
+    """
+    nodes: dict[str, dict[str, FitNode]] = {"Image": {}, "Configuration": {}}
+    default: str | None = None
+    node: FitNode | None = None
+    values: list[str] = []
     for line in listing.splitlines():
-        if image := _FIT_IMAGE.match(line):
-            index = int(image["index"])
-        elif _FIT_KERNEL.match(line) and index is not None:
-            return index
-    msg = "the FIT holds no kernel image"
-    raise LookupError(msg)
+        if match := _FIT_NODE.match(line):
+            node = FitNode(int(match["index"]), match["name"], {})
+            nodes[match["kind"]][node.name] = node
+        elif match := _FIT_DEFAULT.match(line):
+            default, node = str(match["name"]), None
+        elif node is not None and (match := _FIT_PROPERTY.match(line)):
+            values = node.properties[match["key"]] = [match["value"]]
+        elif node is not None and (match := _FIT_CONTINUATION.match(line)):
+            values.append(match["value"])
+    if default is None:
+        msg = "the FIT has no default configuration"
+        raise LookupError(msg)
+    return Fit(nodes["Image"], nodes["Configuration"], default)

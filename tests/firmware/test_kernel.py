@@ -1,11 +1,11 @@
 """firmware/kernel: version, BTF, BPF and cgroup v2, built-in filesystems, BBRv3, vermagic."""
 
 import re
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from wrt_tests import spec, target
-from wrt_tests.bpf import tcx_object
+from wrt_tests import spec
 
 if TYPE_CHECKING:
     from wrt_tests.router import Router
@@ -16,7 +16,18 @@ BBR3_ONLY_SYMBOLS = ("bbr_skb_marked_lost", "bbr_tso_segs")
 KERNEL_PATCH_DIR = re.compile(r"^target/linux/[^/]+/(patches|hack|pending|backport)-[0-9.]+/")
 BBR3_PATCH = re.compile(r"^target/linux/generic/hack-[0-9.]+/960-bbr3-")
 BPF_OBJECT = "/tmp/wrt_pass.o"  # noqa: S108 (a path on the router)
+# The smallest tcx program: it hands every packet on (TCX_NEXT). libbpf derives the
+# program and attach type from the section name.
+TCX_SOURCE = """\
+__attribute__((section("tcx/ingress"), used)) int wrt_pass(void *ctx) { return -1; }
+char LICENSE[] __attribute__((section("license"), used)) = "GPL";
+"""
 VIRTIO_NICS = ("eth0 (WAN)", "eth1 (LAN)")
+# The drivers of the R4S ports register at boot, even where their devices are absent.
+PORT_DRIVERS = (
+    "/sys/bus/platform/drivers/rk_gmac-dwmac",  # the GMAC: WAN, eth0
+    "/sys/bus/pci/drivers/r8169",  # the RTL8111 on PCIe: LAN, eth1
+)
 
 
 @spec(CAPABILITY, "Kernel version follows upstream", "Check running kernel")
@@ -49,7 +60,12 @@ def test_cgroup2_only(router: Router) -> None:
 @spec(CAPABILITY, "BPF and cgroup v2", "Load a tcx program")
 def test_tcx_program_attaches(router: Router, tmp_path: Path) -> None:
     program = tmp_path / "wrt_pass.o"
-    program.write_bytes(tcx_object("wrt_pass"))
+    subprocess.run(
+        ["clang", "--target=bpf", "-O2", "-g", "-c", "-x", "c", "-", "-o", str(program)],
+        input=TCX_SOURCE,
+        text=True,
+        check=True,
+    )
     router.put(program, BPF_OBJECT)
     router.run("mountpoint -q /sys/fs/bpf || mount -t bpf bpf /sys/fs/bpf")
     router.run(f"bpftool prog load {BPF_OBJECT} /sys/fs/bpf/wrt_pass")
@@ -75,7 +91,6 @@ def test_filesystems_are_built_in(router: Router) -> None:
 
 
 @spec(CAPABILITY, "Same kernel boots in the emulator", "Shipped kernel boots in the emulator")
-@target("emulation", "checks the emulator's virtual devices")
 def test_virt_devices(router: Router) -> None:
     assert "console=ttyAMA0" in router.run("cat /proc/cmdline").split()
     assert router.returncode("dmesg | grep -q 'printk: console \\[ttyAMA0\\] enabled'") == 0
@@ -89,6 +104,12 @@ def test_virt_devices(router: Router) -> None:
     # OpenWrt builds without WATCHDOG_SYSFS; the driver announces itself instead.
     assert router.returncode("dmesg | grep -q 'i6300ESB timer .*initialized'") == 0
     assert router.returncode("[ -c /dev/watchdog0 ]") == 0
+
+
+@spec(CAPABILITY, "Drivers for the R4S ports", "Port drivers registered")
+def test_port_drivers_registered(router: Router) -> None:
+    for driver in PORT_DRIVERS:
+        assert router.returncode(f"[ -d {driver} ]") == 0, driver
 
 
 @spec(CAPABILITY, "BBRv3 as default congestion control", "Check congestion control settings")
@@ -122,7 +143,6 @@ def test_only_bbr3_patches_the_kernel() -> None:
 
 
 @spec(CAPABILITY, "Standard vermagic", "Install a kmod from the same build")
-@target("emulation", "serves the build's package repository from the runner")
 def test_kmod_of_the_same_build_loads(router: Router, repository: str) -> None:
     router.run(f"apk add --repository {repository}/targets/packages/packages.adb kmod-dummy")
     router.run("modprobe dummy")

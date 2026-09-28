@@ -11,7 +11,7 @@ We want our own OpenWrt firmware for the NanoPi R4S (4GB LPDDR4). The reference,
 
 Meanwhile, upstream main (2026-09-27, `1019293`) already ships the rockchip 6.18.52 kernel, U-Boot 2026.07, TF-A 2.15, an EROFS root filesystem (fstools already supports placing the overlay after EROFS on a block device), and apk 3.0.5 natively. Our own base therefore needs only a very thin patch layer.
 
-The firmware must track upstream every week, and manual verification on hardware is slow and not repeatable. Verification must be automated as far as possible, and it must run **the actual shipped image** in the emulator. The device only handles the few hardware checks the emulator cannot cover.
+The firmware must track upstream every week, and manual verification on hardware is slow and not repeatable. Verification must be automated, and it must run **the actual shipped image** in the emulator. No step needs the device: what the emulator cannot run is checked statically in the shipped image.
 
 ## What Changes
 
@@ -47,9 +47,9 @@ The firmware must track upstream every week, and manual verification on hardware
 - **Not adopted**: UPX, LRNG, urngd, shortcut-fe, natflow, PCRE1, the zh-cn translation conversion script, opkg patches, the i915 real-time kernel patch, running LuCI on nginx/uwsgi, and forged vermagic.
 - **Automated system tests**
   - The test suite is built on pytest + labgrid, with the Python environment managed and locked by uv, formatting by ruff, and type checking by ty.
-  - The same tests run both in the emulator and on the device; every testable spec scenario maps to one test.
+  - The suite runs against the emulator; every testable spec scenario maps to one test.
   - The emulator runs the shipped image itself: the kernel is extracted from the image's FIT, the boot arguments come from the image's `boot.scr`, the machine boots with the R4S board identity (`friendlyarm,nanopi-r4s`), and the network is built in an unprivileged user namespace.
-  - Device verification shrinks to running `just test-device <host>` after flashing, plus a few hardware-specific checks.
+  - Nothing is verified by hand on the device: the boot chain the emulator cannot run (loader, U-Boot, boot script, device tree) is checked statically in the shipped image.
 - **Code standards**
   - The following checks are all enforced, and CI fails if any fails: shfmt, shellcheck, nixfmt, ruff format/check, ty, actionlint, editorconfig, and forbidden-pattern checks.
   - All scripts use one skeleton; `just check` runs every check and `just fmt` formats everything.
@@ -70,10 +70,10 @@ The firmware must track upstream every week, and manual verification on hardware
 - `build/upstream-pinning`: upstream sources and feeds pinned to SHAs, plus how the patch queue is applied and how failures are handled.
 - `build/ci`: staged CI, caching, full kmod output, and the constraint that "the image and kmods come from the same build".
 - `firmware/toolchain`: the target toolchain version and compiler optimization options.
-- `firmware/kernel`: the kernel version, required kernel features (BTF, cgroup v2, EROFS, F2FS compression, emulation platform drivers), and BBRv3.
+- `firmware/kernel`: the kernel version, required kernel features (BTF, cgroup v2, EROFS, F2FS compression, emulation platform drivers, the R4S port drivers), and BBRv3.
 - `firmware/rootfs`: the layout and behavior of the EROFS root filesystem and the f2fs zstd overlay.
 - `firmware/base-system`: factory defaults (LAN address, web interface, language, shell, zram, password policy) and the list of components not adopted.
-- `testing/harness`: the test suite, the mapping between spec scenarios and tests, the emulator and device targets, and the Python toolchain.
+- `testing/harness`: the test suite, the mapping between spec scenarios and tests, and the Python toolchain.
 - `testing/emulation`: booting the shipped image in QEMU as an R4S, with a network topology and fault injection.
 - `quality/code-standards`: formatting, static checks, the common script skeleton and symmetric naming, and enforcement in CI.
 

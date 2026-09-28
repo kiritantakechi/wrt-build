@@ -43,11 +43,6 @@ image-audit image:
 test profile="dev" *args:
     scripts/test.sh {{ profile }} {{ args }}
 
-# Run the system tests against a real R4S at <host> (Linux or macOS)
-[group('test')]
-test-device host *args:
-    scripts/test-device.sh {{ host }} {{ args }}
-
 # Run the code-standard checks, all or the named ones; changes nothing (any host)
 [group('quality')]
 check *names:

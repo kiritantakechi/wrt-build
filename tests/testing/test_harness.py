@@ -1,4 +1,4 @@
-"""testing/harness: scenarios map to tests, both targets share the suite, uv pins Python."""
+"""testing/harness: every scenario maps to one test, and uv pins the Python toolchain."""
 
 import re
 import shutil
@@ -86,34 +86,6 @@ def test_dangling_marker_fails(demo: tuple[Path, Path]) -> None:
     result = _coverage(openspec, tests)
     assert result.returncode == 1
     assert "demo/test_widget.py::test_covered: @spec names no scenario" in result.stderr
-
-
-@spec(CAPABILITY, "One suite, two targets", "Run on each target")
-def test_both_targets_collect_the_same_tests() -> None:
-    collected = [
-        _python("-m", "pytest", "--collect-only", "-q", "--target-kind", kind, cwd=TESTS_DIR)
-        for kind in ("emulation", "device")
-    ]
-    ids = [{line for line in run.stdout.splitlines() if "::" in line} for run in collected]
-    assert ids[0]
-    assert ids[0] == ids[1]
-
-
-@spec(CAPABILITY, "Target-specific tests state a reason", "Device-only tests on the emulator")
-def test_device_only_tests_are_skipped_with_reason(tmp_path: Path) -> None:
-    (tmp_path / "test_probe.py").write_text(
-        "from wrt_tests import target\n\n\n"
-        '@target("device", "needs the real SD card slot")\n'
-        "def test_probe() -> None:\n    pass\n"
-    )
-    result = _python(
-        *("-m", "pytest", "-p", "wrt_tests.plugin", "--target-kind", "emulation", "-rs"),
-        *("--rootdir", str(tmp_path), str(tmp_path)),
-        cwd=tmp_path,
-    )
-    assert result.returncode == 0, result.stdout
-    assert "1 skipped" in result.stdout
-    assert "device only: needs the real SD card slot" in result.stdout
 
 
 def _wheel(directory: Path, name: str) -> Path:

@@ -30,9 +30,12 @@ import yaml
 from pexpect import TIMEOUT
 
 from wrt_tests.image import (
+    SECTOR,
+    Fit,
+    FitNode,
     emulator_bootargs,
-    fit_kernel_index,
     gunzip_first_member,
+    parse_fit,
     read_mbr,
     script_text,
 )
@@ -104,16 +107,36 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _run(*command: str) -> str:
+def run(*command: str) -> str:
+    """Run a tool of the test environment, fail on a non-zero exit, return stdout."""
     return subprocess.run(command, check=True, capture_output=True, text=True).stdout
 
 
-def _debugfs_dump(filesystem: Path, name: str, output: Path) -> None:
-    # debugfs exits 0 even when the file is missing; check the result instead.
-    _run("debugfs", "-R", f"dump /{name} {output}", str(filesystem))
-    if not output.is_file() or output.stat().st_size == 0:
-        msg = f"{name} not found on the boot partition"
-        raise FileNotFoundError(msg)
+def boot_files(disk: Path, names: tuple[str, ...], output: Path) -> None:
+    """Copy files of the boot partition (ext4) of a raw disk into ``output``."""
+    with disk.open("rb") as raw:
+        boot = read_mbr(raw.read(SECTOR)).partition(BOOT_PARTITION)
+        raw.seek(boot.start)
+        filesystem = output / "boot.ext4"
+        filesystem.write_bytes(raw.read(boot.size))
+    for name in names:
+        file = output / name
+        # debugfs exits 0 even when the file is missing; check the result instead.
+        run("debugfs", "-R", f"dump /{name} {file}", str(filesystem))
+        if not file.is_file() or file.stat().st_size == 0:
+            msg = f"{name} not found on the boot partition"
+            raise FileNotFoundError(msg)
+    filesystem.unlink()
+
+
+def read_fit(path: Path) -> Fit:
+    """List a FIT image file."""
+    return parse_fit(run("dumpimage", "-l", str(path)))
+
+
+def extract_fit_image(path: Path, image: FitNode, output: Path) -> None:
+    """Write one image of a FIT file to ``output``, as stored (still compressed)."""
+    run("dumpimage", "-T", "flat_dt", "-p", str(image.index), "-o", str(output), str(path))
 
 
 def prepare(image: Path, root: Path, machine: Machine, manifest: Path | None) -> Path:
@@ -135,29 +158,20 @@ def prepare(image: Path, root: Path, machine: Machine, manifest: Path | None) ->
     with image.open("rb") as source, disk_file.open("wb") as target:
         trailer = gunzip_first_member(source, target)
     with disk_file.open("rb") as disk:
-        table = read_mbr(disk.read(512))
-        boot = table.partition(BOOT_PARTITION)
-        disk.seek(boot.start)
-        (work / "boot.ext4").write_bytes(disk.read(boot.size))
-
-    _debugfs_dump(work / "boot.ext4", "kernel.img", work / "kernel.img")
-    _debugfs_dump(work / "boot.ext4", "boot.scr", work / "boot.scr")
-    index = fit_kernel_index(_run("dumpimage", "-l", str(work / "kernel.img")))
-    _run(
-        "dumpimage",
-        *("-T", "flat_dt", "-p", str(index)),
-        *("-o", str(work / "Image.lzma"), str(work / "kernel.img")),
-    )
+        table = read_mbr(disk.read(SECTOR))
+    boot_files(disk_file, ("kernel.img", "boot.scr"), work)
+    kernel_fit = work / "kernel.img"
+    extract_fit_image(kernel_fit, read_fit(kernel_fit).selected("Kernel"), work / "Image.lzma")
     (work / "Image").write_bytes(lzma.decompress((work / "Image.lzma").read_bytes()))
     partuuid = table.partuuid(ROOT_PARTITION)
     bootargs = emulator_bootargs(script_text((work / "boot.scr").read_bytes()), partuuid)
     (work / "bootargs").write_text(bootargs + "\n")
 
     machine.dump_dtb(work / "r4s.dtb")
-    _run("fdtput", "-t", "s", str(work / "r4s.dtb"), "/", "compatible", BOARD_COMPATIBLE)
-    _run("fdtput", "-t", "s", str(work / "r4s.dtb"), "/", "model", BOARD_MODEL)
+    run("fdtput", "-t", "s", str(work / "r4s.dtb"), "/", "compatible", BOARD_COMPATIBLE)
+    run("fdtput", "-t", "s", str(work / "r4s.dtb"), "/", "model", BOARD_MODEL)
 
-    for scratch in ("boot.ext4", "kernel.img", "Image.lzma", "boot.scr"):
+    for scratch in ("kernel.img", "Image.lzma", "boot.scr"):
         (work / scratch).unlink()
     source = {
         "image": str(image),
@@ -272,7 +286,7 @@ class Emulator:
 
     def reset_disk(self) -> None:
         """Start from the shipped disk again: a fresh copy-on-write overlay."""
-        _run(
+        run(
             "qemu-img",
             *("create", "-q", "-f", "qcow2"),
             *("-b", str(self.disk), "-F", "raw", str(self.overlay)),

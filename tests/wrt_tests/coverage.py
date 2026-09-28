@@ -38,13 +38,11 @@ class TestRef:
     module: Path
     function: str
     specs: tuple[ScenarioId, ...]
-    target: str | None
 
     @override
     def __str__(self) -> str:
-        """Render as ``module::function``, with the target when the test has one."""
-        suffix = f" [{self.target} only]" if self.target else ""
-        return f"{self.module.as_posix()}::{self.function}{suffix}"
+        """Render as ``module::function``."""
+        return f"{self.module.as_posix()}::{self.function}"
 
 
 class _Collector:
@@ -76,8 +74,7 @@ def collect_tests(tests_dir: Path = TESTS_DIR) -> list[TestRef]:
         module = item.path.relative_to(tests_dir)
         function = getattr(item, "originalname", item.name)
         specs = tuple(ScenarioId(*mark.args) for mark in item.iter_markers("spec"))
-        target = mark.args[0] if (mark := item.get_closest_marker("target")) else None
-        refs.setdefault((module, function), TestRef(module, function, specs, target))
+        refs.setdefault((module, function), TestRef(module, function, specs))
     return list(refs.values())
 
 

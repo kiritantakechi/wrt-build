@@ -1,13 +1,12 @@
 """testing/emulation: the emulator boots the shipped image as an R4S (design D14)."""
 
 import json
-import os
 import re
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from wrt_tests import spec, target
+from wrt_tests import spec
 from wrt_tests.emu import BOARD_COMPATIBLE, sha256
 
 if TYPE_CHECKING:
@@ -19,14 +18,15 @@ DHCP_TIMEOUT = 60.0
 
 
 @spec(CAPABILITY, "Boot the shipped artifacts", "Verify artifact provenance")
-@target("emulation", "checks where the emulator's kernel and disk come from")
-def test_boots_the_shipped_artifacts(router: Router, emulation_source: dict[str, str]) -> None:
+def test_boots_the_shipped_artifacts(
+    router: Router, emulation_dir: Path, emulation_source: dict[str, str]
+) -> None:
     source = emulation_source
     image = Path(source["image"])
     manifest = json.loads(Path(source["manifest"]).read_text())
     assert sha256(image) == source["image_sha256"] == manifest["files"][f"targets/{image.name}"]
 
-    kernel = Path(os.environ["LG_EMU_DIR"]) / "Image"
+    kernel = emulation_dir / "Image"
     assert sha256(kernel) == source["kernel_sha256"]
     banner = re.search(rb"Linux version [^\n]+", kernel.read_bytes())
     assert banner is not None
@@ -60,7 +60,6 @@ def test_userspace_runs(router: Router) -> None:
 
 
 @spec(CAPABILITY, "Repeatable network topology", "LAN client gets an address")
-@target("emulation", "the LAN client lives in the emulator's network sandbox")
 def test_lan_client_gets_an_address(router: Router, network: Network) -> None:
     client = network["client-a"]
     deadline = time.monotonic() + DHCP_TIMEOUT
@@ -72,7 +71,6 @@ def test_lan_client_gets_an_address(router: Router, network: Network) -> None:
 
 
 @spec(CAPABILITY, "Repeatable network topology", "No root privileges needed")
-@target("emulation", "concerns how the emulator's sandbox is built")
 def test_sandbox_needs_no_root(router: Router, network: Network) -> None:
     # Root in here is the invoking user outside: uid_map is "0 <uid> 1".
     inside, outside, count = map(int, Path("/proc/self/uid_map").read_text().split())
@@ -83,7 +81,6 @@ def test_sandbox_needs_no_root(router: Router, network: Network) -> None:
 
 
 @spec(CAPABILITY, "Fault injection", "Tests are isolated")
-@target("emulation", "the device keeps its state between tests")
 def test_tests_do_not_leak_state(router: Router) -> None:
     router.run("uci set system.@system[0].hostname=leaked && uci commit system && sync")
     router.reset()  # what the router fixture does between two tests
@@ -91,10 +88,8 @@ def test_tests_do_not_leak_state(router: Router) -> None:
 
 
 @spec(CAPABILITY, "Fault injection", "Forced power cut")
-@target("emulation", "cuts the power without a shutdown")
 def test_power_cut_keeps_the_disk(router: Router) -> None:
     emulator = router.emulator
-    assert emulator is not None
     router.run("echo written-before-the-cut > /root/marker && sync")
     router.disconnect()
     emulator.power_cut()
