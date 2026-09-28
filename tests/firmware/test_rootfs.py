@@ -4,15 +4,8 @@ import re
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
-from wrt_tests.emu import (
-    BOARD_COMPATIBLE,
-    BOOT_PARTITION,
-    boot_files,
-    extract_fit_image,
-    read_fit,
-    run,
-)
-from wrt_tests.image import SECTOR, read_mbr, script_text
+from wrt_tests.emu import BOARD_COMPATIBLE, boot_files, extract_fit_image, read_fit, run
+from wrt_tests.image import SECTOR, default_environment, read_mbr
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,13 +19,8 @@ ROM_DIGEST = "find /rom -xdev -type f | sort | xargs sha256sum | sha256sum"
 # and SPL reads the U-Boot FIT from sector 16384.
 LOADER_SECTOR, UBOOT_SECTOR = 64, 16384
 SOC_COMPATIBLE = "rockchip,rk3399"
-# The script finds the root on partition 2 and loads the kernel FIT from partition 1
-# of the device it was itself loaded from, then boots it.
-BOOT_SCRIPT_STEPS = (
-    r"^part uuid \$\{devtype\} \$\{devnum\}:2 uuid$",
-    r"^load \$\{devtype\} \$\{devnum\}:1 \$\{kernel_addr_r\} kernel\.img$",
-    r"^bootm \$\{kernel_addr_r\}$",
-)
+# boot-A and boot-B, each with the kernel FIT of its slot.
+BOOT_PARTITIONS = (1, 3)
 # The two ports: the GMAC (WAN, eth0) and the PCIe controller of the RTL8111 (LAN, eth1).
 PORT_NODES = ("/ethernet@fe300000", "/pcie@f8000000")
 
@@ -54,7 +42,7 @@ def _mount(router: Router, mountpoint: str) -> tuple[str, str, str]:
 
 @spec(CAPABILITY, "EROFS root filesystem", "Check build artifacts")
 def test_build_outputs_are_erofs(build_output: Path) -> None:
-    images = sorted(p.name for p in (build_output / "targets").glob("*.img*"))
+    images = sorted(p.name for p in (build_output / "targets").glob("*.gz"))
     assert images
     assert all("-erofs-" in name for name in images), images
     assert not [name for name in images if "squashfs" in name or "ext4" in name]
@@ -97,21 +85,26 @@ def test_factory_reset_only_clears_the_overlay(router: Router) -> None:
 def test_boot_chain(emulation_dir: Path, tmp_path: Path) -> None:
     disk = emulation_dir / "disk.raw"
     with disk.open("rb") as raw:
-        boot_start = read_mbr(raw.read(SECTOR)).partition(BOOT_PARTITION).start // SECTOR
+        first = read_mbr(raw.read(SECTOR)).partitions[0].start // SECTOR
     loader = _sectors(disk, LOADER_SECTOR, UBOOT_SECTOR, tmp_path / "idbloader.img")
     assert "Rockchip RK33 (SD/MMC) boot image" in run("dumpimage", "-T", "rksd", "-l", str(loader))
 
-    uboot = read_fit(_sectors(disk, UBOOT_SECTOR, boot_start, tmp_path / "u-boot.itb"))
+    itb = _sectors(disk, UBOOT_SECTOR, first, tmp_path / "u-boot.itb")
+    uboot = read_fit(itb)
     assert uboot.configuration["Compatible"] == BOARD_COMPATIBLE
     assert uboot.selected("Firmware")["OS"] == "ARM Trusted Firmware"
     assert "u-boot" in uboot.configuration.properties["Loadables"]
+    extract_fit_image(itb, uboot.images["u-boot"], tmp_path / "u-boot.bin")
+    environment = default_environment((tmp_path / "u-boot.bin").read_bytes(), "wrt_boot")
+    assert environment["bootcmd"] == "run wrt_boot"
 
-    boot_files(disk, ("boot.scr", "kernel.img"), tmp_path)
-    script = script_text((tmp_path / "boot.scr").read_bytes())
-    for step in BOOT_SCRIPT_STEPS:
-        assert re.search(step, script, re.MULTILINE), step
-    kernel, dtb = tmp_path / "kernel.img", tmp_path / "board.dtb"
-    extract_fit_image(kernel, read_fit(kernel).selected("FDT"), dtb)
-    assert run("fdtget", str(dtb), "/", "compatible").split() == [BOARD_COMPATIBLE, SOC_COMPATIBLE]
-    for node in PORT_NODES:
-        assert run("fdtget", str(dtb), node, "status").strip() == "okay", node
+    for partition in BOOT_PARTITIONS:
+        slot = tmp_path / f"boot-{partition}"
+        slot.mkdir()
+        boot_files(disk, partition, ("kernel.img",), slot)
+        kernel, dtb = slot / "kernel.img", slot / "board.dtb"
+        extract_fit_image(kernel, read_fit(kernel).selected("FDT"), dtb)
+        compatible = run("fdtget", str(dtb), "/", "compatible").split()
+        assert compatible == [BOARD_COMPATIBLE, SOC_COMPATIBLE], partition
+        for node in PORT_NODES:
+            assert run("fdtget", str(dtb), node, "status").strip() == "okay", (partition, node)

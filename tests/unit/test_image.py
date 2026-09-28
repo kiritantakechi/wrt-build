@@ -8,18 +8,11 @@ import pytest
 
 from wrt_tests.image import (
     SECTOR,
-    emulator_bootargs,
+    default_environment,
     gunzip_first_member,
     parse_fit,
     read_mbr,
-    script_text,
 )
-
-BOOT_SCRIPT = """part uuid ${devtype} ${devnum}:2 uuid
-setenv bootargs "console=${serial_port},1500000 earlycon=uart8250,mmio32${serial_addr} \
-root=PARTUUID=${uuid} rw rootwait fstools_overlay_compression_type=zstd";
-bootm ${kernel_addr_r}
-"""
 
 
 def _mbr(signature: int, partitions: list[tuple[int, int]]) -> bytes:
@@ -57,17 +50,25 @@ def test_read_mbr_rejects_a_disk_without_boot_signature() -> None:
         read_mbr(bytes(SECTOR))
 
 
-def test_script_text_skips_the_legacy_header() -> None:
-    body = BOOT_SCRIPT.encode()
-    image = bytes(64) + struct.pack(">II", len(body), 0) + body
-    assert script_text(image) == BOOT_SCRIPT
+# Strings of a U-Boot binary around its built-in environment.
+BINARY = (
+    b"\x7fELF\x02U-Boot 2026.07\0%s=%s\0\0\x00\x13"
+    b"bootcmd=run wrt_boot\0bootlimit=3\0wrt_boot=if test a; then\trun b; fi\0\0"
+    b"\xff\xfeother\0\0"
+)
 
 
-def test_emulator_bootargs_rewrites_console_earlycon_and_root() -> None:
-    assert emulator_bootargs(BOOT_SCRIPT, "5452574f-02") == (
-        "console=ttyAMA0 root=PARTUUID=5452574f-02 rw rootwait "
-        "fstools_overlay_compression_type=zstd"
-    )
+def test_default_environment_reads_the_marked_block() -> None:
+    assert default_environment(BINARY, "wrt_boot") == {
+        "bootcmd": "run wrt_boot",
+        "bootlimit": "3",
+        "wrt_boot": "if test a; then\trun b; fi",
+    }
+
+
+def test_default_environment_needs_the_marker() -> None:
+    with pytest.raises(LookupError, match="wrt_other"):
+        default_environment(BINARY, "wrt_other")
 
 
 # Shortened ``dumpimage -l`` listings of the two FITs in a shipped image.

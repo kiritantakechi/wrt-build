@@ -1,11 +1,11 @@
-"""The emulated R4S (design D14): preparing its files and driving it at run time.
+"""The emulated R4S (design D14, r4s-ab-rollback D7): its files and driving it at run time.
 
-``emu-prepare`` turns a shipped sysupgrade image into the files the emulator boots:
-the kernel ``Image`` taken from the FIT on the boot partition, bootargs derived
-from the boot script, an R4S-identity device tree, and the raw disk that every
-test run overlays with copy-on-write. The machine parameters are read from the
-labgrid target description, so the device tree always matches the machine that
-boots it. The output directory is keyed by the image's SHA-256 and reused.
+``emu-prepare`` turns the outputs of a build into what the emulator boots: the
+factory image as a raw SD card, which every test run overlays with copy-on-write;
+the emulator's U-Boot as firmware; and an R4S-identity device tree, which U-Boot
+hands on to the kernel it starts from the slot. The machine parameters come from
+the labgrid target description, so the device tree always matches the machine
+that boots it. The output directory is keyed by the image and firmware and reused.
 
 ``Emulator`` gives the tests power, disk snapshots and the serial console.
 """
@@ -13,7 +13,7 @@ boots it. The output directory is keyed by the image's SHA-256 and reused.
 import argparse
 import hashlib
 import json
-import lzma
+import os
 import re
 import shlex
 import shutil
@@ -29,16 +29,7 @@ from typing import TYPE_CHECKING, Any, Self
 import yaml
 from pexpect import TIMEOUT
 
-from wrt_tests.image import (
-    SECTOR,
-    Fit,
-    FitNode,
-    emulator_bootargs,
-    gunzip_first_member,
-    parse_fit,
-    read_mbr,
-    script_text,
-)
+from wrt_tests.image import SECTOR, Fit, FitNode, gunzip_first_member, parse_fit, read_mbr
 
 if TYPE_CHECKING:
     from labgrid import Target
@@ -47,9 +38,12 @@ if TYPE_CHECKING:
 TARGETS_DIR = Path(__file__).resolve().parent.parent / "targets"
 BOARD_COMPATIBLE = "friendlyarm,nanopi-r4s"
 BOARD_MODEL = "FriendlyElec NanoPi R4S"
-BOOT_PARTITION = 1
-ROOT_PARTITION = 2
+MANIFEST_FILE = "manifest.json"
+FACTORY_IMAGE = "targets/*-factory.img.gz"
+FIRMWARE = "u-boot-qemu.bin"
 SOURCE_FILE = "source.json"
+# A 4 GB card: QEMU wants SD cards sized in powers of two.
+SD_CARD_SIZE = 4 << 30
 
 
 class _TemplateLoader(yaml.SafeLoader):
@@ -84,13 +78,19 @@ class Machine:
             smp=extra[extra.index("-smp") + 1],
         )
 
-    def dump_dtb(self, output: Path) -> None:
-        """Write the device tree QEMU generates for this machine."""
+    def dump_dtb(self, output: Path, firmware: Path) -> None:
+        """Write the device tree QEMU generates for this machine running ``firmware``.
+
+        The firmware belongs to the machine: with one, QEMU replaces the PL061 GPIO
+        with an ACPI event device, and a device tree without it would describe a
+        device the kernel faults on.
+        """
         subprocess.run(
             [
                 self.qemu,
                 *("-machine", f"{self.machine},dumpdtb={output}"),
                 *("-cpu", self.cpu, "-m", self.memory, "-smp", self.smp),
+                *("-bios", str(firmware)),
                 "-nographic",
             ],
             check=True,
@@ -112,10 +112,10 @@ def run(*command: str) -> str:
     return subprocess.run(command, check=True, capture_output=True, text=True).stdout
 
 
-def boot_files(disk: Path, names: tuple[str, ...], output: Path) -> None:
-    """Copy files of the boot partition (ext4) of a raw disk into ``output``."""
+def boot_files(disk: Path, partition: int, names: tuple[str, ...], output: Path) -> None:
+    """Copy files of a boot partition (ext4) of a raw disk into ``output``."""
     with disk.open("rb") as raw:
-        boot = read_mbr(raw.read(SECTOR)).partition(BOOT_PARTITION)
+        boot = read_mbr(raw.read(SECTOR)).partition(partition)
         raw.seek(boot.start)
         filesystem = output / "boot.ext4"
         filesystem.write_bytes(raw.read(boot.size))
@@ -124,7 +124,7 @@ def boot_files(disk: Path, names: tuple[str, ...], output: Path) -> None:
         # debugfs exits 0 even when the file is missing; check the result instead.
         run("debugfs", "-R", f"dump /{name} {file}", str(filesystem))
         if not file.is_file() or file.stat().st_size == 0:
-            msg = f"{name} not found on the boot partition"
+            msg = f"{name} not found on partition {partition}"
             raise FileNotFoundError(msg)
     filesystem.unlink()
 
@@ -139,48 +139,60 @@ def extract_fit_image(path: Path, image: FitNode, output: Path) -> None:
     run("dumpimage", "-T", "flat_dt", "-p", str(image.index), "-o", str(output), str(path))
 
 
-def prepare(image: Path, root: Path, machine: Machine, manifest: Path | None) -> Path:
-    """Build (or reuse) the emulator directory for a sysupgrade image and return it."""
-    image_sha256 = sha256(image)
-    if manifest is not None:
-        files = json.loads(manifest.read_text())["files"]
-        expected = files.get(f"targets/{image.name}")
-        if expected != image_sha256:
-            msg = f"{image.name}: sha256 {image_sha256} does not match {manifest} ({expected})"
+@dataclass(frozen=True, slots=True)
+class Build:
+    """The outputs of one build that the emulator boots, as its manifest lists them."""
+
+    directory: Path
+    image: Path
+    firmware: Path
+
+    @classmethod
+    def read(cls, directory: Path) -> Self:
+        """Find the factory image and the firmware, and check both against the manifest."""
+        images = sorted(directory.glob(FACTORY_IMAGE))
+        if len(images) != 1:
+            msg = f"expected one {FACTORY_IMAGE} in {directory}, found {len(images)}"
             raise SystemExit(msg)
-    directory = root / image_sha256[:16]
+        build = cls(directory, images[0], directory / FIRMWARE)
+        files = json.loads((directory / MANIFEST_FILE).read_text())["files"]
+        for path in (build.image, build.firmware):
+            name = path.relative_to(directory).as_posix()
+            if sha256(path) != files.get(name):
+                msg = f"{name} does not match {directory / MANIFEST_FILE}"
+                raise SystemExit(msg)
+        return build
+
+
+def prepare(build: Build, root: Path, machine: Machine) -> Path:
+    """Build (or reuse) the emulator directory for a build and return it."""
+    image_sha256, firmware_sha256 = sha256(build.image), sha256(build.firmware)
+    key = hashlib.sha256(f"{image_sha256} {firmware_sha256}".encode()).hexdigest()
+    directory = root / key[:16]
     if (directory / SOURCE_FILE).is_file():
         return directory
 
     root.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix=f"{directory.name}.", dir=root))
     disk_file = work / "disk.raw"
-    with image.open("rb") as source, disk_file.open("wb") as target:
-        trailer = gunzip_first_member(source, target)
-    with disk_file.open("rb") as disk:
-        table = read_mbr(disk.read(SECTOR))
-    boot_files(disk_file, ("kernel.img", "boot.scr"), work)
-    kernel_fit = work / "kernel.img"
-    extract_fit_image(kernel_fit, read_fit(kernel_fit).selected("Kernel"), work / "Image.lzma")
-    (work / "Image").write_bytes(lzma.decompress((work / "Image.lzma").read_bytes()))
-    partuuid = table.partuuid(ROOT_PARTITION)
-    bootargs = emulator_bootargs(script_text((work / "boot.scr").read_bytes()), partuuid)
-    (work / "bootargs").write_text(bootargs + "\n")
+    with build.image.open("rb") as source, disk_file.open("wb") as target:
+        gunzip_first_member(source, target)
+    if disk_file.stat().st_size > SD_CARD_SIZE:
+        msg = f"{build.image.name} is larger than a {SD_CARD_SIZE >> 30} GiB card"
+        raise SystemExit(msg)
+    os.truncate(disk_file, SD_CARD_SIZE)
+    shutil.copyfile(build.firmware, work / "u-boot.bin")
 
-    machine.dump_dtb(work / "r4s.dtb")
+    machine.dump_dtb(work / "r4s.dtb", work / "u-boot.bin")
     run("fdtput", "-t", "s", str(work / "r4s.dtb"), "/", "compatible", BOARD_COMPATIBLE)
     run("fdtput", "-t", "s", str(work / "r4s.dtb"), "/", "model", BOARD_MODEL)
 
-    for scratch in ("kernel.img", "Image.lzma", "boot.scr"):
-        (work / scratch).unlink()
     source = {
-        "image": str(image),
+        "build": str(build.directory),
+        "image": str(build.image),
         "image_sha256": image_sha256,
-        "kernel_sha256": sha256(work / "Image"),
-        "manifest": str(manifest) if manifest else None,
-        "fwtool_trailer_bytes": len(trailer),
-        "root_partuuid": partuuid,
-        "bootargs": bootargs,
+        "firmware": str(build.firmware),
+        "firmware_sha256": firmware_sha256,
     }
     (work / SOURCE_FILE).write_text(json.dumps(source, indent=2) + "\n")
     shutil.rmtree(directory, ignore_errors=True)
@@ -189,11 +201,10 @@ def prepare(image: Path, root: Path, machine: Machine, manifest: Path | None) ->
 
 
 def main(argv: list[str] | None = None) -> int:
-    """emu-prepare: print the emulator directory prepared for a sysupgrade image."""
+    """emu-prepare: print the emulator directory prepared for the outputs of a build."""
     parser = argparse.ArgumentParser(prog="emu-prepare", description=main.__doc__)
-    parser.add_argument("image", type=Path, help="the sysupgrade .img.gz of a build")
+    parser.add_argument("build", type=Path, help="the output directory of a build")
     parser.add_argument("root", type=Path, help="directory that holds prepared emulators")
-    parser.add_argument("--manifest", type=Path, help="manifest.json of the same build")
     parser.add_argument(
         "--target",
         type=Path,
@@ -201,7 +212,8 @@ def main(argv: list[str] | None = None) -> int:
         help="labgrid description of the emulation target",
     )
     args = parser.parse_args(argv)
-    directory = prepare(args.image, args.root, Machine.from_description(args.target), args.manifest)
+    machine = Machine.from_description(args.target)
+    directory = prepare(Build.read(args.build), args.root, machine)
     sys.stdout.write(f"{directory}\n")
     return 0
 
@@ -256,6 +268,11 @@ class Console:
         """Return the current end of the record; wait_for() can search from here."""
         with self._changed:
             return len(self._data)
+
+    def text(self, since: int = 0) -> str:
+        """Return the console output after ``since``, as text."""
+        with self._changed:
+            return self._data[since:].decode(errors="replace")
 
     def wait_for(self, pattern: str, *, since: int, timeout: float) -> str:
         """Wait until ``pattern`` (a regular expression) appears after ``since``."""
@@ -319,6 +336,11 @@ class Emulator:
     def restore(self) -> None:
         """Return to the snapshot taken by save()."""
         self._monitor(f"loadvm {self.SNAPSHOT}")
+
+    def throttle_writes(self, bps: int) -> None:
+        """Limit writes to the SD card to ``bps`` bytes per second until the power is cut."""
+        limits = dict.fromkeys(("bps", "bps_rd", "iops", "iops_rd", "iops_wr"), 0)
+        self.qemu.monitor_command("block_set_io_throttle", {"id": "card", "bps_wr": bps, **limits})
 
     def send_keys(self, text: str) -> None:
         """Type on the serial console."""

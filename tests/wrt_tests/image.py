@@ -1,10 +1,9 @@
-"""Read the pieces of a shipped sysupgrade image (design D14).
+"""Read the pieces of the shipped images (design D14, r4s-ab-rollback D7).
 
 Everything here is a pure function over bytes or text, so the unit tests cover it
-without an image: the gzip stream is followed by fwtool metadata, the disk has an
-MBR, the boot partition holds a legacy U-Boot script whose ``setenv bootargs`` line
-is the template of the kernel command line, and U-Boot and the kernel are FITs,
-read from their ``dumpimage -l`` listings.
+without an image: a gzip stream may be followed by fwtool metadata, the disk has
+an MBR, U-Boot and the kernel are FITs, read from their ``dumpimage -l`` listings,
+and U-Boot carries its default environment as a run of strings.
 """
 
 import re
@@ -17,8 +16,6 @@ SECTOR = 512
 _MBR_SIGNATURE = 0x1B8
 _MBR_ENTRIES = 0x1BE
 _MBR_ENTRY_SIZE = 16
-_LEGACY_HEADER_SIZE = 64
-_BOOTARGS = re.compile(r'setenv bootargs "(?P<template>[^"]*)"')
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,44 +81,27 @@ def read_mbr(disk: bytes) -> Disk:
     return Disk(signature, tuple(partitions))
 
 
-def script_text(script: bytes) -> str:
-    """Return the text of a legacy U-Boot script image (mkimage -T script).
+_ENVIRONMENT_BLOCK = re.compile(rb"(?:[\x20-\x7e\t]+\0)+\0")
+_ENVIRONMENT_ENTRY = re.compile(r"^(?P<name>[A-Za-z_][\w.#+-]*)=(?P<value>.*)$", re.DOTALL)
 
-    After the 64-byte legacy header comes a zero-terminated table of big-endian
-    part lengths; the first part is the script.
+
+def default_environment(binary: bytes, marker: str) -> dict[str, str]:
+    """Read U-Boot's built-in environment from its binary.
+
+    The environment is a run of ``name=value`` strings, each ending in a zero byte,
+    with one more zero byte after the last. ``marker`` is a variable that only this
+    environment defines; it picks the run out of the other strings of the binary.
     """
-    offset = _LEGACY_HEADER_SIZE
-    lengths: list[int] = []
-    while (length := struct.unpack_from(">I", script, offset)[0]) != 0:
-        lengths.append(length)
-        offset += 4
-    offset += 4
-    if not lengths:
-        msg = "empty script image"
-        raise ValueError(msg)
-    return script[offset : offset + lengths[0]].decode()
-
-
-def emulator_bootargs(script: str, partuuid: str, console: str = "ttyAMA0") -> str:
-    """Turn the ``setenv bootargs`` template of the boot script into emulator bootargs.
-
-    The console moves to the emulator's PL011 UART, earlycon (the RK3399 UART
-    address) is dropped and the root partition is named by PARTUUID, exactly as
-    the script's ``part uuid`` does on the device. Every other argument is kept.
-    """
-    match = _BOOTARGS.search(script)
-    if match is None:
-        msg = "boot script sets no bootargs"
-        raise ValueError(msg)
-    arguments: list[str] = []
-    for argument in match["template"].split():
-        if argument.startswith("earlycon="):
-            continue
-        if argument.startswith("console="):
-            arguments.append(f"console={console}")
-        else:
-            arguments.append(argument.replace("${uuid}", partuuid))
-    return " ".join(arguments)
+    for block in _ENVIRONMENT_BLOCK.finditer(binary):
+        entries = block.group().decode("ascii").split("\0")
+        if any(entry.startswith(f"{marker}=") for entry in entries):
+            return {
+                match["name"]: match["value"]
+                for entry in entries
+                if (match := _ENVIRONMENT_ENTRY.match(entry))
+            }
+    msg = f"no built-in environment with {marker}"
+    raise LookupError(msg)
 
 
 _FIT_NODE = re.compile(r"^ (?P<kind>Image|Configuration) (?P<index>\d+) \((?P<name>[^)]+)\)$")

@@ -14,6 +14,8 @@ import urllib.request
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+from labgrid.driver.exception import ExecutionError
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
@@ -138,12 +140,19 @@ class Router:
         return self.run("cat /proc/sys/kernel/random/boot_id")
 
     def wait_rebooted(self, previous_boot: str, timeout: float = BOOT_TIMEOUT) -> None:
-        """Wait until the router has booted again after ``previous_boot`` and is ready."""
+        """Wait until the router has booted again after ``previous_boot`` and is ready.
+
+        The reboot may cut the connection in the middle of a command; that only
+        means waiting on.
+        """
         deadline = time.monotonic() + timeout
         while True:
-            self.wait_ready(deadline - time.monotonic())
-            if self.boot_id() != previous_boot:
-                return
+            try:
+                self.wait_ready(deadline - time.monotonic())
+                if self.boot_id() != previous_boot:
+                    return
+            except ExecutionError:
+                self.disconnect()
             _check(deadline, "the router never rebooted")
             time.sleep(2)
 

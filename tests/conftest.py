@@ -18,6 +18,8 @@ from wrt_tests.emu import SOURCE_FILE, Emulator
 from wrt_tests.net import RUNNER_ADDRESS, TOPOLOGY, Network
 from wrt_tests.router import Router
 
+UPGRADE_IMAGE = "targets/*-sysupgrade.tar.gz"
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -81,7 +83,14 @@ def emulation_source(emulation_dir: Path) -> dict[str, str]:
 @pytest.fixture(scope="session")
 def build_output(emulation_source: dict[str, str]) -> Path:
     """Return the output directory of the build the emulator boots."""
-    return Path(emulation_source["manifest"]).parent
+    return Path(emulation_source["build"])
+
+
+@pytest.fixture(scope="session")
+def upgrade_image(build_output: Path) -> Path:
+    """Return the single-slot upgrade image of the build under test."""
+    (image,) = build_output.glob(UPGRADE_IMAGE)
+    return image
 
 
 class _QuietHandler(SimpleHTTPRequestHandler):

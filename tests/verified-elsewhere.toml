@@ -52,7 +52,7 @@ by = "build.yml references no secret; a run in a fork without secrets (docs/ci.m
 capability = "build/environment"
 requirement = "Pinned common host environment"
 scenario = "Local and CI tool versions match"
-by = "just env-report in build.yml host-toolchain compared with the local VM (docs/ci.md)"
+by = "just env-report in build.yml system-test compared with the local VM (docs/ci.md)"
 
 [[scenario]]
 capability = "build/environment"

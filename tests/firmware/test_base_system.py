@@ -2,12 +2,13 @@
 
 import re
 from http import HTTPStatus
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from wrt_tests.router import Router
 
 CAPABILITY = "firmware/base-system"
@@ -26,7 +27,7 @@ EXCLUDED_PACKAGES = (
 EXECUTABLE_DIRS = "/rom/bin /rom/sbin /rom/usr/bin /rom/usr/sbin /rom/lib /rom/usr/lib"
 FAILSAFE_PROMPT = r"Press the \[f\] key and hit \[enter\] to enter failsafe mode"
 BOOT_TIMEOUT = 600.0
-UPGRADE_IMAGE = "/tmp/sysupgrade.img.gz"  # noqa: S108 (a path on the router)
+UPGRADE_IMAGE = "/tmp/sysupgrade.tar.gz"  # noqa: S108 (a path on the router)
 
 
 def _report(output: str) -> str:
@@ -66,12 +67,12 @@ def test_failsafe_address(router: Router) -> None:
 
 
 @spec(CAPABILITY, "Default LAN address", "Config-preserving upgrade")
-def test_upgrade_keeps_the_lan_address(router: Router, emulation_source: dict[str, str]) -> None:
+def test_upgrade_keeps_the_lan_address(router: Router, upgrade_image: Path) -> None:
     router.run("uci set network.lan.ipaddr=10.0.0.3/24 && uci commit network")
     # The zram defaults are only filled in while unset (uci-defaults), so an
     # administrator's value survives the upgrade as well.
     router.run("uci set system.@system[0].zram_size_mb=512 && uci commit system")
-    router.put(Path(emulation_source["image"]), UPGRADE_IMAGE)
+    router.put(upgrade_image, UPGRADE_IMAGE)
     previous_boot = router.boot_id()
     router.detach(f"sleep 1; sysupgrade {UPGRADE_IMAGE}")
     with router.moved_to("10.0.0.3"):

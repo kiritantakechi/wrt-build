@@ -132,6 +132,22 @@
         export FAKEROOTDONTTRYCHOWN=1
       '';
 
+      # The emulator: QEMU for aarch64 guests only, without the display, audio and
+      # storage backends the tests never use, and with the fixes in patches/qemu
+      # (sdhci-pci lost its BAR on loadvm, which the tests do between every two).
+      emulatorQemu =
+        unstable:
+        (unstable.qemu.override {
+          minimal = true;
+          enableTools = true;
+          # option ROMs, which PCI devices such as virtio-net-pci load
+          enableBlobs = true;
+          hostCpuTargets = [ "aarch64-softmmu" ];
+        }).overrideAttrs
+          (old: {
+            patches = (old.patches or [ ]) ++ nixpkgs.lib.filesystem.listFilesRecursive ./patches/qemu;
+          });
+
       # System tests: emulator, image extraction, network sandbox peers, and the
       # shared libraries that uv-managed Python and manylinux wheels expect in an
       # FHS layout. Later changes append their peers (PPPoE server, registry, ...).
@@ -139,7 +155,7 @@
         pkgs: unstable:
         [
           unstable.uv
-          unstable.qemu
+          (emulatorQemu unstable)
           unstable.dtc
           unstable.ubootTools
         ]
@@ -227,14 +243,24 @@
       );
 
       # quality: code standards only (just check / just fmt), identical on every host.
+      # build:    quality plus, on Linux, the build environment; CI's build jobs, which
+      #           then never build the emulator.
       # default:  quality plus, on Linux, the build and test environments.
       devShells =
         forSystems linuxSystems (
-          pkgs: unstable: rec {
+          pkgs: unstable:
+          let
+            environments = environmentsFor pkgs unstable;
+          in
+          rec {
             quality = pkgs.mkShellNoCC { packages = qualityTools pkgs unstable; };
+            build = pkgs.mkShellNoCC {
+              inputsFrom = [ quality ];
+              packages = [ environments.wrt-build-fhs ];
+            };
             default = pkgs.mkShellNoCC {
               inputsFrom = [ quality ];
-              packages = builtins.attrValues (environmentsFor pkgs unstable);
+              packages = builtins.attrValues environments;
             };
           }
         )

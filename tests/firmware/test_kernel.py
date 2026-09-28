@@ -23,6 +23,7 @@ __attribute__((section("tcx/ingress"), used)) int wrt_pass(void *ctx) { return -
 char LICENSE[] __attribute__((section("license"), used)) = "GPL";
 """
 VIRTIO_NICS = ("eth0 (WAN)", "eth1 (LAN)")
+SD_CARD = "/dev/mmcblk0"
 # The drivers of the R4S ports register at boot, even where their devices are absent.
 PORT_DRIVERS = (
     "/sys/bus/platform/drivers/rk_gmac-dwmac",  # the GMAC: WAN, eth0
@@ -96,9 +97,10 @@ def test_virt_devices(router: Router) -> None:
     assert router.returncode("dmesg | grep -q 'printk: console \\[ttyAMA0\\] enabled'") == 0
     assert router.run("awk '$2 == \"/rom\" { print $1 }' /proc/mounts") in {
         "/dev/root",
-        "/dev/vda2",
+        f"{SD_CARD}p2",
     }
-    assert router.returncode("[ -b /dev/vda2 ]") == 0
+    assert router.returncode(f"[ -b {SD_CARD}p2 ]") == 0
+    assert router.run("ls /sys/bus/pci/drivers/sdhci-pci/ | grep -c '^0000:'") == "1"
     nics = router.run("ls /sys/bus/virtio/drivers/virtio_net/ | grep '^virtio'").split()
     assert len(nics) == len(VIRTIO_NICS)
     # OpenWrt builds without WATCHDOG_SYSFS; the driver announces itself instead.

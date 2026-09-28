@@ -1,13 +1,21 @@
 """testing/emulation: the emulator boots the shipped image as an R4S (design D14)."""
 
 import json
+import lzma
 import re
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
-from wrt_tests.emu import BOARD_COMPATIBLE, sha256
+from wrt_tests.emu import (
+    BOARD_COMPATIBLE,
+    MANIFEST_FILE,
+    boot_files,
+    extract_fit_image,
+    read_fit,
+    sha256,
+)
 
 if TYPE_CHECKING:
     from wrt_tests.net import Network
@@ -19,21 +27,28 @@ DHCP_TIMEOUT = 60.0
 
 @spec(CAPABILITY, "Boot the shipped artifacts", "Verify artifact provenance")
 def test_boots_the_shipped_artifacts(
-    router: Router, emulation_dir: Path, emulation_source: dict[str, str]
+    router: Router,
+    emulation_dir: Path,
+    emulation_source: dict[str, str],
+    build_output: Path,
+    tmp_path: Path,
 ) -> None:
-    source = emulation_source
-    image = Path(source["image"])
-    manifest = json.loads(Path(source["manifest"]).read_text())
-    assert sha256(image) == source["image_sha256"] == manifest["files"][f"targets/{image.name}"]
+    files = json.loads((build_output / MANIFEST_FILE).read_text())["files"]
+    for kind in ("image", "firmware"):
+        path = Path(emulation_source[kind])
+        shipped = files[path.relative_to(build_output).as_posix()]
+        assert sha256(path) == emulation_source[f"{kind}_sha256"] == shipped
 
-    kernel = emulation_dir / "Image"
-    assert sha256(kernel) == source["kernel_sha256"]
-    banner = re.search(rb"Linux version [^\n]+", kernel.read_bytes())
+    # U-Boot started the kernel of slot A's FIT, with the slot's command line.
+    boot_files(emulation_dir / "disk.raw", 1, ("kernel.img",), tmp_path)
+    kernel = tmp_path / "kernel.img"
+    extract_fit_image(kernel, read_fit(kernel).selected("Kernel"), tmp_path / "Image.lzma")
+    image = lzma.decompress((tmp_path / "Image.lzma").read_bytes())
+    banner = re.search(rb"Linux version [^\n]+", image)
     assert banner is not None
     assert router.run("cat /proc/version") == banner.group().decode()
-
-    assert "fstools_overlay_compression_type=zstd" in source["bootargs"].split()
-    assert router.run("cat /proc/cmdline") == source["bootargs"]
+    arguments = router.run("cat /proc/cmdline").split()
+    assert {"wrt.slot=a", "fstools_overlay_compression_type=zstd"} <= set(arguments)
 
 
 @spec(CAPABILITY, "Boot with the R4S board identity", "Read board name")

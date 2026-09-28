@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 29 Sep 2026 01:30:00 +0800
+Subject: [PATCH] hw/sd/sdhci-pci: migrate the PCI device state
+
+sdhci-pci uses sdhci_vmstate, which holds only the controller registers.
+The PCI configuration space is not saved, so after loadvm or migration
+the BAR is unmapped: every register reads as all ones and the guest
+loses its card ("Controller never released inhibit bit(s)").
+
+Give sdhci-pci a description of its own: the PCI device state, then the
+shared controller state.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+---
+ hw/sd/sdhci-pci.c | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/hw/sd/sdhci-pci.c b/hw/sd/sdhci-pci.c
+--- a/hw/sd/sdhci-pci.c
++++ b/hw/sd/sdhci-pci.c
+@@ -20,6 +20,7 @@
+ #include "qemu/module.h"
+ #include "hw/core/irq.h"
+ #include "hw/core/qdev-properties.h"
++#include "migration/vmstate.h"
+ #include "hw/sd/sdhci.h"
+ #include "sdhci-internal.h"
+ 
+@@ -45,6 +46,28 @@
+     pci_register_bar(dev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->iomem);
+ }
+ 
++/*
++ * The PCI device state (configuration space, BARs) comes first, then the
++ * controller state all SDHCI variants share. With sdhci_vmstate alone, the
++ * BAR was unmapped after loadvm or migration, and the guest lost its card.
++ */
++static const VMStateDescription sdhci_pci_vmstate = {
++    .name = "sdhci-pci",
++    .version_id = 1,
++    .minimum_version_id = 1,
++    .fields = (const VMStateField[]) {
++        VMSTATE_PCI_DEVICE(pcidev, SDHCIState),
++        {
++            .name = "sdhci",
++            .size = sizeof(SDHCIState),
++            .vmsd = &sdhci_vmstate,
++            .flags = VMS_STRUCT,
++            .offset = 0,
++        },
++        VMSTATE_END_OF_LIST()
++    },
++};
++
+ static void sdhci_pci_exit(PCIDevice *dev)
+ {
+     SDHCIState *s = PCI_SDHCI(dev);
+@@ -67,6 +90,7 @@
+     device_class_set_props(dc, sdhci_pci_properties);
+ 
+     sdhci_common_class_init(klass, data);
++    dc->vmsd = &sdhci_pci_vmstate;
+ }
+ 
+ static const TypeInfo sdhci_pci_types[] = {
