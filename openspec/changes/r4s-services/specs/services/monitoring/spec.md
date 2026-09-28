@@ -11,7 +11,11 @@
 
 #### Scenario: 从 LAN 采集
 - **WHEN** 从一台 LAN 主机请求 `http://10.0.0.1:9101/metrics`
-- **THEN** 返回 Prometheus 格式的指标，其中包含 CPU、内存、网络接口、文件系统和温度
+- **THEN** 返回 Prometheus 格式的指标，其中包含 CPU、内存、网络接口和文件系统
+
+#### Scenario: 温度指标
+- **WHEN** 在 R4S 上从 LAN 请求指标
+- **THEN** 其中包含 SoC 的温度
 
 #### Scenario: 从 WAN 访问
 - **WHEN** 从 WAN 侧访问路由器的 9101 端口

@@ -6,12 +6,16 @@
 
 ## ADDED Requirements
 
-### Requirement: 每次签名产出一个 Release
-每次签名完成后 SHALL 在 GitHub 上生成一个 Release，其中包含：签名后的出厂镜像、签名后的单槽升级镜像、包含同一次构建全部软件包和 kmod 的仓库归档、构建清单，以及各产物的校验和。
+### Requirement: 签名并通过演练后发布
+每次签名完成并通过升级演练后 SHALL 在 GitHub 上生成一个 Release；演练失败时 MUST NOT 创建 Release。Release 中包含：签名后的出厂镜像、签名后的单槽升级镜像、包含同一次构建全部软件包和 kmod 的仓库归档、构建清单，以及各产物的校验和。
 
 #### Scenario: 检查 Release 内容
 - **WHEN** 查看一个已发布的 Release
 - **THEN** 其中有出厂镜像、升级镜像、仓库归档、构建清单和校验和文件，清单里的 vermagic 与仓库中 kmod 所依赖的内核版本标识一致
+
+#### Scenario: 升级演练失败
+- **WHEN** 签名后的产物没有通过升级演练
+- **THEN** 不创建 Release
 
 ### Requirement: 候选版与正式版
 来自 bump PR 的构建 SHALL 以预发布（候选版）的形式发布；合并进主分支之后的构建 SHALL 以正式版发布。

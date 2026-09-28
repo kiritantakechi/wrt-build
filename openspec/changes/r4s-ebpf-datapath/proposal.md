@@ -31,7 +31,7 @@ R4S 要同时负责透明代理、完全锥形 NAT 和上行 QoS。这里选择�
 - **WAN**
   - PPPoE 拨号，加 MSS 钳制。
   - IPv6 用原生地址 + DHCPv6-PD 前缀下发，不做 NAT66；dae 同样代理 IPv6。
-- **转发加速**：打开 fw4 的软件 flowtable，但要在 PPPoE 下实测能否命中；命中不了或者出问题就关掉。
+- **转发加速**：打开 fw4 的软件 flowtable，由模拟器用例确认 PPPoE 下能否命中；命中不了或者出问题就关掉。
 - **挂载顺序约束**：WAN 口和 LAN 口上各个 eBPF 程序的挂载顺序和返回值约束要写成规格，并提供可检查的方法（`bpftool net show`）。
 - **自有 feed 新增**
   - dae：把 ImmortalWrt 的 2.0.0 Makefile 升级到 2.1.1；Go 依赖按 `go.sum` 校验，并缓存在 `dl/`；审查 `go.mod` 里被替换成个人 fork `olicesx/outbound` 的那个依赖。
@@ -60,9 +60,7 @@ R4S 要同时负责透明代理、完全锥形 NAT 和上行 QoS。这里选择�
 - **依赖 `r4s-build-foundation` 提供的内核特性**：BTF、`BPF_EVENTS`、`CGROUP_BPF`；以及 kmod-sched-core、kmod-sched-bpf、kmod-veth、kmod-sched-cake。
 - **fw4 规则变化**：WAN 区域对 tcp、udp、icmp 关闭 masquerade；新增一条按 mark 放行的转发规则。
 - **构建依赖**：Go ≥ 1.26、Rust；BPF 对象用 flake 固定的宿主 clang 编译（`BPF_TOOLCHAIN_HOST`，与 `r4s-build-foundation` 一致）。
-- **需要上真机验证**：
-  - PPPoE 重拨后 einat 和 qosify 能不能重新挂上。
-  - dae 在 6.18 上创建网络命名空间时是否触发 conntrack 告警（issue #848 是在 6.6 上报的）。
-  - RK3399 上的吞吐，以及把 dae 绑到 A72 大核后的效果。
-  - cake 在 einat 之后还能否按内网主机公平分配带宽。
+- **验证方式**：foundation 的模拟环境里补齐运营商（PPPoE、DHCPv6-PD）、互联网（探测服务、DNS、iperf3）和代理节点。六个规格的场景全部写成 `just test` 里的自动用例，包括重拨恢复、伪造入站、cake 公平性、flowtable 命中和 dae 的 conntrack 告警。
+- **宿主要求**：宿主内核要有 `ppp_generic` 和 `ppp_async`，`/dev/ppp` 要对普通用户可读写，由 CI 的准备脚本和开发文档负责。
+- **只留给真机的**：RK3399 上的吞吐和 A72 绑定效果；真实线路上的一次拨号和 NAT 类型冒烟。
 - **已知限制**：Tailscale 的控制面和 DERP 中继流量属于本机流量，走直连，在国内可能不稳定。

@@ -10,7 +10,7 @@
 路由器上 SHALL 有一个同步容器，负责把发布产物下载到 `/mnt/data/repo`。它的流量经容器网桥由 dae 按规则分流，因此不依赖路由器本机流量能否直连 GitHub。
 
 #### Scenario: 本机无法直连 GitHub
-- **WHEN** 临时阻断路由器本机到 GitHub 的直连后触发一次同步
+- **WHEN** 阻断路由器本机到 Releases 服务的直连后触发一次同步
 - **THEN** 同步仍然成功完成
 
 ### Requirement: 下载完整并校验之后才生效

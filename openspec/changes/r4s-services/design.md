@@ -15,6 +15,8 @@
 - **ksmbd**：ksmbd-tools 3.5.7，内核模块是 `kmod-fs-ksmbd`（`package/kernel/linux/modules/fs.mk:346`），luci 里有对应的 luci-app-ksmbd。
 - **procd**：提供 `procd_add_restart_mount_trigger`（`procd.sh:431`）。
 - **上游 change**：数据面的 einat、fw4 规则和 dae 绑定来自 `r4s-ebpf-datapath`；mark 分配表也在那里建立。
+- **内核**：rockchip 的配置没有开 `USB_PCI` 和 `USB_XHCI_PCI`（在 6.18.52 的构建结果里核对过），模拟器里的 USB 控制器需要这两项。
+- **验证环境**：foundation 的模拟环境和 datapath 补齐的运营商、互联网与代理节点（datapath D11）。
 
 ## Goals / Non-Goals
 
@@ -65,7 +67,7 @@ options: compress=zstd:3,noatime,space_cache=v2
   - podman → wan 允许转发；
   - lan → podman 允许转发，这样 LAN 可以直接访问容器的地址；
   - podman → lan 默认拒绝。
-- **出网的地址转换**：和 LAN 一样由 einat 完成，einat 不可用时回落到 masquerade。实施时要确认 einat 的内网网段设置包含容器网段（任务 3.2）。
+- **出网的地址转换**：和 LAN 一样由 einat 完成，einat 不可用时回落到 masquerade。实施时要确认 einat 的内网网段设置包含容器网段（任务 4.2）。
 - **对外开放端口**：用 fw4 的 redirect（DNAT）实现，外部端口不能落在 einat 的端口范围 20000-29999 里。
 - **理由**：
   - 规则只有 fw4 一个来源，`nft list ruleset` 一眼就能看全；
@@ -129,11 +131,39 @@ wrt-containers wrt-snap wrt-data   (own feed)
 
 这些都放进 `config/services.seed`。
 
+### D10. 验证方式：USB 数据盘和各类对端都在模拟器里
+
+```
+qemu ... -device qemu-xhci,id=xhci
+  data disk : -drive if=none,id=ssd,file=ssd.qcow2 -device usb-uas,id=uas,bus=xhci.0,port=1
+              -device scsi-hd,bus=uas.0,drive=ssd
+  QMP       : device_add / device_del  -> late attach, other port (port=2), foreign btrfs disk
+sandbox additions:
+  inet     : registry (distribution, TLS by test CA)   headscale (+ embedded DERP, same CA)
+  wg-peer  : wireguard-go + wireguard-tools             remote WireGuard device
+  ts-peer  : tailscaled --tun, logged into headscale    tailnet device
+  client-a : smbclient, curl
+test image: busybox + musl taken from the shipped rootfs -> OCI image -> skopeo push
+```
+
+- **内核补充**：`config/kernel.config` 的 virt 驱动组加上 `USB_PCI` 和 `USB_XHCI_PCI`。UAS 驱动来自镜像里的 `kmod-usb-storage-uas`，模拟器用 `usb-uas` 设备，走的是和真机一样的驱动。
+- **插拔**：通过 QMP 的 `device_add` 和 `device_del` 完成，所以“晚 30 秒挂载”“换一个 USB 口”“插入另一块盘”“拔盘降级”都能自动执行。
+- **测试用容器镜像**：直接用出货 rootfs 里的 busybox 和 musl 拼成一个 OCI 镜像，架构一定对得上，也不用访问外网。用例里的应用容器是一个 busybox httpd，代替 qBittorrent 的角色。
+- **测试 CA**：registry 和 headscale 共用一个测试 CA。夹具把 CA 证书写进路由器的 `/etc/ssl/certs/`，它只存在于测试用的 overlay 里，不会进入镜像。
+- **凭据**：SMB 用户、WireGuard 密钥、Tailscale 认证密钥都由夹具按推送工具的方式写入，同时验证“镜像里没有预置凭据”。
+- **用例与规格一一对应**：`tests/storage/test_data_disk.py`，以及 `tests/services/` 下的 `test_containers`、`test_file_sharing`、`test_vpn`、`test_monitoring`。
+- **快照过期**：用例把系统时间逐日往前拨，在每一天执行一次 cron 任务，不需要等待真实时间。
+- **只能留给真机的**（写成 `@target("device")` 用例）：
+  1. 温度指标（模拟器没有温度传感器）；
+  2. 选定的 SSD 和硬盘盒在 UAS 模式下满负载 1 小时的稳定性；
+  3. macOS Finder 读写共享和大文件拷贝速率（用例提示人工操作并记录结果）。
+
 ## Risks / Trade-offs
 
-- **[USB3 供电不足，或者桥接芯片在 UAS 模式下不稳定]** → 优先选低功耗的 SATA SSD 和 ASM1153、JMS578 这类稳定的桥接芯片。出现问题就把这个设备加进 `usb-storage` 的 quirks，退回 BOT 模式。实测结果记录下来。
+- **[USB3 供电不足，或者桥接芯片在 UAS 模式下不稳定]** → 优先选低功耗的 SATA SSD 和 ASM1153、JMS578 这类稳定的桥接芯片。出现问题就把这个设备加进 `usb-storage` 的 quirks，退回 BOT 模式。真机用例记录实测结果。
+- **[模拟器只覆盖驱动之上的行为]** 桥接芯片、供电和 USB 链路重置这些问题在模拟器里不会出现。→ 由真机的满负载用例覆盖。
 - **[`firewall_driver = "none"` 以后 `podman run -p` 失效]** 这是有意的取舍；开放端口统一用 fw4 的 redirect，写进文档。
-- **[einat 的内网网段设置没有包含容器网段]** → 任务 3.2 专门验证。
+- **[einat 的内网网段设置没有包含容器网段]** → `test_containers.py` 用 `netprobe` 检查容器流量的映射行为。
 - **[btrfs 在异常断电后出问题]** btrfs 是写时复制，一般能保持一致；定期的只读快照可以作为恢复点。
 - **[ksmbd 的漏洞历史]** → 只在 LAN 开放；跟随每周 bump 更新内核。
 - **[容器镜像要从外网拉取]** 容器网段已经纳入 dae，拉镜像可以按规则走代理。

@@ -7,11 +7,11 @@
 ## ADDED Requirements
 
 ### Requirement: 只整形上行
-pppoe-wan 的出方向 SHALL 由 cake 按配置的上行带宽整形，并补偿 PPPoE 的封装开销。入方向 MUST NOT 整形，系统里 MUST NOT 存在 ifb 设备。
+pppoe-wan 的出方向 SHALL 由 cake 按配置的上行带宽整形，并补偿 PPPoE 的封装开销。入方向 MUST NOT 整形，也 MUST NOT 为入方向整形创建 ifb 设备。qosify 为按 DNS 名称分类而创建的 `ifb-dns` 不做整形，不受这条限制。
 
 #### Scenario: 检查队列规则
 - **WHEN** 查看 pppoe-wan 的队列规则和系统里的网络设备
-- **THEN** pppoe-wan 的根队列是按配置带宽运行的 cake，系统里没有 ifb 设备
+- **THEN** pppoe-wan 的根队列是按配置带宽运行的 cake；系统里唯一的 ifb 设备是 `ifb-dns`，它上面没有 cake
 
 ### Requirement: 按内网主机公平分配
 即使地址转换是由 einat 完成的，cake SHALL 仍能在各台 LAN 主机之间公平分配上行带宽。

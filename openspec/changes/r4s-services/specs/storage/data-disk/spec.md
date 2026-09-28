@@ -46,7 +46,7 @@
 - **THEN** 重启之前的日志仍然保存在 `@logs` 中
 
 ### Requirement: 定期只读快照
-`@containers` 和 `@shares` SHALL 每天生成一份只读快照，保存到 `.snapshots`，保留最近 7 天。管理员 SHALL 能随时手动生成一份快照。
+`@containers` 和 `@shares` SHALL 每天生成一份只读快照，保存到 `.snapshots`，保留最近 7 天。管理员 SHALL 能随时手动生成一份快照。管理员 SHALL 能从快照中恢复单个文件。
 
 #### Scenario: 过期快照被清理
 - **WHEN** 系统已经运行超过 8 天
@@ -55,3 +55,7 @@
 #### Scenario: 手动快照
 - **WHEN** 管理员执行手动快照命令
 - **THEN** `.snapshots` 里出现一份带当前时间戳的只读快照
+
+#### Scenario: 从快照恢复文件
+- **WHEN** 共享里的一个文件在快照之后被删除，管理员按文档从快照中恢复它
+- **THEN** 恢复出来的文件与删除前的内容一致

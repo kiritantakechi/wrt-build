@@ -49,5 +49,7 @@ qBittorrent 这类应用需要 Qt6 和 libtorrent，如果原生打包，自有 
 - **依赖其他 change**：
   - `r4s-build-foundation`：cgroup v2 和内核特性。
   - `r4s-ebpf-datapath`：podman0 和 tailscale0 绑定到 dae。
-- **硬件风险**：R4S 的 USB3 口供电有限；部分 USB 转 SATA/NVMe 的桥接芯片在 UAS 模式下不稳定。需要选型并实测。
+- **内核**：`config/kernel.config` 的 virt 驱动组加上 `USB_PCI` 和 `USB_XHCI_PCI`，让模拟器能挂 USB 数据盘。
+- **验证方式**：模拟器里用 `usb-uas` 设备充当 SSD，插拔通过 QEMU 的控制接口完成；沙箱里加上镜像仓库、headscale、WireGuard 对端和 tailnet 对端。五个规格除温度以外的场景都写成 `just test` 里的自动用例。
+- **硬件风险**：R4S 的 USB3 口供电有限；部分 USB 转 SATA/NVMe 的桥接芯片在 UAS 模式下不稳定。需要选型，并用真机用例做满负载实测。
 - **安全**：ksmbd 历史上出过严重漏洞。要依赖每周跟进内核修复，并且只在 LAN 暴露。

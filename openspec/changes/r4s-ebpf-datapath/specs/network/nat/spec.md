@@ -33,7 +33,7 @@ TCP、UDP、ICMP 以外的 IPv4 协议 SHALL 继续由内核的 masquerade 做�
 
 #### Scenario: IPsec ESP 流量
 - **WHEN** 一台 LAN 客户端建立使用 ESP 的 IPsec 隧道
-- **THEN** ESP 报文以路由器的 WAN 地址发出，隧道能建立起来
+- **THEN** ESP 报文以路由器的 WAN 地址发出，对端回送的 ESP 报文能送达这台客户端
 
 ### Requirement: einat 停止时回落到 masquerade
 einat 停止运行时，TCP、UDP、ICMP 的地址转换 SHALL 自动回落到内核 masquerade，LAN 不断网。与此同时，按标记放行入站新连接的规则 SHALL 一并失效。

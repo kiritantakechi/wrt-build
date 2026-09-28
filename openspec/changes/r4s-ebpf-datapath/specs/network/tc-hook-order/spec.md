@@ -7,18 +7,18 @@
 ## ADDED Requirements
 
 ### Requirement: WAN 口上的程序与顺序
-在 WAN 接口的入方向和出方向上，einat SHALL 是最先执行的程序，其后才是 qosify 的分类器。除这两者外，其他组件 MUST NOT 在 WAN 接口上挂载 tc 或 tcx 程序。
+在 WAN 接口的入方向和出方向上，einat SHALL 是最先执行的程序，其后才是 qosify 的过滤器。除这两者外，其他组件 MUST NOT 在 WAN 接口上挂载 tc 或 tcx 程序。
 
 #### Scenario: 检查 WAN 口
 - **WHEN** 查看 pppoe-wan 上挂载的全部 BPF 程序
-- **THEN** tcx 入口和出口上只有 einat，传统 tc 过滤器里只有 qosify 的分类器
+- **THEN** tcx 入口和出口上只有 einat；传统 tc 过滤器里只有 qosify 的过滤器，即出入两个方向的 BPF 分类器，以及入方向把 DNS 回应转给 `ifb-dns` 的过滤器
 
 ### Requirement: 放行报文时必须让后续程序继续执行
 挂在共享钩子上的程序放行报文时 MUST 返回“继续执行后续程序”，不能返回终止判定。只有在有意丢弃或重定向报文时例外。
 
 #### Scenario: WAN 入站的 ICMP 回应
 - **WHEN** 一台 LAN 主机 ping 外部地址，回应从 WAN 进入
-- **THEN** 回应先经 einat 还原成内网地址，再被 qosify 分类（分类计数增加），最后送达这台主机
+- **THEN** 回应先经 einat 还原成内网地址，再被 qosify 分类（qosify 的入方向统计增加），最后送达这台主机
 
 #### Scenario: 分片的 UDP 回应
 - **WHEN** 一台 LAN 主机收到一个经 WAN 进入、被分片的 UDP 回应

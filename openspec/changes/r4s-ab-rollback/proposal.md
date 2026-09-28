@@ -33,6 +33,11 @@
   - 配置备份放进目标槽位的 boot 分区，首次启动时由改成按槽位查找的 `79_move_config` 迁移过去。
   - 只有新槽位通过健康检查后，它才成为默认槽位。
 - **uboot-envtools**：加上 R4S 的环境变量位置，让 Linux 这边可以读写。
+- **在模拟器中验证整条 A/B 链路**
+  - 同一版本的 U-Boot 源码再编一个 `qemu_arm64` 变体，用同一份选槽逻辑，只换板级常量（MMC 编号、串口、设备树来源）。
+  - 模拟器用 `sdhci-pci` 挂载 SD 卡，出厂镜像原样作为 SD 卡，环境变量同样在 `0x3F8000`。
+  - 选槽、计数、回滚、升级、断电、健康检查的规格场景都写成 `just test` 里的自动用例。
+  - 只有 RK3399 从 SD 卡启动和 DesignWare 看门狗这两条链路留给真机冒烟。
 
 ## Capabilities
 
@@ -54,6 +59,11 @@
   - `package/boot/uboot-rockchip/Makefile`；
   - base-files 里的 `platform.sh` 和 `79_move_config`；
   - uboot-envtools 的 rockchip 配置。
-- **依赖**：`r4s-build-foundation`（EROFS 根文件系统和补丁流程）。健康检查里数据面的那几项由 `r4s-ebpf-datapath` 注册。
+- **新增的自有内容**：
+  - `uboot/` 下的公共逻辑和两份板级常量；
+  - 自有 feed 里的 `uboot-wrt-qemu`（只作为测试产物）、`wrt-slot`、`wrt-healthcheck`；
+  - `config/kernel.config` 的 virt 驱动组里加一项 `MMC_SDHCI_PCI`；
+  - `tests/firmware/` 下的四个用例模块，与四个规格一一对应。
+- **依赖**：`r4s-build-foundation`，包括 EROFS 根文件系统、补丁流程、测试框架和模拟环境。健康检查里数据面的那几项由 `r4s-ebpf-datapath` 注册。
 - **U-Boot 不在 A/B 范围内**：U-Boot 在两个槽位之间共用，单槽升级镜像不会改写它。U-Boot 的更新是独立的低频操作，仍然是单点风险。
-- **需要验证**：要端到端演练一次回滚——故意刷一个坏内核或者坏掉的数据面，确认能自动切回原槽位。
+- **真机工作量**：只剩一次冒烟，即刷出厂镜像后运行 `just test-device`，其中两项需要人工断电或者制造卡死。回滚演练本身在 CI 里完成。

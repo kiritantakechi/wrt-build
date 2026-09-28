@@ -15,7 +15,7 @@ WAN SHALL 通过 eth0 做 PPPoE 拨号。拨号凭据 SHALL 在运行时提供�
 
 #### Scenario: 推送凭据后拨号
 - **WHEN** 把拨号凭据推送到设备上
-- **THEN** pppoe-wan 接口起来并获得公网 IPv4 地址
+- **THEN** pppoe-wan 接口起来，并获得 ISP 分配的 IPv4 地址
 
 ### Requirement: MSS 钳制
 经 WAN 转发的 TCP 连接，其 SYN 报文中的 MSS SHALL 被钳制到与路径 MTU 相符的值。

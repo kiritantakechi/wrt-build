@@ -39,13 +39,17 @@
 - 用传统 clsact 挂 `cls_bpf`，优先级 `0x110`（`interface.c:222-262`）。
 - 永远返回 `TC_ACT_UNSPEC`（`qosify-bpf.c:502-554`）。
 - 不需要 BTF。
-- `ingress 0` 时不建 ifb。
+- `ingress 0` 时不建用于整形的 `ifb-<iface>`，但入方向照样挂 BPF 分类器（`0x110`），外加 4 条 u32 过滤器（`0x111`–`0x114`），把源端口为 53 的回应转给 `ifb-dns`，用来按 DNS 名称分类（`interface.c:299-330`）。
+- `ifb-dns` 在 qosify 启动时无条件创建（`dns.c:414-418`）。
+- `ubus call qosify get_stats` 按方向和 DSCP 类别给出计数，用例靠它判断“被分类过”。
 
 **cake**：nat 模式会读报文上挂着的 conntrack 记录，取原始方向的地址（`net/sched/sch_cake.c:574-612`）。einat 不改 conntrack，所以取到的是内网地址。
 
 **flowtable 在 PPPoE 下的发送方式**：纯软件 flowtable 走 `FLOW_OFFLOAD_XMIT_NEIGH`，也就是交给 pppoe-wan 本身去发，因此会经过 pppoe-wan 的 tc 出口（`net/netfilter/nft_flow_offload.c:95-175`；`nf_flow_table_ip.c:455-461`）。只有路径里有网桥，或者开了硬件卸载时，才会直接发。
 
-**ifb**：从 ifb 转回来的报文带着 `tc_skip_classify` 标记，会跳过 tcx、clsact 和 netfilter 入口。
+**ifb**：从 ifb 转回来的报文带着 `tc_skip_classify` 标记，会跳过 tcx、clsact 和 netfilter 入口。经 `ifb-dns` 转回来的 DNS 回应在此之前已经被 einat 处理过，所以跳过也没有影响。
+
+**验证环境**：foundation 的模拟环境（出货镜像、R4S 板型身份、无 root 网络沙箱）和测试框架。本 change 在它的 `isp` 一侧补齐运营商和互联网（D11）。
 
 ## Goals / Non-Goals
 
@@ -70,6 +74,7 @@ LAN: br-lan (+ podman0, tailscale0)        WAN: pppoe-wan
 
  tc-in  [TCX] dae                           tc-in  [TCX] einat ingress_rev_snat (+mark)
  tc-eg  [TCX] dae                                  [cls 0x110] qosify
+                                                   [u32 0x111-0x114] qosify sport 53 -> ifb-dns
                                             tc-eg  [TCX] einat egress_snat
                                                    [cls 0x110] qosify
                                             root   cake (egress only, no ifb)
@@ -88,7 +93,7 @@ LAN: br-lan (+ podman0, tailscale0)        WAN: pppoe-wan
   - `inbound_mark` 通过配置和命令行参数设置（例如 `--inbound-mark`），经 BPF 全局只读变量传进程序；默认值为 0，表示不打标。
   - 发夹转发（hairpin）的报文不打标。
 - **理由**：netfilter 在 einat 之后执行，只有 einat 自己知道哪个报文是它还原的。打标后，fw4 只需要一条按 mark 匹配的放行规则。
-- **提交上游**：补丁默认不改变行为，可以提交给上游。
+- **提交上游**：补丁默认不改变行为，适合提交给上游。提交材料放在 `docs/upstream/`；是否提交、何时提交，由仓库所有者决定。
 - **备选方案**：
   - 沿用全放行规则。否决，有安全漏洞。
   - 在 einat 前面再挂一个 tcx 程序做防伪造。否决，又会回到“两个程序都要排在最前面”的顺序问题。
@@ -109,7 +114,7 @@ defaults: flow_offloading 1        (static)
 
 ### D4. mark 位分配表
 
-仓库里维护一份机器可读的 `config/marks.tsv` 作为分配表，同时生成可读版本 `docs/mark-registry.md`。初始内容：
+分配表只有一份：`config/marks.tsv`。GitHub 会把 TSV 直接渲染成表格，所以不另外生成文档。初始内容：
 
 ```
 mask         owner      purpose                                   source
@@ -117,10 +122,9 @@ mask         owner      purpose                                   source
 0x08000000   dae        dae0peer -> table 2023 (internal)         netns_utils.go
 0x20000000   einat      reverse-translated inbound (our patch)    D2
 0x00ff0000   tailscale  0x40000 masq, 0x80000 bypass              to confirm in r4s-services
-(tbd)        netavark   podman firewall                           to confirm in r4s-services
 ```
 
-`scripts/lint-marks.sh`（对应 `just lint`）读取分配表，扫描 `files/` 和 `feed/` 里各组件的配置模板中出现的 mark。出现未登记或重叠的位时，检查失败。
+`scripts/marks-check.sh` 由 `just check` 调用。它读取分配表，扫描 `files/` 和 `feed/` 里各组件的配置模板中出现的 mark，出现未登记或重叠的位时检查失败。netavark 在 services 的设计里不装防火墙规则，不使用 mark，所以不在表里。
 
 ### D5. dae 的打包与配置结构
 
@@ -141,7 +145,7 @@ mask         owner      purpose                                   source
 
   - `generated/` 目录里是 init 脚本生成的片段，用户配置里 MUST NOT 出现 `lan_interface` 或 `wan_interface`。推送工具在推送前会检查这一点。
 - **后出现的接口怎么处理**：一个 hotplug 脚本（对应 `net` 子系统）监听 podman0 和 tailscale0 的出现与消失，据此重新生成 `10-bind.dae`，然后执行 `dae reload`，满足“60 秒内完成绑定”。
-- **CPU 绑定**：init 脚本支持可选的 `taskset` 参数，把 dae 绑到 A72 大核（cpu4-5）。默认值由 9.9 的实测结果决定。
+- **CPU 绑定**：init 脚本支持可选的 `taskset` 参数，把 dae 绑到 A72 大核（cpu4-5）。默认值由真机基准用例（D11）的结果决定。
 - **备选方案**：用户配置里自己写 `lan_interface`。否决，因为这样无法处理后来才出现的接口。
 
 ### D6. einat 的打包
@@ -177,15 +181,47 @@ mask         owner      purpose                                   source
 - **`/etc/healthcheck.d/50-einat`**：einat 进程在运行；pppoe-wan 存在时，它的 tcx 入口和出口上都有 einat。pppoe-wan 不存在时直接判为通过。
 - **依赖**：镜像里要带上 `bpftool-minimal`。
 
+### D11. 验证方式：在沙箱里模拟运营商和互联网
+
+```
+client-a ─┐                                                     ┌─ inet   203.0.113.0/24  2001:db8:ffff::/64
+client-b ─┼─ br-lan ─ eth1 │ R4S image │ eth0 ─ br-wan ─ isp ─ br-inet ─┤        probes, dns, iperf3
+runner   ─┘ 10.0.0.0/24    │  (QEMU)   │  PPPoE          (BRAS)        └─ proxy  198.51.100.53  2001:db8:53::53
+                                                                                 socks5 exit
+isp:  pppoe-server (user mode, pty + ppp_async)  pool 192.0.2.64-127, next address on every redial
+      per session (ip-up / ipv6-up): radvd + kea-dhcp6, PD /56 out of 2001:db8:100::/40
+      pppd ms-dns 203.0.113.53, mtu 1492
+inet: netprobe (udp/tcp whoami: peer addr+port, TCP_MAXSEG; "big" mode = 3000-byte UDP reply)
+      dnsmasq authoritative for example.test, iperf3 servers
+proxy: microsocks, outbound bound to its own addresses
+```
+
+- **地址**：全部用文档保留地址段（RFC 5737、RFC 3849），不会与真实网络冲突。
+- **工具**：rp-pppoe、ppp、kea、radvd、dnsmasq、microsocks、iperf3、iputils 都来自已固定的 nixpkgs，加进 flake 的测试工具组。
+- **`netprobe`**：`wrt_tests/netprobe.py` 是一个 asyncio 小服务，用来回显对端的地址和端口，以及它看到的 MSS。完全锥形、伪造入站、本机端口、源地址、MSS、分片这些判断都靠它完成。ESP 用原始套接字收发协议号 50 的报文，不依赖宿主的 xfrm。
+- **宿主要求**：宿主内核要有 `ppp_generic` 和 `ppp_async`（OrbStack 和 GitHub runner 都有；OrbStack 内核没有 `pppoe.ko`，所以 ISP 端用 rp-pppoe 的用户态模式），`/dev/ppp` 要对普通用户可读写。CI 的 `prepare-runner.sh` 和 `docs/dev-setup.md` 负责这两件事；`env-report` 会检查。路由器一侧的 PPPoE 在 QEMU 虚拟机里运行，与宿主无关。
+- **用例与规格一一对应**：`tests/network/` 下有六个用例模块，与六个规格同名：`test_transparent_proxy`、`test_dns`、`test_nat`、`test_qos`、`test_wan`、`test_tc_hook_order`。每个模块启动一次模拟器，用例之间只重置配置，不重启。
+- **有代表性的做法**：
+  - 伪造入站：ISP 端把 10.0.0.0/24 路由进 PPP 会话，再从 eth0 所在的二层直接注入目的 IP 为内网地址的帧。两条路径都必须被丢弃。
+  - 重拨：从 ISP 端结束会话，路由器重拨后会拿到新地址。
+  - 公平性：qosify 的上行带宽在用例里设成 20 Mbit/s，TCG 能跑满，结论与线速无关。
+  - flowtable：读 `conntrack -L` 的 `[OFFLOAD]` 标记，同时用 `netprobe` 核对源地址。
+  - dae 的 conntrack 告警（issue #848）：检查模拟器里的 dmesg。内核是同一个，结论直接成立。
+- **只能留给真机的**（写成 `@target("device")` 用例）：
+  1. 吞吐基准：直连 NAT 单流和多流；代理流量在绑定 A72 与不绑定两种情况下的对比，结果决定 D5 的默认值。
+  2. 真实线路冒烟：推送凭据后拨号成功，拿到 PD 前缀，用外部 STUN 服务确认完全锥形。
+
 ## Risks / Trade-offs
 
-- **[dae 创建网络命名空间时触发 conntrack 告警]** issue #848 是在 6.6 上报的。→ 上机时检查 dmesg；如果 6.18 上仍然出现，就跟进上游修复。
-- **[PPPoE 下入方向命中不了 flowtable]** 如果 fw4 把下层的 eth0 也注册进 flowtable，入方向的查表会发生在 einat 还原地址之前，查不中，回程就只能走慢路径。→ 用 `nft list flowtables` 和 conntrack 的加速标记实测。结果只影响性能，不影响正确性。
-- **[include 合并的语义和预期不一致]** → 实施时先做验证；如果不满足，就改为由 init 脚本把几个片段按文本拼接成一个完整配置文件。
+- **[dae 创建网络命名空间时触发 conntrack 告警]** issue #848 是在 6.6 上报的。→ 模拟器用例检查 dmesg；如果 6.18 上仍然出现，就跟进上游修复。
+- **[PPPoE 下入方向命中不了 flowtable]** 如果 fw4 把下层的 eth0 也注册进 flowtable，入方向的查表会发生在 einat 还原地址之前，查不中，回程就只能走慢路径。→ 模拟器用例读 conntrack 的加速标记，把出入两个方向是否命中记录下来。结果只影响性能，不影响正确性。
+- **[include 合并的语义和预期不一致]** → 实施时先用模拟器用例验证；如果不满足，就改为由 init 脚本把几个片段按文本拼接成一个完整配置文件。
 - **[dae 依赖的 outbound 个人 fork]** → 固定到 `go.sum` 里的版本，并审查它和上游 `daeuniverse/outbound` 的差异（任务 1.2）；以后 dae 升级时重新审查。
 - **[Rust 宿主工具链会拉长 CI 的冷启动]** → 它已经在 foundation 设计的工具链阶段里，并被缓存。
 - **[dae 加载时有大约 120 MB 的内存峰值]** 4 GB 内存下可以接受。
 - **[Tailscale 控制面走直连]** 这是已知限制，已记录在 proposal 里。
+- **[模拟的 ISP 与真实运营商行为不同]** 例如 PD 长度、MTU、LCP echo 的间隔。→ 模拟时取常见值；真实线路冒烟用例会核对实际值。差异只影响配置，不影响数据面的结构。
+- **[宿主缺少 ppp 支持]** → `env-report` 提前报错并说明修复方法，不会等到用例运行时才失败。
 
 ## Migration Plan
 
@@ -197,4 +233,4 @@ mask         owner      purpose                                   source
 ## Open Questions
 
 - 上行带宽的具体数值要实测，只影响 qosify 的一个配置值。
-- 是否要把 dae 绑到 A72，由 9.9 的实测决定，只影响 init 脚本的一个默认参数。
+- 是否要把 dae 绑到 A72，由真机吞吐基准决定，只影响 init 脚本的一个默认参数。
