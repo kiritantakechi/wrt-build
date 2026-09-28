@@ -15,6 +15,6 @@ digest=$({
 	uname -m
 	git -C "$TREE" rev-parse HEAD:tools HEAD:toolchain
 	git -C "$TREE/feeds/packages" rev-parse HEAD:lang/golang HEAD:lang/rust
-	cat "$REPO_DIR/config/toolchain.seed" "$REPO_DIR/flake.lock"
+	cat "$REPO_DIR/config/toolchain.seed" "$REPO_DIR/flake.nix" "$REPO_DIR/flake.lock"
 } | sha256sum | cut -d' ' -f1)
 printf 'key=toolchain-v1-%s\n' "$digest"

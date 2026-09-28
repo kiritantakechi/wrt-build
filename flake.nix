@@ -35,6 +35,15 @@
         pkgs:
         let
           llvm = llvmFor pkgs;
+          # Host packages built with LTO into static libraries (package/system/apk
+          # uses meson -Db_lto=true) need an LTO-aware archiver. Distribution
+          # binutils load GCC's LTO plugin automatically; the Nix binutils does
+          # not, and the gcc wrapper does not ship gcc-ar/gcc-nm/gcc-ranlib, so
+          # expose the unwrapped ones without shadowing the wrapped gcc.
+          gccLtoTools = map (
+            tool:
+            pkgs.writeShellScriptBin "gcc-${tool}" ''exec ${pkgs.gcc.cc}/bin/gcc-${tool} "$@"''
+          ) [ "ar" "nm" "ranlib" ];
         in
         pkgs.buildFHSEnv {
           name = "wrt-fhs";
@@ -93,10 +102,14 @@
               jq
               llvm.clang-unwrapped
               llvm.llvm
-            ];
+            ]
+            ++ gccLtoTools;
           profile = ''
             # OpenWrt host tools do not build cleanly with the Nix hardening flags.
             export NIX_HARDENING_ENABLE=
+            # LTO-aware archiver for host builds (see gccLtoTools); target builds
+            # set their own AR/NM/RANLIB from the cross toolchain.
+            export AR=gcc-ar NM=gcc-nm RANLIB=gcc-ranlib
             export WRT_FHS=1
           '';
           runScript = "bash";
