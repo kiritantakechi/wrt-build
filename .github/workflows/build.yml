@@ -38,7 +38,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Prepare runner
-        run: .github/scripts/prepare-runner.sh
+        # Before Nix is installed, so the script runs directly rather than via just.
+        run: scripts/runner-prepare.sh
 
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
 
@@ -52,7 +53,7 @@ jobs:
 
       - name: Toolchain cache key
         id: key
-        run: nix develop -c scripts/toolchain-key.sh >> "$GITHUB_OUTPUT"
+        run: nix develop -c just toolchain-key >> "$GITHUB_OUTPUT"
 
       - name: Restore toolchain
         id: cache
@@ -64,8 +65,8 @@ jobs:
       - name: Build tools and toolchain
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          nix develop -c sh -c 'just config ci && scripts/toolchain-build.sh'
-          nix develop -c scripts/toolchain-pack.sh "$WRT_WORKDIR/toolchain-cache.tar.zst"
+          nix develop -c sh -c 'just config ci && just toolchain-build'
+          nix develop -c just toolchain-pack "$WRT_WORKDIR/toolchain-cache.tar.zst"
 
       - name: Save toolchain
         if: steps.cache.outputs.cache-hit != 'true'
@@ -82,7 +83,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Prepare runner
-        run: .github/scripts/prepare-runner.sh
+        # Before Nix is installed, so the script runs directly rather than via just.
+        run: scripts/runner-prepare.sh
 
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
 
@@ -97,7 +99,7 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Unpack toolchain
-        run: nix develop -c scripts/toolchain-unpack.sh "$WRT_WORKDIR/toolchain-cache.tar.zst"
+        run: nix develop -c just toolchain-unpack "$WRT_WORKDIR/toolchain-cache.tar.zst"
 
       - name: Restore download cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

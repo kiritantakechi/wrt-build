@@ -14,11 +14,14 @@ ensure_fhs test "$@"
 report() {
 	name=$1
 	shift
-	printf '%s %s\n' "${name}" "$("$@" 2>&1 | grep -oE '[0-9]+(\.[0-9]+)+' | head -n 1)"
+	version=$("$@" 2>&1 | grep -oE '[0-9]+(\.[0-9]+)+' | head -n 1)
+	[ -n "${version}" ] || die "cannot read the ${name} version"
+	printf '%s %s\n' "${name}" "${version}"
 }
 
 for input in nixpkgs nixpkgs-unstable; do
-	printf '%s %s\n' "${input}" "$(jq -r --arg i "${input}" '.nodes[$i].locked.rev' "${REPO_DIR}/flake.lock")"
+	rev=$(jq -er --arg i "${input}" '.nodes[$i].locked.rev' "${REPO_DIR}/flake.lock")
+	printf '%s %s\n' "${input}" "${rev}"
 done
 
 # Build environment

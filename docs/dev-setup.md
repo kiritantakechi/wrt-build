@@ -51,7 +51,7 @@ orb -m nixos -u root /Users/kiritan/Projects/wrt-build/scripts/workdir-mount.sh
 注意事项：
 
 - 挂载期间不要拔掉 SSD，也不要让 Mac 进入睡眠，否则 ext4 可能损坏。
-- 拔盘之前先在虚拟机里执行 `umount /mnt/wrt`。
+- 拔盘之前先在虚拟机里执行 `orb -m nixos -u root /Users/kiritan/Projects/wrt-build/scripts/workdir-unmount.sh`。
 - 当前这块 SSD 的实测顺序写入约 75 MB/s（2026-09-28，`dd` 写 2 GiB 并 `fdatasync`）。它是本机构建 I/O 的上限；首次完整构建的耗时记录在 `docs/ci.md`。
 
 ## 3. 构建
@@ -78,7 +78,7 @@ just env-report
 
 - 需要 FHS 环境的命令会自己进入对应的环境，不需要手动进入：构建相关的命令进入 `wrt-build-fhs`，测试和 `env-report` 进入 `wrt-test-fhs`（它包含构建环境的全部工具）。
 - 在 macOS 上直接运行这些命令会立刻失败并给出提示，也不会创建任何目录。
-- `just lint` 在任何宿主机上都可以运行。
+- `just check` 和 `just fmt` 在任何宿主机上都可以运行，规则见 `docs/conventions.md`。
 
 仓库里还没有提交的新文件，flakes 是看不到的（它默认只使用已被 git 跟踪的文件）。在提交之前，要用 `nix develop path:.` 代替 `nix develop`。
 

@@ -3,10 +3,11 @@
 # and non-interactive commands (ssh host cmd) never read this file. Only the ash
 # login shell is handed over: an explicit `bash -l` stays in bash.
 case $- in
-*i*)
-	if [ -t 0 ] && [ -z "${ZSH_VERSION:-}${BASH_VERSION:-}" ] && [ -x /usr/bin/zsh ] &&
-		/usr/bin/zsh -fc true 2>/dev/null; then
-		exec /usr/bin/zsh -l
-	fi
-	;;
+	*i*)
+		if [ -t 0 ] && [ -z "${ZSH_VERSION:-}${BASH_VERSION:-}" ] && [ -x /usr/bin/zsh ] &&
+			/usr/bin/zsh -fc true 2>/dev/null; then
+			exec /usr/bin/zsh -l
+		fi
+		;;
+	*) ;;
 esac

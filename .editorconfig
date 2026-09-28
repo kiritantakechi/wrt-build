@@ -1,0 +1,33 @@
+# Text style for every file in the repository (design D12). Checked by
+# editorconfig-checker; shell formatting options are read by shfmt.
+root = true
+
+# UTF-8, LF, final newline, no trailing whitespace. Tabs, as OpenWrt uses for
+# Makefiles, shell scripts and UCI files; formats that need spaces say so below.
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = tab
+tab_width = 4
+# shfmt: every shell script is POSIX sh, in the build and on the device alike.
+shell_variant = posix
+switch_case_indent = true
+
+[*.{nix,yml,yaml,json,md}]
+indent_style = space
+indent_size = 2
+
+[*.{py,toml}]
+indent_style = space
+indent_size = 4
+
+[justfile]
+indent_style = space
+indent_size = 4
+
+# OpenWrt package Makefiles: tabs in recipes but two spaces inside define blocks
+# (upstream style), so the indentation style is left open.
+[Makefile]
+indent_style = unset

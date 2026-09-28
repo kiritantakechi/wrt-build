@@ -20,16 +20,16 @@
 
 - [x] 3.1 按 design D5 写出 `config/` 下的 `target`、`toolchain`、`kernel`、`rootfs`、`system`、`ci`、`dev` 这几个 seed 片段。验证：由 3.2 的校验覆盖。
 - [x] 3.2 实现 `scripts/config.sh`（对应 `just config <profile>`）：拼接 seed，执行 `make defconfig`，逐行检查 seed 的每一行是否仍在 `.config` 里，最后输出 diffconfig 产物。验证：`dev` 和 `ci` 两个 profile 都通过；故意加一个不存在的选项时，校验失败并报出这一行。
-- [ ] 3.3 让 `config.sh` 把 `config/kernel.config` 链接到 `$TREE/env/kernel-config`；在 `build.sh` 构建完成后逐行校验内核的 `.config`（design D7）。验证：叠加文件的每一行都出现在内核的 `.config` 里；故意在叠加文件中加一个不存在的符号，`build.sh` 失败并报出这一行。
+- [x] 3.3 让 `config.sh` 把 `config/kernel.config` 链接到 `$TREE/env/kernel-config`；在 `build.sh` 构建完成后逐行校验内核的 `.config`（design D7）。验证：叠加文件的每一行都出现在内核的 `.config` 里；故意在叠加文件中加一个不存在的符号，`build.sh` 失败并报出这一行。
 
 ## 4. 工具链与内核
 
-- [ ] 4.1 F2FS 压缩改由内核配置叠加文件提供：在 `config/kernel.config` 写入 F2FS 压缩的五个选项，从 `kernel.seed` 删掉 `KERNEL_F2FS_*`，删除原来的补丁 0001（改为放在 `docs/upstream/`），BBRv3 和启动脚本的补丁顺延为 0001、0002。验证：内核 `.config` 里 `F2FS_FS_COMPRESSION`、`F2FS_FS_LZ4`、`F2FS_FS_ZSTD` 为 y，LZO 和 LZ4HC 为 not set；补丁队列只剩两个；连续执行两次 `just patch` 得到的 HEAD 相同。
+- [x] 4.1 F2FS 压缩改由内核配置叠加文件提供：在 `config/kernel.config` 写入 F2FS 压缩的五个选项，从 `kernel.seed` 删掉 `KERNEL_F2FS_*`，删除原来的补丁 0001（改为放在 `docs/upstream/`），BBRv3 和启动脚本的补丁顺延为 0001、0002。验证：内核 `.config` 里 `F2FS_FS_COMPRESSION`、`F2FS_FS_LZ4`、`F2FS_FS_ZSTD` 为 y，LZO 和 LZ4HC 为 not set；补丁队列只剩两个；连续执行两次 `just patch` 得到的 HEAD 相同。
 - [x] 4.2 写 BBRv3 的补丁，把 sbwml 的 20 个补丁加进 `target/linux/generic/hack-6.18/`，第 0019 个也保留。验证：`make target/linux/prepare` 能干净地打上全部补丁；`tcp_bbr.ko` 编译成功，符号表里有 BBRv3 才有的 `bbr_skb_marked_lost` 和 `bbr_tso_segs`（OpenWrt 的 `MODULE_STRIPPED` 会去掉 `MODULE_VERSION`，所以不看版本号）。
 - [x] 4.3 新增 `files/etc/sysctl.d/13-default-qdisc.conf`，写入 `net.core.default_qdisc=fq`。验证：由 10.2 的系统测试覆盖。
 - [x] 4.4 核对编译参数：挑一个目标包用 `V=s` 编译。验证：日志里 `-O2 -mcpu=cortex-a72.cortex-a53+crypto` 排在 `-Os` 之后，交叉编译器的 GCC 主版本是 15。
 - [ ] 4.5 用 `ci` profile 完整构建一遍。开 LTO 编不过的包，逐个在 `patches/packages` 里加 `no-lto` 退出，并登记到 `docs/lto-optouts.md`。验证：完整构建成功（由 11.2 的 `firmware` job 完成），登记表里的包和补丁队列一一对应。
-- [ ] 4.6 在 `config/kernel.config` 加入 QEMU virt 平台驱动（PL011、`PCI_HOST_GENERIC`、virtio-pci/blk/net、i6300esb），用 `make listnewconfig` 把新出现的子选项全部写明取值。验证：内核 `.config` 里这些驱动都是 y；`listnewconfig` 的输出为空；把 `Image` 体积相比之前的增量记录在 `docs/kernel.md` 里。
+- [x] 4.6 在 `config/kernel.config` 加入 QEMU virt 平台驱动（PL011、`PCI_HOST_GENERIC`、virtio-pci/blk/net、i6300esb），用 `make listnewconfig` 把新出现的子选项全部写明取值。验证：内核 `.config` 里这些驱动都是 y；`listnewconfig` 的输出为空；把 `Image` 体积相比之前的增量记录在 `docs/kernel.md` 里。
 
 ## 5. 根文件系统与启动
 
@@ -46,10 +46,10 @@
 
 ## 7. 代码规范
 
-- [ ] 7.1 新增 `.editorconfig` 和 `.shellcheckrc`（启用 design D12 列出的可选检查），并修正现有代码中的全部告警。验证：`editorconfig-checker` 和 `shellcheck` 都通过。
-- [ ] 7.2 把现有脚本按统一骨架重排并用 shfmt 格式化；把 `audit-image` 改名为 `image-audit`；新增 `workdir-unmount`，与 `workdir-mount` 成对；justfile 用 `[group(...)]` 分组，命令名与脚本名一致。验证：骨架检查通过；删掉任意一个脚本的 `set -eu` 后，骨架检查失败并指出这个脚本。
+- [x] 7.1 新增 `.editorconfig` 和 `.shellcheckrc`（启用 design D12 列出的可选检查），并修正现有代码中的全部告警。验证：`editorconfig-checker` 和 `shellcheck` 都通过。
+- [x] 7.2 把现有脚本按统一骨架重排并用 shfmt 格式化；把 `audit-image` 改名为 `image-audit`；新增 `workdir-unmount`，与 `workdir-mount` 成对；justfile 用 `[group(...)]` 分组，命令名与脚本名一致。验证：骨架检查通过；删掉任意一个脚本的 `set -eu` 后，骨架检查失败并指出这个脚本。
 - [ ] 7.3 实现 `scripts/check.sh` 和 `scripts/fmt.sh`（对应 `just check` 和 `just fmt`），覆盖 shfmt、shellcheck、nixfmt、ruff format/check、ty、actionlint、editorconfig-checker、gitleaks、禁止模式检查和骨架检查，原来的 `just lint` 并入 `just check`。验证：在 macOS 和虚拟机上，先 `just fmt` 再 `just check` 都通过；`tests/quality/test_code_standards.py` 在仓库的临时副本里为每一种检查各制造一个违规，确认检查失败并指出位置。
-- [ ] 7.4 编写 `docs/conventions.md`，写明全部规则、脚本骨架和命名规则。验证：文档里的每一条规则都能在 `check.sh` 中找到对应的检查，反之亦然。
+- [x] 7.4 编写 `docs/conventions.md`，写明全部规则、脚本骨架和命名规则。验证：文档里的每一条规则都能在 `check.sh` 中找到对应的检查，反之亦然。
 
 ## 8. 测试框架
 

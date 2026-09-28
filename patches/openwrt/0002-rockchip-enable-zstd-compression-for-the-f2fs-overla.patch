@@ -8,7 +8,7 @@ it with compress_algorithm=zstd when the kernel command line contains
 fstools_overlay_compression_type=zstd. Pass it from the default boot
 script so writes to the SD card are compressed.
 
-Requires CONFIG_KERNEL_F2FS_FS_COMPRESSION and CONFIG_KERNEL_F2FS_FS_ZSTD.
+Requires a kernel with CONFIG_F2FS_FS_COMPRESSION and CONFIG_F2FS_FS_ZSTD.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---

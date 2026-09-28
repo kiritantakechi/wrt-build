@@ -1,0 +1,16 @@
+# shellcheck configuration (design D12). Every script is POSIX sh.
+shell=sh
+external-sources=true
+source-path=SCRIPTDIR
+
+# Every optional check except require-double-brackets: POSIX sh has no [[ ]].
+enable=add-default-case
+enable=avoid-negated-conditions
+enable=avoid-nullary-conditions
+enable=check-extra-masked-returns
+enable=check-set-e-suppressed
+enable=check-unassigned-uppercase
+enable=deprecate-which
+enable=quote-safe-variables
+enable=require-variable-braces
+enable=useless-use-of-cat
