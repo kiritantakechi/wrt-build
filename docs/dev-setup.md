@@ -76,7 +76,7 @@ just env-report
 
 说明：
 
-- 会编译源码的命令会自己进入 flake 提供的 FHS 环境（`wrt-fhs`），不需要手动进入。
+- 需要 FHS 环境的命令会自己进入对应的环境，不需要手动进入：构建相关的命令进入 `wrt-build-fhs`，测试和 `env-report` 进入 `wrt-test-fhs`（它包含构建环境的全部工具）。
 - 在 macOS 上直接运行这些命令会立刻失败并给出提示，也不会创建任何目录。
 - `just lint` 在任何宿主机上都可以运行。
 

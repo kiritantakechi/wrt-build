@@ -6,7 +6,7 @@ set -eu
 
 require_linux
 require_workdir
-ensure_fhs "$@"
+ensure_fhs build "$@"
 
 [ -f "$TREE/.config" ] || die "no .config; run 'just config <profile>' first"
 jobs=${WRT_JOBS:-$(nproc)}

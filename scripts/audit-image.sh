@@ -10,7 +10,7 @@ image=${1:-}
 
 require_linux
 require_workdir
-ensure_fhs "$@"
+ensure_fhs build "$@"
 
 host_bin="$TREE/staging_dir/host/bin"
 for tool in fsck.erofs apk; do

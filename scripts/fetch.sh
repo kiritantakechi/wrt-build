@@ -6,7 +6,7 @@ set -eu
 
 require_linux
 require_workdir
-ensure_fhs "$@"
+ensure_fhs build "$@"
 
 info "openwrt @ $(lock_field openwrt sha)"
 for feed in $(lock_feeds); do

@@ -10,7 +10,7 @@ archive=${1:?usage: toolchain-unpack.sh <archive.tar.zst>}
 
 require_linux
 require_workdir
-ensure_fhs "$@"
+ensure_fhs build "$@"
 
 [ -f "$archive" ] || die "archive not found: $archive"
 tar -I zstd -xf "$archive" -C "$TREE"

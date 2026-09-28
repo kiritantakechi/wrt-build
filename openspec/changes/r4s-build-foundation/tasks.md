@@ -7,7 +7,7 @@
 - [x] 1.3 在 `justfile` 里加 `env-report` 命令，输出宿主机工具的版本清单。验证：这份清单在 11.3 里和 CI 的输出逐项比对。
 - [x] 1.4 在 OrbStack 里创建 NixOS 虚拟机；在外接 SSD 上建 ext4 镜像文件，在虚拟机里 loop 挂载成 `WRT_WORKDIR`；把步骤写进 `docs/dev-setup.md`。验证：`findmnt $WRT_WORKDIR` 显示 ext4；在这个目录里建两个只有大小写不同的文件都能成功；macOS 系统盘的已用空间没有增长。
 - [x] 1.5 写一个宿主机检查脚本，被所有会获取或编译源码的 `just` 命令先调用：不是 Linux 就立刻退出。验证：在 macOS 上执行 `just fetch`，返回非零并给出提示，也没有创建任何目录。
-- [ ] 1.6 给 flake 增加 `nixpkgs-unstable` 输入，提供 `uv`、`qemu`、`dtc`、`u-boot-tools`；两种平台的 devShell 都加入 `shfmt`、`nixfmt`、`actionlint`、`editorconfig-checker`、`gitleaks`（design D10）。验证：`nix flake check` 通过；`just env-report` 输出 uv、qemu、shfmt、nixfmt、actionlint、editorconfig-checker、gitleaks 的版本。
+- [x] 1.6 给 flake 增加 `nixpkgs-unstable` 输入，提供 `uv`、`qemu`、`dtc`、`u-boot-tools`；两种平台的 devShell 都加入 `shfmt`、`nixfmt`、`actionlint`、`editorconfig-checker`、`gitleaks`（design D10）。验证：`nix flake check` 通过；`just env-report` 输出 uv、qemu、shfmt、nixfmt、actionlint、editorconfig-checker、gitleaks 的版本。
 
 ## 2. 固定上游与补丁流程
 

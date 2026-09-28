@@ -8,7 +8,7 @@ archive=${1:?usage: toolchain-pack.sh <archive.tar.zst>}
 
 require_linux
 require_workdir
-ensure_fhs "$@"
+ensure_fhs build "$@"
 
 cd "$TREE"
 # staging_dir/hostpkg only exists once host packages (golang, rust, ...) are built.

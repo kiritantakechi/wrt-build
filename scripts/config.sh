@@ -10,7 +10,7 @@ profile=${1:-dev}
 
 require_linux
 require_workdir
-ensure_fhs "$@"
+ensure_fhs build "$@"
 
 seeds=$(awk -v p="$profile" -F: '
 	/^[[:space:]]*(#|$)/ { next }

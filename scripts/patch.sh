@@ -7,7 +7,7 @@ set -eu
 
 require_linux
 require_workdir
-ensure_fhs "$@"
+ensure_fhs build "$@"
 
 # Fixed identity; the committer date is taken from each patch's author date
 # (--committer-date-is-author-date), so the resulting commit SHAs do not depend on

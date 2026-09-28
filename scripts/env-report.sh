@@ -1,29 +1,54 @@
 #!/bin/sh
-# Print the pinned host tool versions. The output must be identical on every
-# build host (local VM and CI), so it contains no architecture or path.
+# env-report: print the pinned host tool versions, one "name version" per line.
+# Usage: scripts/env-report.sh
+# The output must be identical on every host (local VM and CI), so it holds
+# version numbers only: no architecture, path or build date.
 set -eu
 # shellcheck source=scripts/lib.sh
 . "$(dirname -- "$0")/lib.sh"
 
 require_linux
-ensure_fhs "$@"
+ensure_fhs test "$@"
 
-first_line() { "$@" 2>&1 | head -n 1; }
+# report <name> <command...>: the first dotted version number the command prints.
+report() {
+	name=$1
+	shift
+	printf '%s %s\n' "${name}" "$("$@" 2>&1 | grep -oE '[0-9]+(\.[0-9]+)+' | head -n 1)"
+}
 
-printf 'nixpkgs %s\n' "$(jq -r '.nodes.nixpkgs.locked.rev' "$REPO_DIR/flake.lock")"
-printf 'bash %s\n' "$(bash -c 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}.${BASH_VERSINFO[2]}"')"
-printf 'gcc %s\n' "$(gcc -dumpfullversion)"
-printf 'g++ %s\n' "$(g++ -dumpfullversion)"
-printf 'clang %s\n' "$(clang -dumpversion)"
-printf 'llc %s\n' "$(llc --version | sed -n 's/^.*LLVM version \([0-9.]*\).*$/\1/p')"
-printf 'make %s\n' "$(first_line make --version)"
-printf 'git %s\n' "$(git --version)"
-printf 'perl %s\n' "$(perl -e 'print $^V')"
-printf 'python3 %s\n' "$(python3 -c 'import platform; print(platform.python_version())')"
-printf 'tar %s\n' "$(first_line tar --version)"
-printf 'gawk %s\n' "$(first_line awk --version)"
-printf 'sed %s\n' "$(first_line sed --version)"
-printf 'patch %s\n' "$(first_line patch --version)"
-printf 'rsync %s\n' "$(first_line rsync --version)"
-printf 'wget %s\n' "$(first_line wget --version)"
-printf 'just %s\n' "$(just --version)"
+for input in nixpkgs nixpkgs-unstable; do
+	printf '%s %s\n' "${input}" "$(jq -r --arg i "${input}" '.nodes[$i].locked.rev' "${REPO_DIR}/flake.lock")"
+done
+
+# Build environment
+report bash bash --version
+report gcc gcc -dumpfullversion
+report g++ g++ -dumpfullversion
+report clang clang -dumpversion
+report llc llc --version
+report make make --version
+report git git --version
+report perl perl -e 'print $^V'
+report python3 python3 --version
+report tar tar --version
+report gawk awk --version
+report sed sed --version
+report patch patch --version
+report rsync rsync --version
+report wget wget --version
+report just just --version
+
+# Test environment
+report uv uv --version
+report qemu qemu-system-aarch64 --version
+report dtc dtc --version
+report dumpimage dumpimage -V
+
+# Code standards
+report shellcheck shellcheck --version
+report shfmt shfmt --version
+report nixfmt nixfmt --version
+report actionlint actionlint -version
+report editorconfig-checker editorconfig-checker -version
+report gitleaks gitleaks version

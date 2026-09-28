@@ -29,13 +29,23 @@ require_workdir() {
 	TREE="$WRT_WORKDIR/openwrt"
 }
 
-# Re-execute the calling script inside the Nix FHS environment unless already there.
+# ensure_fhs <build|test> [args]: re-execute the calling script inside the Nix FHS
+# environment of that kind unless already there. The test environment is a
+# superset of the build environment, so it satisfies both.
 ensure_fhs() {
-	[ -n "${WRT_FHS:-}" ] && return 0
-	command -v wrt-fhs >/dev/null 2>&1 ||
-		die "not inside the build environment; run through 'nix develop' (see docs/dev-setup.md)"
+	kind=$1
+	shift
+	case "${WRT_FHS:-}:$kind" in
+	build:build | test:build | test:test) return 0 ;;
+	build:test) die "inside wrt-build-fhs; run this from the 'nix develop' shell instead" ;;
+	:build | :test) ;;
+	*) die "ensure_fhs: unknown environment '$kind'" ;;
+	esac
+	fhs="wrt-$kind-fhs"
+	command -v "$fhs" >/dev/null 2>&1 ||
+		die "$fhs not found; run through 'nix develop' (see docs/dev-setup.md)"
 	# shellcheck disable=SC2016 # expanded by the inner shell, not here
-	exec wrt-fhs -c 'exec "$0" "$@"' "$0" "$@"
+	exec "$fhs" -c 'exec "$0" "$@"' "$0" "$@"
 }
 
 # lock_field <name> <field>: field is url, sha or epoch.

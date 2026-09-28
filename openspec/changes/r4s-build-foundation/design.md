@@ -146,10 +146,21 @@ CONFIG_I6300ESB_WDT=y
 ### D10. 构建环境（flake）
 
 - **两个 nixpkgs 输入，各管一摊**：
-  - `nixpkgs`（nixos-25.11）只用来构建 FHS 环境，求稳。
+  - `nixpkgs`（nixos-25.11）提供构建环境和规范检查工具，求稳。
   - `nixpkgs-unstable` 只用来提供最新的 `uv`，以及模拟器相关的 `qemu`、`dtc`、`u-boot-tools`，求新。
+- **两个 FHS 环境，外加两个 devShell**：
+
+```
+wrt-build-fhs   build packages + build profile            (WRT_FHS=build)
+wrt-test-fhs    build packages + test packages + profile  (WRT_FHS=test, superset)
+devShell quality  code standards only, same on Linux and macOS (CI check job)
+devShell default  quality + both FHS environments on Linux; quality on macOS
+```
+
+  - 脚本用 `ensure_fhs build` 或 `ensure_fhs test` 声明自己需要的环境；测试环境包含构建环境，两者都满足。
+  - 构建环境的 profile 导出 `WRT_BUILD_INPUTS`，指向一个列出全部构建包路径和 profile 内容的文件，这是构建环境的指纹。
 - **Python 相关工具由 uv 管理**：ruff、ty、pytest、labgrid 以及 Python 解释器本身都由 `tests/uv.lock` 固定版本，不走 Nix。
-- **测试工具组**：flake 里的 `testTools` 列表收纳模拟环境中各类对端要用的守护进程和客户端，例如后续 change 加入的 PPPoE 服务端和镜像仓库。它们来自 `nixpkgs`，放进 FHS 环境，`just test` 也在 FHS 里运行。foundation 只放 `iproute2`、`dnsmasq` 和 `curl`，满足 `client-a` 用 DHCP 取地址和访问 LuCI。
+- **测试工具组**：flake 里的 `testPackages` 列表收纳模拟环境中各类对端要用的守护进程和客户端，例如后续 change 加入的 PPPoE 服务端和镜像仓库。它们来自 `nixpkgs`，放进 FHS 环境，`just test` 也在 FHS 里运行。foundation 放的是 uv、qemu、dtc、u-boot-tools、`iproute2`、`dnsmasq`、`openssh`，以及 manylinux wheel 需要的 `libstdc++`。完整版 qemu 的闭包约 2.2 GiB，但 cache.nixos.org 上有现成的二进制，自己裁剪反而要从源码编译，所以不裁剪。
 - **FHS 的 profile 里导出的变量**：
   - `NIX_HARDENING_ENABLE=`
   - `AR=gcc-ar`、`NM=gcc-nm`、`RANLIB=gcc-ranlib`
@@ -164,13 +175,14 @@ check.yml   (every push/PR, no paths filter)          ~2 min
 
 build.yml   (paths-ignore: openspec/**, docs/**, **/*.md)
   host-toolchain  key = hash(arch, tools/, toolchain/, lang/golang, lang/rust,
-                             toolchain.seed, flake.nix, flake.lock)
+                             toolchain.seed, WRT_BUILD_INPUTS)
                   miss -> build tools + toolchain -> pack existing paths only
   firmware        needs host-toolchain; unpack + touch; dl/ccache caches;
                   ci profile (ALL_KMODS); manifest.json; unsigned artifacts
   system-test     needs firmware; just test (emulation, TCG); JUnit report
 ```
 
+- **缓存键为什么用构建环境的指纹，而不是 `flake.nix` 和 `flake.lock` 的内容**：后续 change 会不断往测试环境里加工具，如果按文件内容算，每加一次工具都要重建一次工具链（约 80 分钟）。指纹只随构建包和构建 profile 变化，结果更精确。
 - **为什么单独拆出 `check.yml`**：它不受路径过滤的限制，任何推送都会触发，而且很快就能出结果；重构建则只在代码变化时才跑。
 - **缓存放不下怎么办**：缓存用量超过 10 GB 时，把工具链压缩包改为 Release 附件存放。
 
@@ -277,7 +289,7 @@ sandbox: unshare --user --map-root-user --net --mount (rootless)
 - **[virt 驱动增加内核体积]** 预计约 100～300 KB，实施时实测。R4S 上没有对应的设备，这些驱动不会被探测到。
 - **[叠加文件漏写子选项，导致内核配置卡住]** 实施时用 `listnewconfig` 补全；构建后的逐行校验会拦住配置漂移。
 - **[模拟器与真机的差异被误认为已覆盖]** 覆盖报告把只能在真机上验证的场景单独列出；板型身份一致，但硬件节点不同，这一点写在文档里。
-- **[嵌套用户命名空间不可用]** 本机和 CI 都实测一遍；如果不可用，退回到用 sudo 建立网络命名空间（CI runner 和虚拟机都有 root 权限）。
+- **[嵌套用户命名空间不可用]** OrbStack 虚拟机里已实测可用；CI 依靠 `prepare-runner.sh` 放开 AppArmor 的限制，实施 `system-test` 时再实测一次。
 - **[ty 仍处于 0.0.x 阶段]** 版本由 `uv.lock` 固定；升级 ty 放在每周 bump 里一起处理，出现误报时在 pyproject 里记录下来。
 - **[TCG 速度慢]** 每个模块只启动一次虚拟机，用例之间用快照还原；`system-test` job 的目标耗时是 30 分钟以内。
 - **[超过 GitHub 缓存上限]** 退路见 D11。
