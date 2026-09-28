@@ -45,17 +45,12 @@ jobs:
 
       - uses: DeterminateSystems/nix-installer-action@v23
 
-      - name: Host environment
-        run: |
-          nix develop -c just env-report | tee env-report.txt
-          { echo '### Host environment'; echo '```'; cat env-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Fetch and patch sources
-        run: nix develop -c sh -c 'just fetch && just patch'
+        run: nix develop .#build -c sh -c 'just fetch && just patch'
 
       - name: Toolchain cache key
         id: key
-        run: nix develop -c just toolchain-key >> "$GITHUB_OUTPUT"
+        run: nix develop .#build -c just toolchain-key >> "$GITHUB_OUTPUT"
 
       - name: Restore toolchain
         id: cache
@@ -67,8 +62,8 @@ jobs:
       - name: Build tools and toolchain
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          nix develop -c sh -c 'just config ci && just toolchain-build'
-          nix develop -c just toolchain-pack "$WRT_WORKDIR/toolchain-cache.tar.zst"
+          nix develop .#build -c sh -c 'just config ci && just toolchain-build'
+          nix develop .#build -c just toolchain-pack "$WRT_WORKDIR/toolchain-cache.tar.zst"
 
       - name: Save toolchain
         if: steps.cache.outputs.cache-hit != 'true'
@@ -91,7 +86,7 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@v23
 
       - name: Fetch, patch and configure
-        run: nix develop -c sh -c 'just fetch && just patch && just config ci'
+        run: nix develop .#build -c sh -c 'just fetch && just patch && just config ci'
 
       - name: Restore toolchain
         uses: actions/cache/restore@v6
@@ -101,7 +96,7 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Unpack toolchain
-        run: nix develop -c just toolchain-unpack "$WRT_WORKDIR/toolchain-cache.tar.zst"
+        run: nix develop .#build -c just toolchain-unpack "$WRT_WORKDIR/toolchain-cache.tar.zst"
 
       - name: Restore download cache
         uses: actions/cache/restore@v6
@@ -110,17 +105,17 @@ jobs:
           restore-keys: dl-
           path: ${{ env.WRT_WORKDIR }}/dl
 
-      # v2: entries hashed by the compiler's content (config/ccache.conf); entries
-      # of the unversioned caches were hashed by its mtime and can never hit.
+      # Keyed by config/ccache.conf, which decides whether an entry can hit (it
+      # identifies the compiler by its content), then by run.
       - name: Restore compiler cache
         uses: actions/cache/restore@v6
         with:
-          key: ccache-v2-${{ github.run_id }}
-          restore-keys: ccache-v2-
+          key: ccache-${{ hashFiles('config/ccache.conf') }}-${{ github.run_id }}
+          restore-keys: ccache-${{ hashFiles('config/ccache.conf') }}-
           path: ${{ env.WRT_WORKDIR }}/ccache
 
       - name: Build firmware
-        run: nix develop -c scripts/build.sh ci
+        run: nix develop .#build -c scripts/build.sh ci
 
       - name: Save download cache
         if: always()
@@ -133,7 +128,7 @@ jobs:
         if: always()
         uses: actions/cache/save@v6
         with:
-          key: ccache-v2-${{ github.run_id }}
+          key: ccache-${{ hashFiles('config/ccache.conf') }}-${{ github.run_id }}
           path: ${{ env.WRT_WORKDIR }}/ccache
 
       - name: Build logs
@@ -154,7 +149,7 @@ jobs:
   system-test:
     needs: firmware
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
 
@@ -169,11 +164,18 @@ jobs:
           name: firmware-unsigned
           path: ${{ env.WRT_WORKDIR }}/out/ci
 
+      - name: Host environment
+        run: |
+          nix develop -c just env-report | tee env-report.txt
+          { echo '### Host environment'; echo '```'; cat env-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
       - name: System tests
         run: nix develop -c just test ci -rs
 
       - name: Spec coverage
-        run: nix develop -c sh -c 'cd tests && uv run --locked spec-coverage --change r4s-build-foundation'
+        run: >-
+          nix develop -c sh -c 'cd tests && uv run --locked spec-coverage
+          --change r4s-build-foundation --change r4s-ab-rollback'
 
       - name: Test report
         if: always()

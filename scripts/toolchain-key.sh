@@ -22,8 +22,8 @@ seed=$(cat "${REPO_DIR}/config/toolchain.seed")
 # host packages plus the build profile. Test and quality tooling are not part of
 # it, so adding them keeps the cached toolchain.
 environment=${WRT_BUILD_INPUTS##*/}
+# The scripts that build and pack the archive decide what it holds.
+recipe=$(cat "${REPO_DIR}"/scripts/toolchain-build.sh "${REPO_DIR}"/scripts/toolchain-pack.sh | sha256sum)
 
-digest=$(printf '%s\n' "${arch}" "${trees}" "${langs}" "${seed}" "${environment}" | sha256sum)
-# The version changes with what the archive holds; v3 adds the toolchain's compile
-# stamp (toolchain-build).
-printf 'key=toolchain-v3-%s\n' "${digest%% *}"
+digest=$(printf '%s\n' "${arch}" "${trees}" "${langs}" "${seed}" "${environment}" "${recipe}" | sha256sum)
+printf 'key=toolchain-%s\n' "${digest%% *}"
