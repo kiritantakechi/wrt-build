@@ -22,11 +22,13 @@ seeds=$(awk -v p="${profile}" -F: '
 [ -f "${TREE}/feeds.conf" ] || die "no source tree; run 'just fetch' and 'just patch' first"
 
 # Rootfs overlay, kernel configuration overlay (design D7) and compiler cache live
-# outside the tree; files/, env/ and .ccache are all gitignored upstream.
+# outside the tree; files/, env/ and .ccache are all gitignored upstream. The cache
+# reads its settings from config/ccache.conf.
 ln -sfn "${REPO_DIR}/files" "${TREE}/files"
 mkdir -p "${TREE}/env" "${WRT_WORKDIR}/ccache" "${WRT_WORKDIR}/out"
 ln -sfn "${REPO_DIR}/config/kernel.config" "${TREE}/env/kernel-config"
 ln -sfn "${WRT_WORKDIR}/ccache" "${TREE}/.ccache"
+ln -sfn "${REPO_DIR}/config/ccache.conf" "${WRT_WORKDIR}/ccache/ccache.conf"
 
 wanted="${WRT_WORKDIR}/out/seed-${profile}.config"
 : >"${wanted}"

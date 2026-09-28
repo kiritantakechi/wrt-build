@@ -110,11 +110,13 @@ jobs:
           restore-keys: dl-
           path: ${{ env.WRT_WORKDIR }}/dl
 
+      # v2: entries hashed by the compiler's content (config/ccache.conf); entries
+      # of the unversioned caches were hashed by its mtime and can never hit.
       - name: Restore compiler cache
         uses: actions/cache/restore@v6
         with:
-          key: ccache-${{ github.run_id }}
-          restore-keys: ccache-
+          key: ccache-v2-${{ github.run_id }}
+          restore-keys: ccache-v2-
           path: ${{ env.WRT_WORKDIR }}/ccache
 
       - name: Build firmware
@@ -131,7 +133,7 @@ jobs:
         if: always()
         uses: actions/cache/save@v6
         with:
-          key: ccache-${{ github.run_id }}
+          key: ccache-v2-${{ github.run_id }}
           path: ${{ env.WRT_WORKDIR }}/ccache
 
       - name: Build logs
