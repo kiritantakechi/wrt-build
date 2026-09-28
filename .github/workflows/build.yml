@@ -17,6 +17,11 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    # bash -eo pipefail: a failing command inside a pipe (e.g. | tee) fails the step.
+    shell: bash
+
 env:
   WRT_WORKDIR: /mnt/wrt
   NIX_CONFIG: experimental-features = nix-command flakes
@@ -30,8 +35,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Free disk space
-        run: .github/scripts/free-disk.sh
+      - name: Prepare runner
+        run: .github/scripts/prepare-runner.sh
 
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
 
@@ -74,8 +79,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Free disk space
-        run: .github/scripts/free-disk.sh
+      - name: Prepare runner
+        run: .github/scripts/prepare-runner.sh
 
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
 
