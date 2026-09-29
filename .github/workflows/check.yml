@@ -43,3 +43,4 @@ jobs:
         run: >-
           nix develop .#quality -c uv run --directory tests --locked spec-coverage --summary
           --change r4s-build-foundation --change r4s-ab-rollback --change r4s-ebpf-datapath
+          --change r4s-services

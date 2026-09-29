@@ -160,6 +160,8 @@ jobs:
             paths: build firmware quality testing unit
           - name: network
             paths: network
+          - name: services
+            paths: storage services
     steps:
       - uses: actions/checkout@v7
 

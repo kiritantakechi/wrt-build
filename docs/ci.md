@@ -7,7 +7,7 @@ There are two workflows, both on GitHub-hosted ubuntu-24.04 runners (4-core x86_
 | `check.yml` | `check` | `nix develop .#quality -c just check`, then `spec-coverage` requires every scenario of the implemented changes to have its test; runs on every push, with no path filter | — |
 | `build.yml` | `host-toolchain` | Fetch and patch, then build the tools and the cross toolchain, in `nix develop .#build` | `staging_dir/{host,hostpkg,toolchain-*}` and `build_dir/host`, keyed by `scripts/toolchain-key.sh` |
 | `build.yml` | `firmware` | Restore the toolchain, then build with the ci profile (all kmods), in `nix develop .#build`; produces unsigned artifacts and `manifest.json` | `dl/` and ccache |
-| `build.yml` | `system-test` | Two jobs in parallel, each with its own emulator: `system` (`build firmware quality testing unit`) and `network` (the datapath's tests behind the emulated ISP). Each downloads the firmware artifacts, runs `just env-report` (PPP for the sandbox included) and `just test ci <paths>`, and uploads its JUnit report | — |
+| `build.yml` | `system-test` | Three jobs in parallel, each with its own emulator: `system` (`build firmware quality testing unit`), `network` (the datapath's tests behind the emulated ISP) and `services` (`storage services`: the data disk, containers, SMB, VPN and metrics). Each downloads the firmware artifacts, runs `just env-report` (PPP and WireGuard for the sandbox included) and `just test ci <paths>`, and uploads its JUnit report | — |
 
 `build.yml` runs only when code changes (changes to `openspec/`, `docs/` and Markdown files do not trigger it), and a new push to the same branch cancels the older pipeline that is still running.
 
