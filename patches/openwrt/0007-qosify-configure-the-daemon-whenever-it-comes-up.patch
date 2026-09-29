@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 29 Sep 2026 06:30:00 +0800
+Subject: [PATCH] qosify: configure the daemon whenever it comes up
+
+service_running waited 10 seconds for the daemon's ubus object and, if
+it had not appeared by then, left qosify unconfigured until the next
+reload: no shaping and no classification, with only a "Request timed
+out" in the log. The daemon registers once its BPF programs are loaded,
+which on a busy boot can take longer than that.
+
+Wait up to two minutes instead, in the background, so that the boot
+does not wait along.
+---
+ package/network/config/qosify/Makefile          | 2 +-
+ package/network/config/qosify/files/qosify.init | 6 ++++--
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/package/network/config/qosify/Makefile b/package/network/config/qosify/Makefile
+index 31a69b3..68e234a 100644
+--- a/package/network/config/qosify/Makefile
++++ b/package/network/config/qosify/Makefile
+@@ -14,7 +14,7 @@ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_DATE:=2026-06-22
+ PKG_SOURCE_VERSION:=beeb87ec1f16aaf5d99ff8060c2455971d9d400e
+ PKG_MIRROR_HASH:=c9ef0ad68daedb7e18e4959884a40cc0c64849dbd17bf6fdadeed8bdd8d49358
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_LICENSE:=GPL-2.0
+ PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
+diff --git a/package/network/config/qosify/files/qosify.init b/package/network/config/qosify/files/qosify.init
+index 8c1ca7d..74a8ac4 100644
+--- a/package/network/config/qosify/files/qosify.init
++++ b/package/network/config/qosify/files/qosify.init
+@@ -166,6 +166,8 @@ start_service() {
+ }
+ 
+ service_running() {
+-	ubus -t 10 wait_for qosify
+-	[ $? = 0 ] && reload_service
++	# The daemon appears on ubus once its BPF programs are loaded, which can
++	# take longer than a few seconds on a busy boot. Configure it whenever it
++	# is up, without holding up the boot meanwhile.
++	( ubus -t 120 wait_for qosify && reload_service ) >/dev/null 2>&1 &
+ }
