@@ -4,10 +4,10 @@ There are two workflows, both on GitHub-hosted ubuntu-24.04 runners (4-core x86_
 
 | Workflow | Job | What it does | Cache |
 |---|---|---|---|
-| `check.yml` | `check` | `nix develop .#quality -c just check`; runs on every push, with no path filter | — |
+| `check.yml` | `check` | `nix develop .#quality -c just check`, then `spec-coverage` requires every scenario of the implemented changes to have its test; runs on every push, with no path filter | — |
 | `build.yml` | `host-toolchain` | Fetch and patch, then build the tools and the cross toolchain, in `nix develop .#build` | `staging_dir/{host,hostpkg,toolchain-*}` and `build_dir/host`, keyed by `scripts/toolchain-key.sh` |
 | `build.yml` | `firmware` | Restore the toolchain, then build with the ci profile (all kmods), in `nix develop .#build`; produces unsigned artifacts and `manifest.json` | `dl/` and ccache |
-| `build.yml` | `system-test` | Download the firmware artifacts; `just env-report`; `just test ci` runs all tests in the emulator, then `spec-coverage` checks coverage of the implemented changes; uploads the JUnit report | — |
+| `build.yml` | `system-test` | Two jobs in parallel, each with its own emulator: `system` (`build firmware quality testing unit`) and `network` (the datapath's tests behind the emulated ISP). Each downloads the firmware artifacts, runs `just env-report` (PPP for the sandbox included) and `just test ci <paths>`, and uploads its JUnit report | — |
 
 `build.yml` runs only when code changes (changes to `openspec/`, `docs/` and Markdown files do not trigger it), and a new push to the same branch cancels the older pipeline that is still running.
 
@@ -36,6 +36,9 @@ The workflows reference no secrets, and the repository has none configured, so e
 | 2026-09-28 | 36437827311 #2 | host-toolchain job total | 4 min 30 s | Re-run of the same run: toolchain cache hit |
 | 2026-09-28 | 36437827311 #2 | firmware job total | 30 min | Build: 23 min 35 s on an AMD EPYC 7763; ccache of the first attempt: 20,834 of 20,837 cacheable calls hit (99.99%) |
 | 2026-09-28 | 36442399839 | system-test job total | 12 min | Tests: 10 min 03 s, 64 passed; the device target is gone, so nothing is skipped |
+| 2026-09-28 | 36467421324 | host-toolchain job total | 64 min | `scripts/toolchain-build.sh` and `toolchain-pack.sh` joined the key, so a cold rebuild: tools and toolchain 53 min |
+| 2026-09-28 | 36467421324 | firmware job total | 98 min | Build: 92 min; the ccache key now follows `config/ccache.conf`, so an empty cache under the new key |
+| 2026-09-28 | 36467421324 | system-test job total | 48 min | Tests: 37 min 34 s, 95 passed (the A/B slots: rollback, power loss, upgrades, from the factory image through U-Boot) |
 
 The first full pipeline on a cold cache took about 3 hours 6 minutes; both build jobs are well within the 6-hour limit.
 

@@ -2,7 +2,8 @@
 # test the result in the emulator (design D11):
 #   host-toolchain: tools + cross toolchain, cached by the inputs that affect them
 #   firmware:       everything else (ci profile: all kmods), unsigned artifacts
-#   system-test:    the system tests against the shipped image, JUnit report
+#   system-test:    the system tests against the shipped image, JUnit reports; two
+#                   emulators in parallel: the base system, and the network
 # No job here uses any secret; signing happens elsewhere (r4s-release-pipeline).
 name: build
 
@@ -148,8 +149,17 @@ jobs:
 
   system-test:
     needs: firmware
+    name: system-test (${{ matrix.suite.name }})
     runs-on: ubuntu-24.04
     timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: system
+            paths: build firmware quality testing unit
+          - name: network
+            paths: network
     steps:
       - uses: actions/checkout@v7
 
@@ -170,18 +180,13 @@ jobs:
           { echo '### Host environment'; echo '```'; cat env-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: System tests
-        run: nix develop -c just test ci -rs
-
-      - name: Spec coverage
-        run: >-
-          nix develop -c sh -c 'cd tests && uv run --locked spec-coverage
-          --change r4s-build-foundation --change r4s-ab-rollback'
+        run: nix develop -c just test ci ${{ matrix.suite.paths }} -rs
 
       - name: Test report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: system-test-report
+          name: system-test-report-${{ matrix.suite.name }}
           path: tests/.reports
           include-hidden-files: true
           if-no-files-found: error
