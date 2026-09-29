@@ -1,0 +1,12 @@
+# The eBPF datapath (r4s-ebpf-datapath): dae on the LAN side, einat on the WAN,
+# with the tc classifier and the veth pair dae attaches through; qosify shapes
+# WAN egress with cake. bpftool-minimal, which the health checks read tcx with,
+# is in system.seed.
+CONFIG_PACKAGE_kmod-sched-core=y
+CONFIG_PACKAGE_kmod-sched-bpf=y
+CONFIG_PACKAGE_kmod-sched-cake=y
+CONFIG_PACKAGE_kmod-veth=y
+CONFIG_PACKAGE_dae=y
+CONFIG_PACKAGE_luci-app-dae=y
+CONFIG_PACKAGE_einat=y
+CONFIG_PACKAGE_qosify=y

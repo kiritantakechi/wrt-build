@@ -1,0 +1,51 @@
+#!/bin/sh
+# The datapath's defaults (r4s-ebpf-datapath D7, D8, D9), for a fresh
+# configuration only: config_generate has already written a DHCP WAN by now, so
+# "fill in what is unset" cannot apply them, and a configuration that an upgrade
+# carries over brings /etc/wrt-datapath along (keep.d) and is left as it is.
+#  - WAN dials PPPoE on eth0 without credentials, which the config push brings;
+#    wan6 asks DHCPv6 over the PPP link for a delegated prefix;
+#  - LAN hands out /64s by RA and DHCPv6 (odhcpd);
+#  - the firewall clamps MSS on WAN and offloads flows in software, and lets no
+#    new flow from WAN into LAN but those einat translated back: OpenWrt's
+#    default accept of all ESP and ISAKMP towards the LAN goes (a LAN client's
+#    own IPsec still works, as masquerade tracks it);
+#  - dnsmasq asks dae (127.0.0.1#5353) first, then the resolvers WAN brings;
+#  - qosify shapes WAN egress only, framed as fiber with PPPoE over Ethernet
+#    (38 bytes of Ethernet and 8 of PPPoE); the config push sets the rate.
+[ -e /etc/wrt-datapath ] && exit 0
+
+uci -q batch <<-EOF
+	set network.wan.proto='pppoe'
+	set network.wan.device='eth0'
+	delete network.wan.username
+	delete network.wan.password
+	set network.wan.ipv6='1'
+	set network.wan6=interface
+	set network.wan6.device='@wan'
+	set network.wan6.proto='dhcpv6'
+	set network.lan.ip6assign='64'
+	set firewall.@defaults[0].flow_offloading='1'
+	add_list dhcp.@dnsmasq[0].server='127.0.0.1#5353'
+	set dhcp.@dnsmasq[0].strictorder='1'
+	set qosify.wan.disabled='0'
+	set qosify.wan.ingress='0'
+	set qosify.wan.egress='1'
+	set qosify.wan.mode='diffserv4'
+	set qosify.wan.nat='1'
+	set qosify.wan.host_isolate='1'
+	set qosify.wan.overhead_type='manual'
+	set qosify.wan.overhead='46'
+	set qosify.wan.overhead_mpu='84'
+EOF
+zone=0
+while name=$(uci -q get "firewall.@zone[${zone}].name"); do
+	[ "${name}" = wan ] && uci -q set "firewall.@zone[${zone}].mtu_fix=1"
+	zone=$((zone + 1))
+done
+for rule in $(uci -X show firewall | sed -nE "s/^firewall\.([^.]*)\.name='Allow-(IPSec-ESP|ISAKMP)'$/\1/p"); do
+	uci -q delete "firewall.${rule}"
+done
+uci -q commit
+touch /etc/wrt-datapath
+exit 0

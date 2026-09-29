@@ -5,7 +5,7 @@ Kernel configuration comes from three sources, each responsible for one kind of 
 | Source | What goes there | Examples |
 |---|---|---|
 | `CONFIG_KERNEL_*` in `config/kernel.seed` | Symbols for which upstream provides an option in `Config-kernel.in` and that affect package dependencies or host tools | BTF, `BPF_EVENTS`, cgroup |
-| `config/kernel.config` | Symbols with no upstream `CONFIG_KERNEL_*` option | F2FS compression, QEMU virt drivers |
+| `config/kernel.config` | Symbols with no upstream `CONFIG_KERNEL_*` option | F2FS compression, QEMU virt drivers, netkit |
 | `patches/openwrt/` | Only BBRv3 modifies kernel source | `hack-6.18/960-bbr3-*` |
 
 `scripts/config.sh` links `config/kernel.config` to `$TREE/env/kernel-config`. It is the last layer of `LINUX_KCONFIG_LIST` (`include/target.mk`), a mechanism upstream supports natively. After the build, `scripts/build.sh` checks it line by line: every line of the kernel config overlay must appear verbatim in the kernel's `.config`.

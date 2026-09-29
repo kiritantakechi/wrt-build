@@ -1,14 +1,16 @@
 #!/bin/sh
-# image-audit: check a built sysupgrade image against the firmware/base-system spec.
-# Usage: scripts/image-audit.sh <openwrt-...-sysupgrade.img.gz>
-# Reads the image offline: partition 2 is extracted with the tree's fsck.erofs and
-# the package database is queried with the tree's apk.
+# image-audit: check a built factory image against the base system and datapath specs.
+# Usage: scripts/image-audit.sh <openwrt-...-factory.img.gz>
+# The datapath part is r4s-ebpf-datapath task 1.4: its packages, and an einat
+# without libbpf or libelf.
+# Reads the image offline: partition 2 (slot A's root) is extracted with the tree's
+# fsck.erofs and the package database is queried with the tree's apk.
 set -eu
 # shellcheck source=scripts/lib.sh
 . "$(dirname -- "$0")/lib.sh"
 
 image=${1:-}
-[ -n "${image}" ] && [ -f "${image}" ] || die "usage: image-audit <sysupgrade.img.gz>"
+[ -n "${image}" ] && [ -f "${image}" ] || die "usage: image-audit <factory.img.gz>"
 
 require_linux
 require_workdir
@@ -24,8 +26,8 @@ trap 'rm -rf "${work}"' EXIT INT TERM
 
 case "${image}" in
 	*.gz)
-		# sysupgrade images carry fwtool metadata after the gzip stream; gzip then
-		# reports "trailing garbage ignored" with exit status 2, which is expected.
+		# Images with fwtool metadata after the gzip stream make gzip report
+		# "trailing garbage ignored" with exit status 2, which is expected.
 		rc=0
 		gzip -dc "${image}" >"${work}/disk.img" 2>/dev/null || rc=$?
 		[ "${rc}" -eq 0 ] || [ "${rc}" -eq 2 ] || die "cannot decompress ${image}"
@@ -33,7 +35,8 @@ case "${image}" in
 	*) cp "${image}" "${work}/disk.img" ;;
 esac
 
-# The root filesystem is MBR partition 2: an EROFS image followed by the overlay area.
+# Slot A's root filesystem is MBR partition 2: an EROFS image followed by the
+# overlay area.
 table=$(sfdisk -d "${work}/disk.img")
 root_start=$(printf '%s\n' "${table}" | awk -F'[=,]' '/img2 /{ gsub(/ /, "", $2); print $2 }')
 [ -n "${root_start}" ] || die "no second partition in ${image}"
@@ -60,7 +63,8 @@ for pkg in urngd opkg nginx nginx-ssl nginx-full uwsgi libpcre shortcut-fe natfl
 		pass "package ${pkg} absent"
 	fi
 done
-for pkg in uhttpd ucode luci-base luci-i18n-base-zh-cn zram-swap bash zsh zsh-plugins kmod-tcp-bbr; do
+for pkg in uhttpd ucode luci-base luci-i18n-base-zh-cn zram-swap bash zsh zsh-plugins kmod-tcp-bbr \
+	dae luci-app-dae einat qosify kmod-sched-cake bpftool-minimal; do
 	if printf '%s\n' "${installed}" | grep -qx -- "${pkg}"; then
 		pass "package ${pkg} installed"
 	else
@@ -78,6 +82,15 @@ esac
 upx=$(find "${root}" -type f \( -path '*/bin/*' -o -path '*/sbin/*' -o -path '*/lib/*' \) \
 	-exec grep -l 'UPX!' {} + 2>/dev/null || true)
 if [ -z "${upx}" ]; then pass "no UPX-packed executables"; else fail "UPX-packed files: ${upx}"; fi
+
+# einat uses its aya loader only: no libbpf or libelf behind it.
+needed=$(readelf -d "${root}/usr/bin/einat" 2>/dev/null |
+	sed -n 's/.*(NEEDED).*\[\(.*\)\]$/\1/p' | tr '\n' ' ')
+case "${needed}" in
+	'') fail "einat missing or not a dynamic executable" ;;
+	*libbpf* | *libelf*) fail "einat links ${needed}" ;;
+	*) pass "einat links neither libbpf nor libelf" ;;
+esac
 
 root_hash=$(awk -F: '$1 == "root" { print $2 }' "${root}/etc/shadow")
 if [ -z "${root_hash}" ]; then pass "no preset root password"; else fail "root has a password hash"; fi
