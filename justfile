@@ -43,6 +43,11 @@ image-audit image:
 test profile="dev" *args:
     scripts/test.sh {{ profile }} {{ args }}
 
+# Open the host kernel's PPP to the test sandbox, after each VM restart (root)
+[group('test')]
+sandbox-prepare:
+    scripts/sandbox-prepare.sh
+
 # Check the packet marks of the configuration templates against config/marks.tsv (any host)
 [group('quality')]
 marks-check *dirs:

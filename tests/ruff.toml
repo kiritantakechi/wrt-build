@@ -25,6 +25,7 @@ ignore = [
 # marker (capability, requirement, scenario); pytest imports test modules by path
 # (--import-mode=importlib), so test directories are not packages.
 "**/test_*.py" = ["S101", "D103", "INP001"]
+"*/conftest.py" = ["INP001"]
 # Command-line tools print their report.
 "wrt_tests/coverage.py" = ["T201"]
 

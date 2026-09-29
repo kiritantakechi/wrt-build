@@ -151,9 +151,10 @@
             patches = (old.patches or [ ]) ++ nixpkgs.lib.filesystem.listFilesRecursive ./patches/qemu;
           });
 
-      # System tests: emulator, image extraction, network sandbox peers, and the
-      # shared libraries that uv-managed Python and manylinux wheels expect in an
-      # FHS layout. Later changes append their peers (PPPoE server, registry, ...).
+      # System tests: emulator, image extraction, network sandbox peers (the
+      # emulated ISP and internet), and the shared libraries that uv-managed
+      # Python and manylinux wheels expect in an FHS layout. Later changes append
+      # their peers (registry, ...).
       testPackages =
         pkgs: unstable:
         [
@@ -168,10 +169,20 @@
           e2fsprogs
           iproute2
           iputils
+          procps
+          tcpdump
           dnsmasq
           # LAN clients take their address over DHCP; only this applet of
           # busybox, which would otherwise shadow coreutils in the FHS.
           (writeShellScriptBin "udhcpc" ''exec ${busybox}/bin/busybox udhcpc "$@"'')
+          # the ISP: PPPoE in user mode, router advertisements, prefix delegation
+          rp-pppoe
+          ppp
+          radvd
+          kea
+          # the internet: a socks5 exit and bulk transfers
+          microsocks
+          iperf3
         ])
         ++ testSsh pkgs;
 

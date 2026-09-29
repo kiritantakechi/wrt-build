@@ -47,6 +47,15 @@ report uv uv --version
 report qemu qemu-system-aarch64 --version
 report dtc dtc --version
 report dumpimage dumpimage -V
+report rp-pppoe pppoe -V
+report radvd radvd --version
+report kea-dhcp6 kea-dhcp6 -v
+report dnsmasq dnsmasq --version
+report iperf3 iperf3 --version
+# The emulated ISP runs pppd in the sandbox (r4s-ebpf-datapath design D11).
+[ -r /dev/ppp ] && [ -w /dev/ppp ] ||
+	die "/dev/ppp is missing or closed to regular users: run scripts/sandbox-prepare.sh as root"
+printf '%s %s\n' /dev/ppp rw
 
 # Code standards
 report shellcheck shellcheck --version

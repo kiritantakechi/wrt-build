@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, cast, override
 import pytest
 
 from wrt_tests.emu import SOURCE_FILE, Emulator
+from wrt_tests.isp import Isp
 from wrt_tests.net import RUNNER_ADDRESS, TOPOLOGY, Network
 from wrt_tests.router import Router
 
@@ -37,6 +38,12 @@ def network(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Network]:
     """Build the sandbox topology around the emulator."""
     with Network(TOPOLOGY, tmp_path_factory.mktemp("net")) as sandbox:
         yield sandbox
+
+
+@pytest.fixture(scope="session")
+def isp(network: Network) -> Isp:
+    """Return the handle on the emulated ISP's sessions."""
+    return Isp(network["isp"], network.workdir / "isp")
 
 
 @pytest.fixture(scope="session")
