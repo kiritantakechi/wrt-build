@@ -1,0 +1,25 @@
+# The services beyond routing (r4s-services D9): the USB data disk, containers,
+# SMB file sharing, WireGuard and Tailscale, monitoring, and our own tools for
+# them. usb-storage is built into the kernel already; UAS comes as a module.
+# blockd tells procd of each mount: the mount triggers of the services that wait
+# for the data disk fire on its notifications.
+CONFIG_PACKAGE_kmod-usb-storage-uas=y
+CONFIG_PACKAGE_kmod-fs-btrfs=y
+CONFIG_PACKAGE_btrfs-progs=y
+CONFIG_PACKAGE_block-mount=y
+CONFIG_PACKAGE_blockd=y
+CONFIG_PACKAGE_podman=y
+CONFIG_PACKAGE_crun=y
+CONFIG_PACKAGE_netavark=y
+CONFIG_PACKAGE_conmon=y
+CONFIG_PACKAGE_kmod-fs-ksmbd=y
+CONFIG_PACKAGE_ksmbd-server=y
+CONFIG_PACKAGE_luci-app-ksmbd=y
+CONFIG_PACKAGE_kmod-wireguard=y
+CONFIG_PACKAGE_wireguard-tools=y
+CONFIG_PACKAGE_luci-proto-wireguard=y
+CONFIG_PACKAGE_tailscale=y
+CONFIG_PACKAGE_prometheus-node-exporter-ucode=y
+CONFIG_PACKAGE_wrt-data=y
+CONFIG_PACKAGE_wrt-containers=y
+CONFIG_PACKAGE_wrt-metrics=y

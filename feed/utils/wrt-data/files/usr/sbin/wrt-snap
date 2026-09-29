@@ -1,0 +1,68 @@
+#!/bin/sh
+# wrt-snap: read-only snapshots of the data disk's containers and shares
+# (r4s-services D5).
+# Usage: wrt-snap now | prune | list [subvolume]
+# now takes one of each, as .snapshots/<subvolume>/<UTC time>; prune keeps those
+# of the last seven days (UTC), today's included, whatever time of day each was
+# taken; cron runs both once a day. A file comes back by copying it out of a
+# snapshot (docs/services.md).
+set -eu
+# shellcheck source=../../lib/functions/wrt-data.sh
+. /lib/functions/wrt-data.sh
+
+SNAPSHOTTED="containers shares"
+KEEP_DAYS=7
+SNAPSHOTS="${WRT_DATA}/.snapshots"
+
+die() {
+	echo "wrt-snap: $*" >&2
+	exit 1
+}
+
+now() {
+	# ISO 8601 basic format: the names sort by time. A name taken already (a
+	# snapshot of this second) would have btrfs snapshot into that snapshot:
+	# wait for the next second instead.
+	while :; do
+		at=$(date -u +%Y%m%dT%H%M%SZ)
+		free=1
+		for subvolume in ${SNAPSHOTTED}; do
+			[ ! -e "${SNAPSHOTS}/${subvolume}/${at}" ] || free=0
+		done
+		[ "${free}" = 0 ] || break
+		sleep 1
+	done
+	for subvolume in ${SNAPSHOTTED}; do
+		mkdir -p "${SNAPSHOTS}/${subvolume}"
+		btrfs -q subvolume snapshot -r "${WRT_DATA}/${subvolume}" "${SNAPSHOTS}/${subvolume}/${at}"
+		echo "${SNAPSHOTS}/${subvolume}/${at}"
+	done
+}
+
+prune() {
+	epoch=$(date +%s)
+	oldest=$(date -u -d "@$((epoch - (KEEP_DAYS - 1) * 86400))" +%Y%m%d)
+	for snapshot in "${SNAPSHOTS}"/*/*; do
+		[ -d "${snapshot}" ] || continue
+		day=${snapshot##*/}
+		[ "${day%%T*}" -lt "${oldest}" ] || continue
+		btrfs -q subvolume delete "${snapshot}"
+	done
+}
+
+# list [subvolume]: the snapshots (of one subvolume), oldest first.
+list() {
+	for snapshot in "${SNAPSHOTS}"/*/*; do
+		[ -d "${snapshot}" ] || continue
+		of=${snapshot%/*}
+		[ -z "$1" ] || [ "${of##*/}" = "$1" ] || continue
+		echo "${snapshot}"
+	done
+}
+
+grep -q "${WRT_DATA_MOUNT}" /proc/mounts || die "the data disk is not mounted"
+case "${1:-}" in
+	now | prune) "$1" ;;
+	list) list "${2:-}" ;;
+	*) die "usage: wrt-snap now | prune | list [subvolume]" ;;
+esac

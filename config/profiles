@@ -1,3 +1,3 @@
 # <profile>: <seed files in config/, applied in order>
-dev: target toolchain kernel rootfs system datapath dev
-ci: target toolchain kernel rootfs system datapath ci
+dev: target toolchain kernel rootfs system datapath services dev
+ci: target toolchain kernel rootfs system datapath services ci

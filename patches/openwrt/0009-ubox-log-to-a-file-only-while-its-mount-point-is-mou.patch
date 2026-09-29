@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 29 Sep 2026 15:00:00 +0800
+Subject: [PATCH] ubox: log to a file only while its mount point is mounted
+
+The log service leaves the log file out while its fstab mount point is
+not mounted only at boot. A start or reload later on, such as the reload
+any change to the system configuration brings, creates the directory on
+the root filesystem and logs there: onto the flash, underneath where the
+disk mounts.
+
+Leave the file out whenever the mount point is not mounted; its mount
+trigger starts it once the mount point is mounted, as at boot.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+---
+ package/system/ubox/Makefile       | 2 +-
+ package/system/ubox/files/log.init | 5 +++--
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/package/system/ubox/Makefile b/package/system/ubox/Makefile
+index 0ba418c..cccbf33 100644
+--- a/package/system/ubox/Makefile
++++ b/package/system/ubox/Makefile
+@@ -1,7 +1,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=ubox
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/ubox.git
+diff --git a/package/system/ubox/files/log.init b/package/system/ubox/files/log.init
+index e02cc27..83e0ea2 100644
+--- a/package/system/ubox/files/log.init
++++ b/package/system/ubox/files/log.init
+@@ -52,10 +52,11 @@ start_service_file()
+ 	}
+ 	[ -z "${log_file}" ] && return
+ 
++	# A log file on a mount point that is not mounted would go to the
++	# directory underneath; the mount trigger starts it once it is mounted.
+ 	local mountpoint="$(procd_get_mountpoints "${log_file}")"
+ 
+-	[ "$_BOOT" = "1" ] &&
+-		[ "$mountpoint" ] &&
++	[ "$mountpoint" ] &&
+ 		! grep -q ".* $mountpoint " /proc/mounts &&
+ 		return 0
+ 
+-- 
+2.51.2
+

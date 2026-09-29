@@ -1,0 +1,56 @@
+// The host's filesystems for the node exporter (r4s-services D8), which runs in
+// a procd jail that sees only its own mounts: ubus call wrt-metrics filesystems
+// statvfs()es every mount of the host but the virtual ones and, as node_exporter
+// does, those under /dev, /proc and /sys and each container's own; the jail's
+// scratch mount too. A count a filesystem does not keep (EROFS: inodes) is left
+// out rather than reported as -1.
+'use strict';
+
+import { open, statvfs } from 'fs';
+
+const virtual = /^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|nsfs|proc|pstore|securityfs|sysfs|tracefs)$/;
+const ignored = /^\/(dev|proc|sys|tmp\/\.ujail)($|\/)|\/containers\/storage\/./;
+
+// /proc/mounts escapes space, tab, newline and backslash as octal.
+function unescape(field) {
+	return replace(field, /\\([0-7]{3})/g, (_, octal) => chr(int(octal, 8)));
+}
+
+return {
+	'wrt-metrics': {
+		filesystems: {
+			call: function() {
+				const mounts = open('/proc/mounts');
+				const found = [];
+
+				for (let line = mounts?.read('line'); length(line); line = mounts.read('line')) {
+					const fields = split(rtrim(line, '\n'), ' ');
+
+					const mountpoint = unescape(fields[1]);
+
+					if (match(fields[2], virtual) || match(mountpoint, ignored))
+						continue;
+
+					const st = statvfs(mountpoint);
+
+					if (!st)
+						continue;
+
+					push(found, {
+						device: unescape(fields[0]),
+						mountpoint,
+						fstype: fields[2],
+						size: st.frsize * st.blocks,
+						free: st.frsize * st.bfree,
+						avail: st.frsize * st.bavail,
+						files: st.files >= 0 ? st.files : null,
+						files_free: st.ffree >= 0 ? st.ffree : null,
+						readonly: st.flag & 1
+					});
+				}
+
+				return { filesystems: found };
+			}
+		}
+	}
+};

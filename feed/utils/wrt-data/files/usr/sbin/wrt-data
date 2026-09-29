@@ -1,0 +1,96 @@
+#!/bin/sh
+# wrt-data: set up the USB data disk (r4s-services D1).
+# Usage: wrt-data init [device]   (without a device: list the candidates)
+#        wrt-data status
+# init erases the disk, after its full name has been typed again: a btrfs
+# filesystem labelled wrtdata, the subvolumes containers, downloads, shares, logs
+# and .snapshots; then it names the disk by UUID in the fstab mount of /mnt/data
+# (section wrtdata, which the image's defaults hold disabled until then).
+set -eu
+# shellcheck source=../../lib/functions/wrt-data.sh
+. /lib/functions/wrt-data.sh
+
+# Seconds to wait for the new data disk's mount.
+MOUNT_TIMEOUT=30
+
+die() {
+	echo "wrt-data: $*" >&2
+	exit 1
+}
+
+# candidates: the USB disks, one "device<TAB>size<TAB>model" per line.
+candidates() {
+	for disk in /sys/block/sd*; do
+		[ -e "${disk}/device" ] || continue
+		case "$(readlink -f "${disk}/device")" in
+			*/usb*) ;;
+			*) continue ;;
+		esac
+		sectors=$(cat "${disk}/size")
+		model=$(tr -s ' ' <"${disk}/device/model" 2>/dev/null || true)
+		printf '/dev/%s\t%s GiB\t%s\n' "${disk##*/}" "$((sectors / 2097152))" "${model% }"
+	done
+}
+
+init() {
+	device=$1
+	disks=$(candidates)
+	printf '%s\n' "${disks}" | cut -f1 | grep -qx "${device}" || die "${device} is not a USB disk"
+	printf 'This erases everything on %s. Type its full name to go on: ' "${device}"
+	read -r answer || answer=
+	[ "${answer}" = "${device}" ] || die "not confirmed; ${device} is untouched"
+
+	grep "^${device}" /proc/mounts | while read -r mounted _; do umount "${mounted}"; done
+	mkfs.btrfs -q -f -L "${WRT_DATA_LABEL}" "${device}"
+	uuid=$(block info "${device}" | sed -n 's/.* UUID="\([^"]*\)".*/\1/p')
+	[ -n "${uuid}" ] || die "no UUID on ${device} after mkfs"
+
+	top=$(mktemp -d)
+	mount -t btrfs "${device}" "${top}"
+	for subvolume in ${WRT_DATA_SUBVOLUMES} .snapshots; do
+		btrfs -q subvolume create "${top}/${subvolume}"
+	done
+	umount "${top}"
+	rmdir "${top}"
+
+	uci -q batch <<-EOF
+		set fstab.wrtdata=mount
+		set fstab.wrtdata.uuid='${uuid}'
+		set fstab.wrtdata.target='${WRT_DATA}'
+		set fstab.wrtdata.options='${WRT_DATA_OPTIONS}'
+		set fstab.wrtdata.enabled='1'
+		commit fstab
+	EOF
+	# Announce the disk again, as when it is plugged in: blockd mounts it and
+	# tells procd, whose mount triggers start what waits for it.
+	echo add >"/sys/class/block/${device#/dev/}/uevent"
+	tries=${MOUNT_TIMEOUT}
+	until grep -q "${WRT_DATA_MOUNT}" /proc/mounts; do
+		tries=$((tries - 1))
+		[ "${tries}" -gt 0 ] || die "${device} did not get mounted at ${WRT_DATA}"
+		sleep 1
+	done
+	echo "wrt-data: ${device} (UUID ${uuid}) is the data disk, at ${WRT_DATA}"
+}
+
+status() {
+	mount=$(grep "${WRT_DATA_MOUNT}" /proc/mounts) || {
+		echo "not mounted"
+		return
+	}
+	echo "${mount}" | cut -d' ' -f1,4
+	btrfs subvolume list -o "${WRT_DATA}" | sed 's/.* path /  /'
+}
+
+case "${1:-}" in
+	init)
+		if [ -n "${2:-}" ]; then
+			init "$2"
+		else
+			echo "USB disks (wrt-data init <device> erases one):"
+			candidates
+		fi
+		;;
+	status) status ;;
+	*) die "usage: wrt-data init [device] | status" ;;
+esac

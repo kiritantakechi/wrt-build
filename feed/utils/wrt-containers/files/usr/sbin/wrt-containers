@@ -1,0 +1,51 @@
+#!/bin/sh
+# wrt-containers: run the Pods declared on the data disk (r4s-services D4).
+# Usage: wrt-containers apply
+# Each /mnt/data/containers/pods/<name>.yaml is a Kubernetes Pod named <name>;
+# <name>.options next to it, if any, holds more options of podman kube play, such
+# as --ip for a fixed address (docs/services.md). A declaration that changed since
+# it was last applied is played again (podman kube play --replace); an unchanged
+# one only has its Pod started. Every Pod joins podman's own network, podman
+# (bridge podman0: the fw4 zone podman, which dae serves), not the network kube
+# play would make for Pods.
+set -eu
+# shellcheck source=../../../../wrt-data/files/lib/functions/wrt-data.sh
+. /lib/functions/wrt-data.sh
+
+PODS="${WRT_DATA}/containers/pods"
+# The hash of each declaration as last applied, on the data disk with its Pods.
+APPLIED="${WRT_DATA}/containers/applied"
+
+apply() {
+	mkdir -p "${APPLIED}"
+	for declaration in "${PODS}"/*.yaml; do
+		[ -e "${declaration}" ] || continue
+		name=${declaration##*/}
+		name=${name%.yaml}
+		options=
+		[ ! -e "${PODS}/${name}.options" ] || options=$(cat "${PODS}/${name}.options")
+		hash=$(printf '%s\n' "${options}" | cat - "${declaration}" | sha256sum)
+		hash=${hash%% *}
+		applied=$(cat "${APPLIED}/${name}" 2>/dev/null || true)
+		if [ "${applied}" = "${hash}" ] && podman pod exists "${name}"; then
+			podman pod start "${name}" >/dev/null
+		else
+			# shellcheck disable=SC2086 # the options are separate words
+			podman kube play --replace --network=podman ${options} "${declaration}" >/dev/null
+			echo "${hash}" >"${APPLIED}/${name}"
+		fi
+		echo "wrt-containers: ${name} is up"
+	done
+}
+
+grep -q "${WRT_DATA_MOUNT}" /proc/mounts || {
+	echo "wrt-containers: the data disk is not mounted" >&2
+	exit 1
+}
+case "${1:-}" in
+	apply) apply ;;
+	*)
+		echo "usage: wrt-containers apply" >&2
+		exit 1
+		;;
+esac

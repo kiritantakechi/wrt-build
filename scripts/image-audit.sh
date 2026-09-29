@@ -1,8 +1,9 @@
 #!/bin/sh
-# image-audit: check a built factory image against the base system and datapath specs.
+# image-audit: check a built factory image against the base system, datapath and services specs.
 # Usage: scripts/image-audit.sh <openwrt-...-factory.img.gz>
 # The datapath part is r4s-ebpf-datapath task 1.4: its packages, and an einat
-# without libbpf or libelf.
+# without libbpf or libelf. The services part: their packages, and no app that
+# belongs in a container (qBittorrent, Qt, libtorrent).
 # Reads the image offline: partition 2 (slot A's root) is extracted with the tree's
 # fsck.erofs and the package database is queried with the tree's apk.
 set -eu
@@ -56,7 +57,8 @@ installed=$("${host_bin}/apk" --root "${root}" --no-network --no-cache list --in
 	sed 's/-[0-9][^ ]* .*//')
 [ -n "${installed}" ] || die "could not read the installed package list from the image"
 
-for pkg in urngd opkg nginx nginx-ssl nginx-full uwsgi libpcre shortcut-fe natflow lrng upx; do
+for pkg in urngd opkg nginx nginx-ssl nginx-full uwsgi libpcre shortcut-fe natflow lrng upx \
+	qbittorrent qbittorrent-nox libtorrent libtorrent-rasterbar qt6-core qt5-core; do
 	if printf '%s\n' "${installed}" | grep -qx -- "${pkg}"; then
 		fail "package ${pkg} is installed"
 	else
@@ -64,7 +66,9 @@ for pkg in urngd opkg nginx nginx-ssl nginx-full uwsgi libpcre shortcut-fe natfl
 	fi
 done
 for pkg in uhttpd ucode luci-base luci-i18n-base-zh-cn zram-swap bash zsh zsh-plugins kmod-tcp-bbr \
-	dae luci-app-dae einat qosify kmod-sched-cake bpftool-minimal; do
+	dae luci-app-dae einat qosify kmod-sched-cake bpftool-minimal \
+	kmod-usb-storage-uas kmod-fs-btrfs btrfs-progs podman crun netavark ksmbd-server \
+	kmod-wireguard tailscale prometheus-node-exporter-ucode wrt-data wrt-containers wrt-metrics; do
 	if printf '%s\n' "${installed}" | grep -qx -- "${pkg}"; then
 		pass "package ${pkg} installed"
 	else

@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 29 Sep 2026 13:30:00 +0800
+Subject: [PATCH] ksmbd-tools: share only what is mounted, and start once it is
+
+A share whose path lies on an fstab mount point that is not mounted
+exposed the directory underneath, on the root filesystem: files written
+there filled the flash, and vanished from view once the disk came.
+
+Leave such a share out until its mount point is mounted, restart the
+service when it is (a mount trigger per share), and do not start at all
+while every share waits for its mount.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+---
+ net/ksmbd-tools/Makefile         |  2 +-
+ net/ksmbd-tools/files/ksmbd.init | 28 ++++++++++++++++++++++++++++
+ 2 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/net/ksmbd-tools/Makefile b/net/ksmbd-tools/Makefile
+index df3a142..8c6e0b5 100644
+--- a/net/ksmbd-tools/Makefile
++++ b/net/ksmbd-tools/Makefile
+@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=ksmbd-tools
+ PKG_VERSION:=3.5.7
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+ PKG_SOURCE_URL:=https://github.com/cifsd-team/ksmbd-tools/releases/download/$(PKG_VERSION)
+diff --git a/net/ksmbd-tools/files/ksmbd.init b/net/ksmbd-tools/files/ksmbd.init
+index f87b392..7fefbc5 100644
+--- a/net/ksmbd-tools/files/ksmbd.init
++++ b/net/ksmbd-tools/files/ksmbd.init
+@@ -109,6 +109,16 @@ smb_add_share()
+ 
+ 	[ -z "$name" ] || [ -z "$path" ] && return
+ 
++	# A share on a mount point that is not mounted would expose the directory
++	# underneath (on the root filesystem): leave it out until it is mounted.
++	local mountpoint="$(procd_get_mountpoints "$path")"
++	if [ -n "$mountpoint" ] && ! grep -q " $mountpoint " /proc/mounts; then
++		logger -p daemon.info -t 'ksmbd' "Share $name waits for $mountpoint to be mounted."
++		SHARES_WAITING=$((SHARES_WAITING + 1))
++		return
++	fi
++	SHARES=$((SHARES + 1))
++
+ 	{
+ 		printf "\n[%s]\n\tpath = %s\n" "$name" "$path"
+ 		[ -n "$comment" ] && printf "\tcomment = %s\n" "$comment"
+@@ -142,6 +152,8 @@ smb_add_share()
+ 
+ init_config()
+ {
++	SHARES=0
++	SHARES_WAITING=0
+ 	mkdir -p /var/etc/ksmbd
+ 
+ 	config_load ksmbd
+@@ -150,12 +162,22 @@ init_config()
+ 	config_foreach smb_add_share share
+ }
+ 
++smb_add_share_trigger()
++{
++	local path
++	config_get path "$1" path
++	[ -n "$path" ] && procd_add_restart_mount_trigger "$path"
++}
++
+ service_triggers()
+ {
+ 	# PROCD_RELOAD_DELAY=1000
+ 
+ 	procd_add_reload_trigger "dhcp" "system" "ksmbd"
+ 
++	config_load ksmbd
++	config_foreach smb_add_share_trigger share
++
+ 	for i in $SMBD_IFACE; do
+ 		procd_add_reload_interface_trigger "$i"
+ 	done
+@@ -175,6 +197,12 @@ start_service()
+ {
+ 	init_config
+ 
++	# Every share waits for its mount: nothing to serve yet.
++	if [ "$SHARES" -eq 0 ] && [ "$SHARES_WAITING" -gt 0 ]; then
++		logger -p daemon.notice -t 'ksmbd' "No share is mounted yet, not starting."
++		return 0
++	fi
++
+ 	if [ ! -e /etc/ksmbd/ksmbd.conf ]; then
+ 		logger -p daemon.error -t 'ksmbd' "missing config /etc/ksmbd/ksmbd.conf!"
+ 		exit 1

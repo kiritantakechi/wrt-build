@@ -1,0 +1,90 @@
+#!/bin/sh
+# The services' defaults (r4s-services D2, D3, D6, D7, D8), for a fresh
+# configuration only, as 91-wrt-datapath: /etc/wrt-services marks it, and keep.d
+# carries the marker through upgrades.
+#  - the data disk's mount point is in fstab from the start, disabled until
+#    wrt-data init names the disk: the services that keep their data there see
+#    it as a mount point to wait for, even before there is a disk;
+#  - logs persist on the data disk, 64 MiB before they rotate; logd writes them
+#    only while it is mounted (the log service's mount trigger);
+#  - containers keep their storage on the data disk; podman's API service stays
+#    off, as the Pods are wrt-containers'; the LAN may reach containers (podman's
+#    own defaults made the zone, with its way to wan);
+#  - SMB: one share on the data disk, LAN only; SMB 3.0 at least, and an unknown
+#    user is refused rather than taken for a guest;
+#  - WireGuard: wg0 in a zone of its own, off until the config push brings its
+#    keys; Tailscale: tailscale0 in a zone of its own; both forward to lan and
+#    wan, and their own input is rejected, as wan's;
+#  - the node exporter listens on the LAN.
+[ -e /etc/wrt-services ] && exit 0
+
+touch /etc/config/fstab
+uci -q batch <<-EOF
+	set fstab.wrtdata=mount
+	set fstab.wrtdata.target='/mnt/data'
+	set fstab.wrtdata.enabled='0'
+	set system.@system[0].log_file='/mnt/data/logs/messages'
+	set system.@system[0].log_size='65536'
+	set firewall.lan_podman=forwarding
+	set firewall.lan_podman.src='lan'
+	set firewall.lan_podman.dest='podman'
+	set ksmbd.shares=share
+	set ksmbd.shares.name='shares'
+	set ksmbd.shares.path='/mnt/data/shares'
+	set ksmbd.shares.read_only='no'
+	set ksmbd.shares.guest_ok='no'
+	set ksmbd.shares.create_mask='0664'
+	set ksmbd.shares.dir_mask='0775'
+	set network.wg0=interface
+	set network.wg0.proto='wireguard'
+	set network.wg0.listen_port='51820'
+	add_list network.wg0.addresses='10.9.0.1/24'
+	set network.wg0.disabled='1'
+	set firewall.wg=zone
+	set firewall.wg.name='wg'
+	add_list firewall.wg.network='wg0'
+	set firewall.wg.input='REJECT'
+	set firewall.wg.output='ACCEPT'
+	set firewall.wg.forward='REJECT'
+	set firewall.wg_lan=forwarding
+	set firewall.wg_lan.src='wg'
+	set firewall.wg_lan.dest='lan'
+	set firewall.wg_wan=forwarding
+	set firewall.wg_wan.src='wg'
+	set firewall.wg_wan.dest='wan'
+	set firewall.wg_in=rule
+	set firewall.wg_in.name='Allow-WireGuard'
+	set firewall.wg_in.src='wan'
+	set firewall.wg_in.proto='udp'
+	set firewall.wg_in.dest_port='51820'
+	set firewall.wg_in.target='ACCEPT'
+	set firewall.tailscale=zone
+	set firewall.tailscale.name='tailscale'
+	add_list firewall.tailscale.device='tailscale0'
+	set firewall.tailscale.input='REJECT'
+	set firewall.tailscale.output='ACCEPT'
+	set firewall.tailscale.forward='REJECT'
+	set firewall.tailscale_lan=forwarding
+	set firewall.tailscale_lan.src='tailscale'
+	set firewall.tailscale_lan.dest='lan'
+	set firewall.tailscale_wan=forwarding
+	set firewall.tailscale_wan.src='tailscale'
+	set firewall.tailscale_wan.dest='wan'
+	set firewall.lan_tailscale=forwarding
+	set firewall.lan_tailscale.src='lan'
+	set firewall.lan_tailscale.dest='tailscale'
+	set firewall.tailscale_in=rule
+	set firewall.tailscale_in.name='Allow-Tailscale'
+	set firewall.tailscale_in.src='wan'
+	set firewall.tailscale_in.proto='udp'
+	set firewall.tailscale_in.dest_port='41641'
+	set firewall.tailscale_in.target='ACCEPT'
+	set prometheus-node-exporter-ucode.main.listen_interface='lan'
+EOF
+sed -i 's#^graphroot = .*#graphroot = "/mnt/data/containers/storage"#' /etc/containers/storage.conf
+sed -i -e 's/^\(\tmap to guest =\).*/\1 never/' \
+	-e '/^\[global\]/a\	server min protocol = SMB3_00' /etc/ksmbd/ksmbd.conf.template
+/etc/init.d/podman disable
+uci -q commit
+touch /etc/wrt-services
+exit 0

@@ -1,0 +1,7 @@
+#!/bin/sh
+# The data disk's daily snapshots (wrt-snap) in root's crontab, at 03:17.
+crontab=/etc/crontabs/root
+grep -qs wrt-snap "${crontab}" ||
+	echo '17 3 * * * wrt-snap now >/dev/null && wrt-snap prune' >>"${crontab}"
+/etc/init.d/cron enable
+exit 0
