@@ -8,6 +8,7 @@ tc hook of a device (``hooks``), and the configuration dae runs with in the test
 
 import ipaddress
 import json
+import re
 import shlex
 import time
 from collections import defaultdict
@@ -19,6 +20,8 @@ from wrt_tests.net import PROXIED_TARGET, PROXY, PROXY_PORT
 from wrt_tests.poll import until
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from wrt_tests.isp import Isp, Session
     from wrt_tests.net import Netns, Network
     from wrt_tests.router import Router
@@ -30,6 +33,11 @@ EINAT = {"tcx/ingress": ["ingress_rev_snat"], "tcx/egress": ["egress_snat"]}
 QOSIFY = {"clsact/ingress": ["qosify_ingress_ip"], "clsact/egress": ["qosify_egress_ip"]}
 # dae on a bridge (br-lan, podman0) runs the L2 variants of its LAN programs.
 DAE = {"tcx/ingress": ["tproxy_lan_ingress_l2"], "tcx/egress": ["tproxy_lan_egress_l2"]}
+# The fw4 rules einat's instance brings (feed/net/einat/files/init): its nat rule
+# (no masquerade) and its rule (accept what it translated back). They come with a
+# firewall reload, after its programs are attached; fw4 names them after the
+# instance, "ubus:einat[instance1] nat 0".
+EINAT_RULE = re.compile(r"ubus:einat\[\w+\] (nat|rule) \d+")
 LAN_CLIENTS = ("client-a", "client-b")
 
 # dae in the tests: the socks5 exit on the emulated internet is the only node,
@@ -155,6 +163,14 @@ class Online:
         assert found is not None, f"{name} has no addresses"  # noqa: S101
         return found
 
+    def reboot(self, *, while_off: Callable[[], object] | None = None) -> None:
+        """Reboot the router and wait until it is online again, with the LAN clients.
+
+        ``while_off`` changes hardware while the router is off (Router.reboot).
+        """
+        self.router.reboot(while_off=while_off)
+        self.reconnected()
+
     def redial(self) -> Session:
         """End the session from the ISP side, wait until online again; return the old one."""
         self.isp.hang_up(self.session)
@@ -174,12 +190,22 @@ class Online:
     def wait_datapath(self) -> None:
         """Wait for einat and qosify on pppoe-wan, the delegated prefix and the LAN clients."""
         start = time.monotonic()
-        until(
-            lambda: hooks(self.router, "pppoe-wan") == {**EINAT, **QOSIFY},
-            timeout=ONLINE_TIMEOUT,
-            what="einat and qosify on pppoe-wan",
-        )
+        try:
+            until(
+                lambda: hooks(self.router, "pppoe-wan") == {**EINAT, **QOSIFY},
+                timeout=ONLINE_TIMEOUT,
+                what="einat and qosify on pppoe-wan",
+            )
+        except TimeoutError as error:
+            error.add_note(f"pppoe-wan holds {hooks(self.router, 'pppoe-wan')}")
+            error.add_note(self.router.run("logread -e einat -e qosify | tail -n 20"))
+            raise
         self.recovery = time.monotonic() - start
+        until(
+            lambda: set(EINAT_RULE.findall(self.router.run("nft list ruleset"))) == {"nat", "rule"},
+            timeout=ONLINE_TIMEOUT,
+            what="einat's firewall rules",
+        )
         until(
             lambda: interface(self.router, "wan6").get("ipv6-prefix"),
             timeout=ONLINE_TIMEOUT,

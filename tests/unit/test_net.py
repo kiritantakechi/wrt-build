@@ -24,6 +24,8 @@ INTERNET = {
         ("203.0.113.1", "2001:db8:ffff::1"),
     ),
     "proxy": (("198.51.100.53/24", "2001:db8:53::53/64"), ("198.51.100.1", "2001:db8:53::1")),
+    "wg-peer": (("203.0.113.60/24", "2001:db8:ffff::60/64"), ("203.0.113.1", "2001:db8:ffff::1")),
+    "ts-peer": (("203.0.113.70/24", "2001:db8:ffff::70/64"), ("203.0.113.1", "2001:db8:ffff::1")),
 }
 
 
@@ -63,3 +65,18 @@ def test_bridges_join_their_ports(network: Network, bridge: str, ports: set[str]
     del network  # requested for the bridges
     shown = ip("-o", "link", "show", "master", bridge)
     assert {line.split(": ")[1].split("@")[0] for line in shown.splitlines()} >= ports
+
+
+@pytest.mark.parametrize(
+    ("server", "path"),
+    [("registry.example.net", "/v2/"), ("headscale.example.net", "/health")],
+)
+def test_servers_answer_over_tls_of_the_test_ca(network: Network, server: str, path: str) -> None:
+    # r4s-services D10: the registry and headscale on inet, named by the
+    # sandbox's hosts file and by the internet's resolver.
+    ca = network.workdir / "pki" / "ca.crt"
+    network["proxy"].run(
+        "curl", "-sfo", "/dev/null", "--cacert", str(ca), f"https://{server}{path}"
+    )
+    answer = network["proxy"].probe("resolve", server, "--server", "203.0.113.53")
+    assert answer["answers"]

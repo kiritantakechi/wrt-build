@@ -16,6 +16,8 @@ from wrt_tests.emu import (
     read_fit,
     sha256,
 )
+from wrt_tests.poll import until
+from wrt_tests.storage import PLUG_TIMEOUT, Disk, device
 
 if TYPE_CHECKING:
     from wrt_tests.net import Network
@@ -111,3 +113,27 @@ def test_power_cut_keeps_the_disk(router: Router) -> None:
     emulator.power_on()
     router.wait_ready()
     assert router.run("cat /root/marker") == "written-before-the-cut"
+
+
+@spec(CAPABILITY, "USB storage", "Hot-plug a USB disk")
+def test_usb_disk_hot_plug(router: Router, tmp_path: Path) -> None:
+    # The xHCI controller's two root hubs, USB 2 and USB 3.
+    hubs = router.run("cat /sys/bus/usb/devices/usb*/product").splitlines()
+    assert hubs == ["xHCI Host Controller"] * 2
+    disk = Disk.blank(router.emulator, tmp_path, "hotplug")
+    disk.plug(4)
+    try:
+        path = device(router, disk)
+        name = path.removeprefix("/dev/")
+        # Bound to uas, as the R4S's disk, at SuperSpeed: the SCSI device's USB
+        # interface is three levels up, the USB device four.
+        usb = f"/sys/block/{name}/device/../../.."
+        assert router.run(f"readlink -f {usb}/driver").endswith("/uas")
+        assert router.run(f"cat {usb}/../speed") == "5000"
+    finally:
+        disk.unplug()
+    until(
+        lambda: router.returncode(f"test -e /sys/block/{name}") != 0,
+        timeout=PLUG_TIMEOUT,
+        what=f"{path} gone",
+    )

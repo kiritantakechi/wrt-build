@@ -2,7 +2,8 @@
 # the shipped factory image from an SD card, a copy-on-write overlay of it, and
 # hands the R4S-identity device tree on to the kernel. scripts/test.sh fills
 # $LG_EMU_DIR with emu-prepare and runs the suite inside the network sandbox,
-# where eth0 (WAN) sits on br-wan and eth1 (LAN) on br-lan.
+# where eth0 (WAN) sits on br-wan and eth1 (LAN) on br-lan. The xHCI controller
+# takes the USB data disks the tests plug in and out (r4s-services D10).
 targets:
   main:
     resources:
@@ -27,6 +28,7 @@ targets:
           -netdev tap,id=lan,ifname=emu-lan,script=no,downscript=no
           -device virtio-net-pci,netdev=lan,mac=52:54:00:0a:00:11
           -device i6300esb
+          -device qemu-xhci,id=xhci
           -action watchdog=reset
       SSHDriver:
         # The first boot of a slot creates dropbear's host keys, which takes a

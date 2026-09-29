@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from labgrid.driver.exception import ExecutionError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
     from labgrid import Target
@@ -30,6 +30,9 @@ SSH_PORT = 22
 _TERMINAL_CONTROL = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\r")
 BOOT_TIMEOUT = 600.0
 READY_MARK = "- init complete -"
+# The kernel's last words before the machine restarts.
+RESTART_MARK = "reboot: Restarting system"
+BOOT_ID = "cat /proc/sys/kernel/random/boot_id"
 
 
 class Router:
@@ -144,29 +147,42 @@ class Router:
 
     def boot_id(self) -> str:
         """Return the kernel's boot ID, which changes with every boot."""
-        return self.run("cat /proc/sys/kernel/random/boot_id")
+        return self.run(BOOT_ID)
 
     def wait_rebooted(self, previous_boot: str, timeout: float = BOOT_TIMEOUT) -> None:
         """Wait until the router has booted again after ``previous_boot`` and is ready.
 
-        The reboot may cut the connection in the middle of a command; that only
-        means waiting on.
+        The old system may still answer while it shuts down, and the reboot may
+        cut the connection in the middle of a command; either only means waiting on.
         """
         deadline = time.monotonic() + timeout
         while True:
             try:
                 self.wait_ready(deadline - time.monotonic())
-                if self.boot_id() != previous_boot:
+                stdout, _, code = self._connected().run(BOOT_ID)
+                if code == 0 and "\n".join(map(str, stdout)) != previous_boot:
                     return
             except ExecutionError:
-                self.disconnect()
+                pass
+            self.disconnect()
             _check(deadline, "the router never rebooted")
             time.sleep(2)
 
-    def reboot(self, command: str = "reboot") -> None:
-        """Run ``command`` (which must end in a reboot) and wait until the router is back."""
+    def reboot(
+        self, command: str = "reboot", *, while_off: Callable[[], object] | None = None
+    ) -> None:
+        """Run ``command`` (which must end in a reboot) and wait until the router is back.
+
+        ``while_off`` runs between the end of the old system and the next boot:
+        hardware changed then is changed with the power off, after the old
+        system has written out and unmounted everything.
+        """
         previous_boot = self.boot_id()
+        mark = self.emulator.console.mark()
         self.detach(f"sleep 1; {command}")
+        if while_off is not None:
+            self.emulator.console.wait_for(RESTART_MARK, since=mark, timeout=BOOT_TIMEOUT)
+            while_off()
         self.wait_rebooted(previous_boot)
 
     @contextmanager

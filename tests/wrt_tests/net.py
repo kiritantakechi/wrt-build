@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Self, cast, override
 
-from wrt_tests import isp, netprobe
+from wrt_tests import internet, isp, netprobe
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -142,10 +142,13 @@ TOPOLOGY = Topology(
             ports=(
                 Port(
                     "br-inet",
-                    addresses=tuple(
-                        f"{address}/{length}"
-                        for addresses in (isp.DNS, DIRECT_TARGET, PROXIED_TARGET)
-                        for address, length in zip(addresses, (24, 64), strict=True)
+                    addresses=(
+                        *(
+                            f"{address}/{length}"
+                            for addresses in (isp.DNS, DIRECT_TARGET, PROXIED_TARGET)
+                            for address, length in zip(addresses, (24, 64), strict=True)
+                        ),
+                        *(f"{address}/24" for _, address in internet.SERVERS),
                     ),
                 ),
             ),
@@ -176,8 +179,11 @@ TOPOLOGY = Topology(
                     f"--address=/any.example.net/{DIRECT_TARGET[0]}",
                     "--host-record=direct.example.net,{},{}".format(*DIRECT_TARGET),
                     "--host-record=proxied.example.net,{},{}".format(*PROXIED_TARGET),
+                    *(f"--host-record={name},{address}" for name, address in internet.SERVERS),
                 ),
                 *(("iperf3", "--server", "--port", str(port)) for port in IPERF_PORTS),
+                ("registry", "serve", "{workdir}/registry.yml"),
+                ("headscale", "serve", "--config", "{workdir}/headscale.yaml"),
             ),
         ),
         Namespace(
@@ -193,6 +199,47 @@ TOPOLOGY = Topology(
             ),
             routes=tuple(f"default via {gateway}" for gateway in PROXY_GATEWAY),
             daemons=(("microsocks", "-i", "::", "-p", str(PROXY_PORT)),),
+        ),
+        # A remote WireGuard device; the tests make its tunnel, a wireguard link
+        # of the host kernel, with the keys they push to the router.
+        Namespace(
+            "wg-peer",
+            ports=(
+                Port(
+                    "br-inet",
+                    addresses=tuple(
+                        f"{address}/{length}"
+                        for address, length in zip(internet.WG_PEER, (24, 64), strict=True)
+                    ),
+                ),
+            ),
+            routes=tuple(f"default via {gateway}" for gateway in INET_GATEWAY),
+        ),
+        # A tailnet device: tailscaled on a TUN of its own, trusting the test CA.
+        Namespace(
+            "ts-peer",
+            ports=(
+                Port(
+                    "br-inet",
+                    addresses=tuple(
+                        f"{address}/{length}"
+                        for address, length in zip(internet.TS_PEER, (24, 64), strict=True)
+                    ),
+                ),
+            ),
+            routes=tuple(f"default via {gateway}" for gateway in INET_GATEWAY),
+            daemons=(
+                (
+                    "env",
+                    "SSL_CERT_FILE={workdir}/../pki/ca.crt",
+                    "tailscaled",
+                    "--no-logs-no-support",
+                    "--statedir={workdir}",
+                    "--socket={workdir}/tailscaled.sock",
+                    "--tun=tailscale0",
+                    "--port=41641",
+                ),
+            ),
         ),
     ),
 )
@@ -297,14 +344,14 @@ class Network(AbstractContextManager["Network"]):
         return self
 
     def _isolate(self) -> None:
-        """Give the sandbox its own accounts and the ISP's /etc/ppp.
+        """Give the sandbox its own accounts, hosts, the ISP's /etc/ppp and the servers' setup.
 
         The sandbox has one uid, 0, which is the invoking user outside. Its own
         passwd and group make every account that uid, with a private home:
         daemons that switch to an account (rp-pppoe drops to nobody) or read a
         dotfile (pppd reads ~/.ppprc) stay inside the sandbox. The host's name
         service cache would answer with the host's accounts, so its socket is
-        hidden.
+        hidden. Its own hosts file names the emulated internet's servers.
         """
         etc = self.workdir / "etc"
         home = self.workdir / "home"
@@ -315,7 +362,8 @@ class Network(AbstractContextManager["Network"]):
         )
         (etc / "group").write_text("root:x:0:\nnogroup:x:0:\n")
         isp.configure(etc / "ppp", self.workdir / "isp")
-        for name in ("passwd", "group", "ppp"):
+        internet.configure(self.workdir)
+        for name in ("passwd", "group", "ppp", "hosts"):
             subprocess.run(["mount", "--bind", etc / name, f"/etc/{name}"], check=True)
         if Path("/var/run/nscd/socket").exists():
             subprocess.run(["mount", "-t", "tmpfs", "tmpfs", "/var/run/nscd"], check=True)

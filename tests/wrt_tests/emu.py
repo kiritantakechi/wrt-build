@@ -44,6 +44,7 @@ FIRMWARE = "u-boot-qemu.bin"
 SOURCE_FILE = "source.json"
 # A 4 GB card: QEMU wants SD cards sized in powers of two.
 SD_CARD_SIZE = 4 << 30
+UNPLUG_TIMEOUT = 30
 
 
 class _TemplateLoader(yaml.SafeLoader):
@@ -345,6 +346,52 @@ class Emulator:
     def send_keys(self, text: str) -> None:
         """Type on the serial console."""
         self.qemu.write(text.encode())
+
+    def plug_disk(self, name: str, image: Path, port: int) -> None:
+        """Plug ``image`` in as a USB SSD (UAS, as the R4S's) on xHCI port ``port``.
+
+        The disk's SCSI product name is ``name``, which the guest shows as its
+        model. The machine's snapshot holds no such disk (a raw image takes no
+        internal snapshot), so a disk must be unplugged before the machine is
+        restored.
+        """
+        file = {"driver": "file", "filename": str(image)}
+        self.qemu.monitor_command(
+            "blockdev-add", {"driver": "raw", "node-name": name, "file": file}
+        )
+        uas = {"driver": "usb-uas", "id": f"{name}-uas", "bus": "xhci.0", "port": str(port)}
+        self.qemu.monitor_command("device_add", uas)
+        disk = {
+            "driver": "scsi-hd",
+            "id": f"{name}-hd",
+            "bus": f"{name}-uas.0",
+            "drive": name,
+            "product": name,
+        }
+        self.qemu.monitor_command("device_add", disk)
+        # A hot-plugged usb-uas waits for its disk: only now it appears on the port.
+        self.qemu.monitor_command(
+            "qom-set",
+            {"path": f"/machine/peripheral/{name}-uas", "property": "attached", "value": True},
+        )
+
+    def unplug_disk(self, name: str) -> None:
+        """Pull a disk plug_disk() plugged in."""
+        self.qemu.monitor_command("device_del", {"id": f"{name}-uas"})
+        # The drive is free once the disk device has let it go, which QEMU
+        # finishes a little after the device is gone.
+        deadline = time.monotonic() + UNPLUG_TIMEOUT
+        while self._drive_in_use(name):
+            if time.monotonic() > deadline:
+                msg = f"{name} was not unplugged"
+                raise TimeoutError(msg)
+            time.sleep(0.2)
+        self.qemu.monitor_command("blockdev-del", {"node-name": name})
+
+    def _drive_in_use(self, name: str) -> bool:
+        """Return whether a device's block backend still holds the drive ``name``."""
+        blocks = self.qemu.monitor_command("query-block")
+        return any(block.get("inserted", {}).get("node-name") == name for block in blocks)
 
 
 if __name__ == "__main__":

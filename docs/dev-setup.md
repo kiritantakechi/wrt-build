@@ -56,7 +56,7 @@ Notes:
 
 ## 3. PPP for the test sandbox
 
-The emulated ISP runs pppd inside the test sandbox, which needs the `ppp_generic` and `ppp_async` modules and a `/dev/ppp` open to regular users. After each VM restart, run (the OrbStack NixOS VM has no `modprobe` on its path, so kmod comes from nixpkgs):
+The emulated ISP runs pppd inside the test sandbox, which needs the `ppp_generic` and `ppp_async` modules and a `/dev/ppp` open to regular users; the WireGuard peer needs the `wireguard` module. After each VM restart, run (the OrbStack NixOS VM has no `modprobe` on its path, so kmod comes from nixpkgs):
 
 ```sh
 orb -m nixos -u root sh -c 'NIX_CONFIG="experimental-features = nix-command flakes" nix shell nixpkgs#kmod -c /Users/kiritan/Projects/wrt-build/scripts/sandbox-prepare.sh'

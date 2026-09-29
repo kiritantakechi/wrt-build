@@ -89,6 +89,14 @@ def test_tcp_reports_the_peer_and_mss(client: Netns, family: int) -> None:
 
 
 @pytest.mark.parametrize("family", [0, 1], ids=["ipv4", "ipv6"])
+def test_connect_tells_accepted_from_refused(client: Netns, family: int) -> None:
+    assert client.probe("connect", SERVER[family], "--port", str(PORT)) == {
+        "connection": "accepted"
+    }
+    assert client.probe("connect", SERVER[family], "--port", "9") == {"connection": "refused"}
+
+
+@pytest.mark.parametrize("family", [0, 1], ids=["ipv4", "ipv6"])
 def test_udp_reports_the_peer(client: Netns, family: int) -> None:
     seen = client.probe("udp", SERVER[family], "--source-port", "40000")
     assert (seen["address"], seen["port"]) == (CLIENT[family], 40000)

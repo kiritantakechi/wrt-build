@@ -3,7 +3,7 @@
 # Usage: scripts/runner-prepare.sh   (CI only; uses sudo)
 #  - allow unprivileged user namespaces, which bubblewrap (the Nix FHS
 #    environments) and the test sandbox need; Ubuntu 24.04 restricts them;
-#  - open PPP to the test sandbox (sandbox-prepare.sh);
+#  - open PPP and WireGuard to the test sandbox (sandbox-prepare.sh);
 #  - make room on the root disk and create $WRT_WORKDIR on /mnt.
 set -eu
 # shellcheck source=scripts/lib.sh

@@ -183,6 +183,19 @@
           # the internet: a socks5 exit and bulk transfers
           microsocks
           iperf3
+          # the services' peers (r4s-services D10): a container registry and its
+          # image tools, a tailnet's control server and a node, the WireGuard
+          # peer's tools (its tunnel is the host kernel's), an SMB client, and a
+          # test CA for the registry and headscale
+          distribution
+          skopeo
+          erofs-utils
+          headscale
+          tailscale
+          wireguard-tools
+          samba
+          curl
+          openssl
         ])
         ++ testSsh pkgs;
 

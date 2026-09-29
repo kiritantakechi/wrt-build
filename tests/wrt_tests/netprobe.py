@@ -16,7 +16,9 @@ UDP and ESP answer from the address they were sent to, as a reply must to get
 back through a stateful NAT.
 
 Every other command is a client and prints one JSON object: ``tcp``, ``udp`` and
-``esp`` what the server saw; ``listen`` the first datagram it receives; ``send``
+``esp`` what the server saw; ``connect`` whether any TCP server accepted a
+connection, refused it or never answered; ``listen`` the first datagram it
+receives; ``send``
 the port it sent one from; ``resolve`` the answers of a DNS server;
 ``solicit-prefix`` what a DHCPv6 server offers for prefix delegation;
 ``solicit-router`` that it asked the routers on a link for an advertisement, as a
@@ -186,6 +188,17 @@ def tcp(host: str, port: int) -> Seen:
     """Connect and return what the server saw."""
     with socket.create_connection((host, port), timeout=TIMEOUT) as sock:
         return _decode(sock.makefile().readline())
+
+
+def connect(host: str, port: int) -> Seen:
+    """Open a TCP connection to any server; return whether it was accepted."""
+    try:
+        with socket.create_connection((host, port), timeout=TIMEOUT):
+            return {"connection": "accepted"}
+    except ConnectionRefusedError:
+        return {"connection": "refused"}
+    except TimeoutError:
+        return {"connection": "unanswered"}
 
 
 def udp(host: str, port: int, *, source_port: int = 0, big: bool = False) -> Seen:
@@ -372,6 +385,12 @@ def main() -> None:
     port: Argument = ("--port", {"type": int, "default": PORT})
     command("serve", lambda a: asyncio.run(serve(a.port)), port)
     command("tcp", lambda a: tcp(a.host, a.port), host, port)
+    command(
+        "connect",
+        lambda a: connect(a.host, a.port),
+        host,
+        ("--port", {"type": int, "required": True}),
+    )
     command(
         "udp",
         lambda a: udp(a.host, a.port, source_port=a.source_port, big=a.big),

@@ -52,10 +52,20 @@ report radvd radvd --version
 report kea-dhcp6 kea-dhcp6 -v
 report dnsmasq dnsmasq --version
 report iperf3 iperf3 --version
-# The emulated ISP runs pppd in the sandbox (r4s-ebpf-datapath design D11).
+report registry registry --version
+report skopeo skopeo --version
+report headscale headscale version
+report tailscale tailscale version
+report wg wg --version
+report smbclient smbclient --version
+# The emulated ISP runs pppd in the sandbox (r4s-ebpf-datapath design D11), and
+# the WireGuard peer is a wireguard link of this kernel (r4s-services D10).
 [ -r /dev/ppp ] && [ -w /dev/ppp ] ||
 	die "/dev/ppp is missing or closed to regular users: run scripts/sandbox-prepare.sh as root"
 printf '%s %s\n' /dev/ppp rw
+[ -d /sys/module/wireguard ] ||
+	die "the wireguard module is not loaded: run scripts/sandbox-prepare.sh as root"
+printf '%s %s\n' wireguard loaded
 
 # Code standards
 report shellcheck shellcheck --version

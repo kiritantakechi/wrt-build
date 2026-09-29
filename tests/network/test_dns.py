@@ -43,24 +43,7 @@ def _resolve(online: Online, name: str, **options: str) -> dict[str, object]:
     return online.client().probe("resolve", name, "--server", online.router.address, *arguments)
 
 
-@pytest.fixture(scope="module", autouse=True)
-def internet_zone(online: Online) -> None:
-    """Let the emulated internet's answers through dnsmasq's rebind protection.
-
-    dnsmasq restarts to take it, and until it listens again, dae answers a LAN
-    query to the router's port 53 itself (a query to a local socket is the one
-    it leaves alone), so the module waits for dnsmasq.
-    """
-    router = online.router
-    router.run(
-        "uci add_list dhcp.@dnsmasq[0].rebind_domain=example.net && uci commit dhcp"
-        " && /etc/init.d/dnsmasq reload"
-    )
-    until(
-        lambda: f"{router.address}:53" in router.run("ss -Hlun 'sport = :53'"),
-        timeout=60,
-        what="dnsmasq listening again",
-    )
+pytestmark = pytest.mark.usefixtures("internet_zone")
 
 
 @pytest.fixture(scope="module", autouse=True)

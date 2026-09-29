@@ -74,11 +74,16 @@ def _einat_rules(online: Online) -> bool:
 
 
 def _einat_attached(online: Online) -> None:
-    until(
-        lambda: hooks(online.router, "pppoe-wan").get("tcx/ingress") == EINAT["tcx/ingress"],
-        timeout=RECOVERY,
-        what="einat on pppoe-wan",
-    )
+    try:
+        until(
+            lambda: hooks(online.router, "pppoe-wan").get("tcx/ingress") == EINAT["tcx/ingress"],
+            timeout=RECOVERY,
+            what="einat on pppoe-wan",
+        )
+    except TimeoutError as error:
+        error.add_note(f"pppoe-wan holds {hooks(online.router, 'pppoe-wan')}")
+        error.add_note(online.router.run("logread -e einat -e procd | tail -n 20"))
+        raise
 
 
 @pytest.fixture
@@ -241,7 +246,9 @@ def test_full_cone_after_redial(online: Online) -> None:
     online.network["inet"].probe(
         "send", online.wan_address, "--port", str(first), "--bind", NEVER_CONTACTED
     )
-    assert listener.received()
+    assert listener.received(), online.router.run(
+        "nft list chain inet fw4 forward_wan; logread -e einat | tail -n 10"
+    )
 
 
 @spec(CAPABILITY, "Register a health check", "PPPoE not yet connected")
