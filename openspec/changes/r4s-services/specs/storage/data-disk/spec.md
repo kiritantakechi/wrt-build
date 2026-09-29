@@ -7,11 +7,11 @@ Defines the USB SSD data disk's filesystem, subvolume layout, and mounting; how 
 ## ADDED Requirements
 
 ### Requirement: Btrfs data disk and subvolume layout
-The data disk SHALL use btrfs and contain four subvolumes, `@containers`, `@downloads`, `@shares`, and `@logs`, plus a `.snapshots` subvolume for storing snapshots. Each subvolume SHALL be mounted at its own fixed mount point, with mount options that include zstd compression and noatime.
+The data disk SHALL use btrfs and contain four subvolumes, `containers`, `downloads`, `shares`, and `logs`, plus a `.snapshots` subvolume for storing snapshots. The disk SHALL be mounted at a fixed mount point with mount options that include zstd compression and noatime, and each subvolume SHALL be at its own fixed path under it.
 
 #### Scenario: Check mounts
 - **WHEN** an initialized data disk is attached and the system boots
-- **THEN** the four subvolumes are each mounted at their fixed mount points, and the mount options include `compress=zstd` and `noatime`
+- **THEN** the disk is mounted at its fixed mount point with `compress=zstd` and `noatime` among the mount options, and the four subvolumes are at their fixed paths
 
 ### Requirement: Data disk identified by UUID
 The data disk SHALL be identified and mounted by filesystem UUID, independent of USB port position and device name. A disk whose UUID does not match MUST NOT be mounted at the data disk mount points.

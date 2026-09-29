@@ -10,6 +10,8 @@ Any PR, issue or push to a repository the maintainer does not own requires expli
 | 4 | EHfive/einat-ebpf | `feed/net/einat/patches/100-mark-inbound-packets-translated-back.patch` | Carried in the einat package; not submitted (awaiting approval) | — |
 | 5 | openwrt/openwrt | `patches/openwrt/0007-qosify-configure-the-daemon-whenever-it-comes-up.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
 | 6 | openwrt/openwrt | `patches/openwrt/0008-rockchip-set-a-NIC-s-IRQ-affinity-only-when-that-NIC.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
+| 7 | openwrt/packages | `patches/packages/0001-ksmbd-tools-share-only-what-is-mounted-and-start-onc.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
+| 8 | openwrt/openwrt | `patches/openwrt/0009-ubox-log-to-a-file-only-while-its-mount-point-is-mou.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
 
 ## 1. EROFS compression algorithm
 
@@ -65,3 +67,22 @@ What the patch does: `set_interface_core` returns unless the event is for that i
 
 Verification log: 2026-09-29, a bridge created after dae is bound within the spec's 60 seconds (`tests/network/test_transparent_proxy.py`).
 
+## 7. ksmbd-tools: shares on a disk that is not mounted
+
+Problem: ksmbd's init script shares every configured path whether or not the disk it belongs on is mounted. A share on a USB disk that is late, absent or pulled out then shares the empty directory underneath, on the router's flash: what clients write there fills the flash, and disappears from view once the disk is mounted over it. Nothing starts the service again when the disk arrives.
+
+What the patch does: `smb_add_share` asks `procd_get_mountpoints` for the fstab mount point a share's path lies on and leaves the share out while that mount point is not mounted; the service does not start while every share waits; `service_triggers` adds a restart mount trigger per share path, so the mount brings the share. Shares on no fstab mount point are unaffected. `PKG_RELEASE` goes to 2.
+
+How this project uses it: the share `shares` lies on the data disk, whose fstab entry exists from the first boot (r4s-services D2).
+
+Verification log: 2026-09-29, in the emulator ksmbd stays down without the data disk and starts when it is plugged in (`tests/storage/test_data_disk.py`, `tests/services/test_file_sharing.py`).
+
+## 8. ubox: a log file on a disk that is not mounted
+
+Problem: the log service leaves its log file out while the file's fstab mount point is not mounted, but only at boot. A start or reload later on, such as the reload that any change to the system configuration brings, creates the directory on the root filesystem and logs there: onto the flash, underneath where the disk mounts.
+
+What the patch does: the log file is left out whenever its mount point is not mounted; its mount trigger starts it once the mount point is mounted, as at boot. `PKG_RELEASE` goes to 2.
+
+How this project uses it: the persistent log is `/mnt/data/logs/messages`, on the data disk (r4s-services D2).
+
+Verification log: 2026-09-29, in the emulator the log service restarted while the data disk is absent writes nothing to the SD card, and starts writing to the disk when it is plugged in (`tests/storage/test_data_disk.py`).
