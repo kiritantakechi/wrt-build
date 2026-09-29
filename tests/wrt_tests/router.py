@@ -120,10 +120,17 @@ class Router:
             time.sleep(2)
 
     def http(
-        self, path: str, *, headers: dict[str, str] | None = None, timeout: float = 30
+        self,
+        path: str,
+        *,
+        headers: dict[str, str] | None = None,
+        data: bytes | None = None,
+        timeout: float = 30,
     ) -> tuple[int, str]:
-        """GET ``path`` from the router's web server; return status and body, of any status."""
-        request = urllib.request.Request(f"http://{self.address}{path}", headers=headers or {})
+        """GET ``path`` (POST ``data``) from the router's web server; return status and body."""
+        request = urllib.request.Request(
+            f"http://{self.address}{path}", headers=headers or {}, data=data
+        )
         try:
             # Always http://<router address>; no other scheme is ever built.
             with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
