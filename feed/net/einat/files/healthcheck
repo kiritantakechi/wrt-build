@@ -1,0 +1,14 @@
+#!/bin/sh
+# einat's check for wrt-healthcheck (r4s-ebpf-datapath design D10): einat runs and,
+# once the WAN interface is connected (has an address), sits on its tc ingress and
+# egress. An interface that is not connected is no failure: pppoe-wan exists from
+# PPPoE discovery on, while the login may still be going on, or failing.
+enabled=$(uci -q get einat.config.enabled)
+[ "${enabled}" = 1 ] || exit 0
+pidof einat >/dev/null || exit 1
+ifname=$(uci -q get einat.config.ifname)
+ip -4 addr show dev "${ifname}" 2>/dev/null | grep -q ' inet ' || exit 0
+programs=$(bpftool net show dev "${ifname}")
+for hook in "tcx/ingress ingress_rev_snat" "tcx/egress egress_snat"; do
+	echo "${programs}" | grep -q " ${hook} " || exit 1
+done

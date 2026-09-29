@@ -1,0 +1,95 @@
+#!/bin/sh /etc/rc.common
+# dae, bound to the LAN side only (r4s-ebpf-datapath design D1, D5). The service
+# runs the entry /var/run/dae/main.dae, written here: the interfaces to bind and
+# the DNS listener, then an include of the configuration (option config_file).
+# dae includes only files under the entry's directory, so /var/run/dae mirrors
+# the configuration's directory with symbolic links: the include, and any the
+# configuration makes itself, resolve as if dae ran from there.
+# shellcheck disable=SC2154 # config_get assigns the options read below
+
+# shellcheck disable=SC2034 # read by /etc/rc.common
+START=99
+# shellcheck disable=SC2034
+USE_PROCD=1
+
+extra_command "hot_reload" "Apply the configuration without dropping connections"
+
+PROG=/usr/bin/dae
+RUN=/var/run/dae
+ENTRY="${RUN}/main.dae"
+LOG_DIR=/var/log/dae
+# The LAN side: br-lan, and the container and tailnet interfaces while they exist.
+INTERFACES="br-lan podman0 tailscale0"
+
+# bound: the interfaces dae binds now, comma-separated.
+bound() {
+	list=
+	for interface in ${INTERFACES}; do
+		[ -e "/sys/class/net/${interface}" ] && list="${list:+${list},}${interface}"
+	done
+	echo "${list}"
+}
+
+write_entry() {
+	config_get config_file config config_file /etc/dae/config.dae
+	interfaces=$(bound)
+	rm -rf "${RUN}"
+	# dae refuses configuration files others can read.
+	umask 077
+	mkdir -p "${RUN}"
+	for path in "${config_file%/*}"/*; do
+		# Never a link where the entry goes: writing it would go through the link.
+		[ -e "${path}" ] && [ "${path##*/}" != "${ENTRY##*/}" ] && ln -s "${path}" "${RUN}/"
+	done
+	{
+		echo "# Written by /etc/init.d/dae; edit ${config_file} instead."
+		printf 'global {\n\tlan_interface: %s\n\tauto_config_kernel_parameter: true\n}\n' "${interfaces}"
+		printf "dns {\n\tbind: '127.0.0.1:5353'\n}\n"
+		printf 'include {\n\t%s\n}\n' "${config_file##*/}"
+	} >"${ENTRY}"
+}
+
+start_service() {
+	config_load dae
+	config_get_bool enabled config enabled 0
+	[ "${enabled}" = 1 ] || return 0
+	write_entry
+	"${PROG}" validate -c "${ENTRY}" || return 1
+
+	config_get log_maxbackups config log_maxbackups 1
+	config_get log_maxsize config log_maxsize 1
+	config_get_bool cpu_pinning config cpu_pinning 0
+	set -- "${PROG}" run -c "${ENTRY}" --disable-timestamp \
+		--logfile "${LOG_DIR}/dae.log" \
+		--logfile-maxbackups "${log_maxbackups}" --logfile-maxsize "${log_maxsize}"
+	[ "${cpu_pinning}" = 0 ] || set -- taskset -c 4,5 "$@"
+
+	procd_open_instance
+	procd_set_param command "$@"
+	procd_set_param limits nofile="1000000 1000000"
+	procd_set_param respawn
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+stop_service() {
+	rm -rf "${LOG_DIR}"
+}
+
+reload_service() {
+	if running; then
+		config_load dae
+		write_entry
+		"${PROG}" validate -c "${ENTRY}" && "${PROG}" reload
+	else
+		start
+	fi
+}
+
+hot_reload() {
+	reload_service
+}
+
+service_triggers() {
+	procd_add_reload_trigger dae
+}

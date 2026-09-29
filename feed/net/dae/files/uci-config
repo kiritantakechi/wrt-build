@@ -1,0 +1,9 @@
+# dae starts only once a configuration is in /etc/dae/config.dae: push it from the
+# private config repository or edit it in LuCI, then enable it.
+config dae 'config'
+	option enabled '0'
+	option config_file '/etc/dae/config.dae'
+	option log_maxbackups '1'
+	option log_maxsize '1'
+	# Pin dae to the A72 cores (cpu4-5); off, so the scheduler places it.
+	option cpu_pinning '0'

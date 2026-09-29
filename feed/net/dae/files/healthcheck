@@ -1,0 +1,15 @@
+#!/bin/sh
+# dae's check for wrt-healthcheck (r4s-ebpf-datapath design D10): dae runs, and its
+# programs sit on every LAN-side interface that exists. There is nothing to check
+# while dae is disabled, as it stays until a configuration is pushed.
+enabled=$(uci -q get dae.config.enabled)
+[ "${enabled}" = 1 ] || exit 0
+pidof dae >/dev/null || exit 1
+for interface in br-lan podman0 tailscale0; do
+	[ -e "/sys/class/net/${interface}" ] || continue
+	programs=$(bpftool net show dev "${interface}")
+	for direction in ingress egress; do
+		# tproxy_lan_<direction>, or its _l2 variant on a bridge
+		echo "${programs}" | grep -q " tcx/${direction} tproxy_lan_${direction}" || exit 1
+	done
+done

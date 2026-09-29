@@ -116,6 +116,9 @@
           jq
           llvm.clang-unwrapped
           llvm.llvm
+          # Bootstraps OpenWrt's host Go (CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT,
+          # its GOROOT is /usr/share/go in the FHS), on every host architecture.
+          go
         ]
         ++ gccLtoTools;
 

@@ -1,0 +1,9 @@
+# einat on the PPPoE WAN (r4s-ebpf-datapath design D2, D3).
+config einat 'config'
+	option enabled '1'
+	option ifname 'pppoe-wan'
+	# External ports; the kernel's ephemeral ports (32768-60999) stay clear of them.
+	option ports '20000-29999'
+	# Marks the packets einat translates back inward; fw4 accepts exactly those
+	# (config/marks.tsv).
+	option inbound_mark '0x20000000'

@@ -1,0 +1,14 @@
+# dae configuration: nodes, groups, routing and DNS upstreams. The image carries
+# only this template; the real one lives in the private config repository.
+#
+# /etc/init.d/dae adds the interfaces to bind (lan_interface) and the DNS listener
+# (127.0.0.1:5353, which dnsmasq forwards to) around this file, so neither
+# lan_interface nor wan_interface belongs here.
+
+global {
+	log_level: info
+}
+
+routing {
+	fallback: direct
+}

@@ -1,0 +1,170 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 29 Sep 2026 04:00:00 +0800
+Subject: [PATCH] feat: mark inbound packets translated back to internal hosts
+
+Add inbound_mark (--inbound-mark on the command line): ingress_rev_snat
+ORs it into the mark of every packet it translates back to an internal
+address. A firewall can then accept exactly the inbound traffic einat
+let in, rather than all traffic from the external interface towards
+the internal networks.
+
+The mark is a read-only global of the BPF object, 0 by default, which
+marks nothing; the behaviour without the option is unchanged.
+---
+ config.sample.toml      |  5 +++++
+ src/bpf/einat.bpf.c     |  8 ++++++++
+ src/config.rs           |  2 ++
+ src/instance/config.rs  |  3 +++
+ src/main.rs             | 11 +++++++++++
+ src/skel/einat/aya.rs   |  1 +
+ src/skel/einat/types.rs |  5 +++++
+ 7 files changed, 35 insertions(+)
+
+diff --git a/config.sample.toml b/config.sample.toml
+index 5785314..5db2aa6 100644
+--- a/config.sample.toml
++++ b/config.sample.toml
+@@ -66,6 +66,11 @@ bpf_fib_lookup_external = true
+ # similar to set `icmp_in_ranges = []`.
+ allow_inbound_icmpx = true
+ 
++# Mark ORed into inbound packets once they are translated back to an internal
++# address, so that a firewall can accept exactly those; 0 (the default) marks
++# nothing. Hexadecimal is fine: TOML reads 0x20000000.
++#inbound_mark = 0
++
+ # NAT records lifetimes, see <https://datatracker.ietf.org/doc/html/rfc6146#section-4> .
+ # See available time units in <https://github.com/fundu-rs/fundu/blob/fundu-v2.0.0/README.md#time-units> .
+ timeout_fragment = "2s"
+diff --git a/src/bpf/einat.bpf.c b/src/bpf/einat.bpf.c
+index 66d78a4..6621e7a 100644
+--- a/src/bpf/einat.bpf.c
++++ b/src/bpf/einat.bpf.c
+@@ -33,6 +33,10 @@ const volatile u8 ENABLE_FIB_LOOKUP_SRC = false;
+ // ICMP IDs can be mapped.
+ const volatile u8 ALLOW_INBOUND_ICMPX = true;
+ 
++// Mark ORed into inbound packets once they are translated back to an internal
++// address, so that a firewall can accept exactly those. 0 marks nothing.
++const volatile u32 INBOUND_MARK = 0;
++
+ // at least FRAGMENT_MIN=2s,
+ // https://datatracker.ietf.org/doc/html/rfc6146#section-4
+ const volatile u64 TIMEOUT_FRAGMENT = 2E9;
+@@ -1877,6 +1881,10 @@ int ingress_rev_snat(struct __sk_buff *skb) {
+         return TC_ACT_SHOT;
+     }
+ 
++    if (INBOUND_MARK) {
++        skb->mark |= INBOUND_MARK;
++    }
++
+     return TC_ACT_UNSPEC;
+ #undef BPF_LOG_TOPIC
+ }
+diff --git a/src/config.rs b/src/config.rs
+index fef9df5..37ec31d 100644
+--- a/src/config.rs
++++ b/src/config.rs
+@@ -158,6 +158,8 @@ pub struct ConfigNetIf {
+     #[serde(default)]
+     pub allow_inbound_icmpx: Option<bool>,
+     #[serde(default)]
++    pub inbound_mark: Option<u32>,
++    #[serde(default)]
+     pub timeout_fragment: Option<Timeout>,
+     #[serde(default)]
+     pub timeout_icmp_default: Option<Timeout>,
+diff --git a/src/instance/config.rs b/src/instance/config.rs
+index 20f0183..d8d1ad8 100644
+--- a/src/instance/config.rs
++++ b/src/instance/config.rs
+@@ -105,6 +105,9 @@ impl LoadConfig {
+         if let Some(v) = config.allow_inbound_icmpx {
+             ro_data.ALLOW_INBOUND_ICMPX = v as _;
+         }
++        if let Some(v) = config.inbound_mark {
++            ro_data.INBOUND_MARK = v;
++        }
+         if let Some(v) = config.timeout_fragment {
+             ro_data.TIMEOUT_FRAGMENT = v.0;
+         }
+diff --git a/src/main.rs b/src/main.rs
+index 1fde237..8033b37 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -41,6 +41,8 @@ OPTIONS:
+       --ports <range> ...      External TCP/UDP port ranges, defaults to 20000-29999
+       --hairpin-if <name> ...  Hairpin internal network interface names, e.g. lo, lan0
+       --internal <CIDR> ...    Perform source NAT for these internal networks only
++      --inbound-mark <mark>    Mark ORed into inbound packets translated back to internal hosts,
++                               decimal or 0x-prefixed hexadecimal
+       --bpf-loader <loader>    BPF loading backend used, one of aya or libbpf
+   -v, --version                Print einat version
+ ";
+@@ -54,6 +56,7 @@ struct Args {
+     ports: Vec<ProtoRange>,
+     hairpin_if_names: Vec<String>,
+     snat_internals: Vec<IpNet>,
++    inbound_mark: Option<u32>,
+     log_level: Option<u8>,
+     bpf_loader: Option<BpfLoader>,
+ }
+@@ -96,6 +99,13 @@ fn parse_env_args() -> Result<Args> {
+                 let internals: Result<Vec<_>, _> = parser.values()?.map(|s| s.parse()).collect();
+                 args.snat_internals = internals?;
+             }
++            Long("inbound-mark") => {
++                let mark: String = parser.value()?.parse()?;
++                args.inbound_mark = Some(match mark.strip_prefix("0x") {
++                    Some(hex) => u32::from_str_radix(hex, 16)?,
++                    None => mark.parse()?,
++                });
++            }
+             Long("bpf-log") => {
+                 args.log_level = Some(parser.value()?.parse()?);
+             }
+@@ -592,6 +602,7 @@ fn main() -> Result<()> {
+             nat66,
+             default_externals: true,
+             snat_internals: args.snat_internals,
++            inbound_mark: args.inbound_mark,
+             ipv4_hairpin_route: hairpin_route.clone(),
+             ipv6_hairpin_route: hairpin_route,
+             prefer_tcx: true,
+diff --git a/src/skel/einat/aya.rs b/src/skel/einat/aya.rs
+index 5a2f510..9e7ec77 100644
+--- a/src/skel/einat/aya.rs
++++ b/src/skel/einat/aya.rs
+@@ -155,6 +155,7 @@ impl EinatEbpf for EinatAya {
+             EGRESS_IPV6,
+             ENABLE_FIB_LOOKUP_SRC,
+             ALLOW_INBOUND_ICMPX,
++            INBOUND_MARK,
+             TIMEOUT_FRAGMENT,
+             TIMEOUT_ICMP_DEFAULT,
+             TIMEOUT_UDP_MIN,
+diff --git a/src/skel/einat/types.rs b/src/skel/einat/types.rs
+index cbe7823..1bf3807 100644
+--- a/src/skel/einat/types.rs
++++ b/src/skel/einat/types.rs
+@@ -41,6 +41,9 @@ pub struct EinatRoData {
+     pub EGRESS_IPV6: u8,
+     pub ENABLE_FIB_LOOKUP_SRC: u8,
+     pub ALLOW_INBOUND_ICMPX: u8,
++    pub INBOUND_MARK: u32,
++    // Explicit padding up to the next u64, as the BPF object lays it out.
++    pub _PADDING: u32,
+     pub TIMEOUT_FRAGMENT: u64,
+     pub TIMEOUT_ICMP_DEFAULT: u64,
+     pub TIMEOUT_UDP_MIN: u64,
+@@ -61,6 +64,8 @@ impl Default for EinatRoData {
+             EGRESS_IPV6: 1,
+             ENABLE_FIB_LOOKUP_SRC: 0,
+             ALLOW_INBOUND_ICMPX: 1,
++            INBOUND_MARK: 0,
++            _PADDING: 0,
+             TIMEOUT_FRAGMENT: 2 * E9,
+             TIMEOUT_ICMP_DEFAULT: 60 * E9,
+             TIMEOUT_UDP_MIN: 120 * E9,
