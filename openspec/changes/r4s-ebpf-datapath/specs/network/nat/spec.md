@@ -64,7 +64,7 @@ After a PPPoE redial, a re-created WAN interface, or a change of public address,
 - **THEN** within 60 seconds, new connections again behave as full-cone NAT
 
 ### Requirement: Register a health check
-einat SHALL register a check with the health check: the check passes only when the einat process is running and, if the WAN interface exists, einat is attached to it. A missing WAN interface (for example, before PPPoE has connected) MUST NOT cause the check to fail.
+einat SHALL register a check with the health check: the check passes only when the einat process is running and, if the WAN interface is connected, einat is attached to it. A WAN interface that is missing or not yet connected (for example, while PPPoE is still logging in) MUST NOT cause the check to fail.
 
 #### Scenario: PPPoE not yet connected
 - **WHEN** the health check runs while einat is running but the pppoe-wan interface does not exist yet

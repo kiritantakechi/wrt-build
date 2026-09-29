@@ -7,11 +7,15 @@ Define WAN-side behavior: PPPoE dial-up, TCP MSS clamping, IPv6 prefix delegatio
 ## ADDED Requirements
 
 ### Requirement: PPPoE dial-up
-WAN SHALL dial PPPoE over eth0. Dial-up credentials SHALL be provided at runtime and MUST NOT be preinstalled in the firmware image.
+WAN SHALL dial PPPoE over eth0. Dial-up credentials SHALL be provided at runtime and MUST NOT be preinstalled in the firmware image. The image's network defaults SHALL apply to a fresh configuration only; a configuration carried over by an upgrade MUST keep its values.
 
 #### Scenario: Image contains no credentials
 - **WHEN** the network config in the firmware image is inspected
 - **THEN** WAN is of type PPPoE, and the username and password are both empty
+
+#### Scenario: Upgrade keeps the pushed configuration
+- **WHEN** credentials have been pushed and network defaults changed, and a config-preserving upgrade is performed
+- **THEN** after the upgrade, the credentials and the changed values are unchanged
 
 #### Scenario: Dial after pushing credentials
 - **WHEN** dial-up credentials are pushed to the device

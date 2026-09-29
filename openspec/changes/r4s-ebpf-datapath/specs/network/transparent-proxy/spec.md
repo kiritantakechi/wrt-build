@@ -44,6 +44,13 @@ Splitting SHALL apply to both the IPv4 and the IPv6 traffic of the LAN.
 - **WHEN** a LAN client accesses a target that the rules classify as proxied, over IPv6
 - **THEN** the traffic leaves through the proxy node
 
+### Requirement: Optional CPU pinning
+dae SHALL be placed by the scheduler by default. An option SHALL pin it to the A72 cores (cpu4-5) instead.
+
+#### Scenario: Enable CPU pinning
+- **WHEN** the pinning option is enabled and dae restarts
+- **THEN** dae runs only on cpu4-5, and its programs are on the bound interfaces again
+
 ### Requirement: Configuration management
 dae's config SHALL be editable in LuCI and hot-reloaded on save. The full config (including subscriptions and node information) MUST NOT be preinstalled in the firmware image; its canonical copy lives in the private config repository.
 

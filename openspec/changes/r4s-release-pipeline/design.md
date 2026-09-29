@@ -149,7 +149,7 @@ wrt-config (private repo)
   4. Compute a configuration hash for each service, compare it with the record on the device, and push and reload only the services that changed;
   5. Transfer the files to the device over `ssh -o PasswordAuthentication=no` and run `uci batch`;
   6. If a service fails to reload, restore its pre-push backup, reload it again, and exit with a nonzero status.
-- **Preservation across upgrades**: The paths the push writes (`/etc/dae/user/`, the relevant entries in `/etc/config/*`, and local files other than the Pod YAML) are appended to the image's `/etc/sysupgrade.conf` so they survive A/B upgrades.
+- **Preservation across upgrades**: The paths the push writes (`/etc/dae/`, the relevant entries in `/etc/config/*`, and local files other than the Pod YAML) are appended to the image's `/etc/sysupgrade.conf` so they survive A/B upgrades.
 - **Why encrypt**: If the private repository leaks or is made public by mistake, every plaintext secret is exposed. sops with age fits the Nix ecosystem, and decryption happens only on the workstation. This is a default security measure added by this design; exploration only confirmed "secrets live in a private repository".
 
 ### D7. Verification
