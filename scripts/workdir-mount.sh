@@ -1,18 +1,30 @@
 #!/bin/sh
 # workdir-mount: loop-mount the ext4 build volume inside the Linux VM.
-# Usage: scripts/workdir-mount.sh [--format] [image] [mountpoint]   (as root)
-# The image file lives on the external SSD (design D9). Mounting twice is a no-op;
-# --format creates the filesystem once and refuses an image that already has one.
-# The mountpoint is handed to the owner of this repository.
+# Usage: scripts/workdir-mount.sh [--format [--owner user]] [image] [mountpoint]   (as root)
+# The image file lives on the external SSD (design D9). Mounting twice is a no-op.
+# --format creates the filesystem once (never over one) and gives its top
+# directory to --owner, else to sudo's caller, else to the owner of this
+# repository. The filesystem keeps its owner, so a later mount changes nothing:
+# OrbStack shows the Mac's files as owned by whoever reads them, root included.
 set -eu
 # shellcheck source=scripts/lib.sh
 . "$(dirname -- "$0")/lib.sh"
 
 format=0
-if [ "${1:-}" = --format ]; then
-	format=1
+owner=
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		--format) format=1 ;;
+		--owner)
+			user=$(id -u "$2") || die "no user $2"
+			group=$(id -g "$2")
+			owner=${user}:${group}
+			shift
+			;;
+		*) break ;;
+	esac
 	shift
-fi
+done
 image=${1:-/mnt/mac/Volumes/SSD/wrt-work.ext4}
 mountpoint=${2:-/mnt/wrt}
 
@@ -27,16 +39,20 @@ if findmnt -rn --mountpoint "${mountpoint}" >/dev/null 2>&1; then
 fi
 
 fstype=$(blkid -o value -s TYPE "${image}" 2>/dev/null || true)
+created=0
 if [ -z "${fstype}" ]; then
 	[ "${format}" -eq 1 ] || die "${image} has no filesystem; rerun with --format to create one"
+	[ -n "${owner}" ] || owner=${SUDO_UID:+${SUDO_UID}:${SUDO_GID}}
+	[ -n "${owner}" ] || owner=$(stat -c %u:%g "${REPO_DIR}")
+	[ "${owner%%:*}" -ne 0 ] || die "cannot tell whose the volume is; rerun with --owner <user>"
 	# Lazy init and no discard: the backing file lives on HFS+, which cannot punch holes.
 	mkfs.ext4 -q -L wrtwork -m 0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard "${image}"
 	fstype=ext4
+	created=1
 fi
 [ "${fstype}" = ext4 ] || die "${image} contains ${fstype}, expected ext4"
 
-owner=$(stat -c %u:%g "${REPO_DIR}")
 mkdir -p "${mountpoint}"
 mount -o loop,noatime "${image}" "${mountpoint}"
-chown "${owner}" "${mountpoint}"
+[ "${created}" -eq 0 ] || chown "${owner}" "${mountpoint}"
 info "mounted ${image} on ${mountpoint}"

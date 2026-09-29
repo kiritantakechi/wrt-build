@@ -36,8 +36,8 @@ One-time setup:
 touch /Volumes/SSD/.metadata_never_index
 mkfile -n 112g /Volumes/SSD/wrt-work.ext4
 
-# in the VM (creates the filesystem once, then mounts it):
-orb -m nixos -u root /Users/kiritan/Projects/wrt-build/scripts/workdir-mount.sh --format
+# in the VM (creates the filesystem once, owned by kiritan, then mounts it):
+orb -m nixos -u root /Users/kiritan/Projects/wrt-build/scripts/workdir-mount.sh --format --owner kiritan
 ```
 
 After each VM restart, mount it again (the script can be run repeatedly and never reformats):
@@ -46,7 +46,7 @@ After each VM restart, mount it again (the script can be run repeatedly and neve
 orb -m nixos -u root /Users/kiritan/Projects/wrt-build/scripts/workdir-mount.sh
 ```
 
-By default, the image file is `/mnt/mac/Volumes/SSD/wrt-work.ext4`, the mount point is `/mnt/wrt`, and the mount point is owned by user `kiritan`.
+By default, the image file is `/mnt/mac/Volumes/SSD/wrt-work.ext4` and the mount point is `/mnt/wrt`. Its owner is set once, when the filesystem is created, and kept in it: as root, the VM sees the Mac's files as root's own, so the owner has to be named then.
 
 Notes:
 
