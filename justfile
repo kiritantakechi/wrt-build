@@ -43,6 +43,11 @@ image-audit image:
 test profile="dev" *args:
     scripts/test.sh {{ profile }} {{ args }}
 
+# Check the packet marks of the configuration templates against config/marks.tsv (any host)
+[group('quality')]
+marks-check *dirs:
+    scripts/marks-check.sh {{ dirs }}
+
 # Run the code-standard checks, all or the named ones; changes nothing (any host)
 [group('quality')]
 check *names:
