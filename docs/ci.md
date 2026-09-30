@@ -1,13 +1,18 @@
 # CI
 
-There are two workflows, both on GitHub-hosted ubuntu-24.04 runners (4-core x86_64, 6 hours max per job):
+There are three workflows, all on GitHub-hosted ubuntu-24.04 runners (4-core x86_64, 6 hours max per job):
 
 | Workflow | Job | What it does | Cache |
 |---|---|---|---|
 | `check.yml` | `check` | `nix develop .#quality -c just check`, then `spec-coverage` requires every scenario of the implemented changes to have its test; runs on every push, with no path filter | — |
+| `check.yml` | `github-audit` | Weekly (and on demand): `just github-audit` reads back the settings the release pipeline relies on, the `release-signing` environment's reviewers and branches and the checks main requires | — |
 | `build.yml` | `host-toolchain` | Fetch and patch, then build the tools and the cross toolchain, in `nix develop .#build` | `staging_dir/{host,hostpkg,toolchain-*}` and `build_dir/host`, keyed by `scripts/toolchain-key.sh` |
 | `build.yml` | `firmware` | Restore the toolchain, then build with the ci profile (all kmods), in `nix develop .#build`; produces unsigned artifacts and `manifest.json` | `dl/` and ccache |
-| `build.yml` | `system-test` | Three jobs in parallel, each with its own emulator: `system` (`build firmware quality testing unit`), `network` (the datapath's tests behind the emulated ISP) and `services` (`storage services`: the data disk, containers, SMB, VPN and metrics). Each downloads the firmware artifacts, runs `just env-report` (PPP and WireGuard for the sandbox included) and `just test ci <paths>`, and uploads its JUnit report | — |
+| `build.yml` | `system-test` | Four jobs in parallel, each with its own emulator: `system` (`build firmware quality testing unit`), `network` (the datapath's tests behind the emulated ISP), `services` (`storage services`: the data disk, containers, SMB, VPN and metrics) and `release` (`release ops`: signing, publishing, device sync, the config push and the upgrade drill, with keys made for the run). Each downloads the firmware artifacts, runs `just env-report` (PPP and WireGuard for the sandbox included) and `just test ci <paths>`, and uploads its JUnit report | — |
+| `build.yml` | `sign` | Main and `bump/*` only, once `RELEASE_SIGNING` is `enabled`: waits for the maintainer's approval of the `release-signing` environment, then signs the firmware artifacts with the pinned signing tools (`nix run .#sign-tools -- scripts/release-sign.sh`) | — |
+| `build.yml` | `upgrade-drill` | Boots the latest stable release (`just drill-base`) and drills the upgrade to the signed candidate (`just test drill-base -m drill`, `WRT_SIGNED`) | — |
+| `build.yml` | `publish` | After the drill: `scripts/release-publish.sh --upload`, a pre-release from a bump branch, the stable release from main | — |
+| `bump.yml` | `bump` | Weekly: `just upstream-bump`; when upstream moved, a pull request from `bump/<date>`, and `check` and `build` started on that branch (`docs/release-flow.md`) | — |
 
 `build.yml` runs only when code changes (changes to `openspec/`, `docs/` and Markdown files do not trigger it), and a new push to the same branch cancels the older pipeline that is still running.
 
@@ -15,7 +20,7 @@ The toolchain cache key depends only on these inputs: the runner architecture, t
 
 The build jobs enter `.#build`, which holds only the build environment, so they never build the emulator's QEMU: it carries a patch (`patches/qemu/`), so no binary cache has it, and building it takes a few minutes. `system-test` enters the default shell with both environments.
 
-The workflows reference no secrets, and the repository has none configured, so every run is also the run of a fork without secrets. `just env-report` prints the same 28 lines in CI (x86_64) and in the local VM (aarch64), checked on run 36388876907.
+Only `sign` references secrets, the release keys of the `release-signing` environment, and it runs neither for a pull request nor while `RELEASE_SIGNING` is unset; every other job is also the job of a fork without secrets. `just env-report` prints the same 28 lines in CI (x86_64) and in the local VM (aarch64), checked on run 36388876907.
 
 ## Timings
 
@@ -39,6 +44,12 @@ The workflows reference no secrets, and the repository has none configured, so e
 | 2026-09-28 | 36467421324 | host-toolchain job total | 64 min | `scripts/toolchain-build.sh` and `toolchain-pack.sh` joined the key, so a cold rebuild: tools and toolchain 53 min |
 | 2026-09-28 | 36467421324 | firmware job total | 98 min | Build: 92 min; the ccache key now follows `config/ccache.conf`, so an empty cache under the new key |
 | 2026-09-28 | 36467421324 | system-test job total | 48 min | Tests: 37 min 34 s, 95 passed (the A/B slots: rollback, power loss, upgrades, from the factory image through U-Boot) |
+| 2026-09-29 | 36514179961 | host-toolchain job total | 75 min | A new toolchain key (the datapath changed its inputs), so a cold rebuild |
+| 2026-09-29 | 36514179961 | firmware job total | 241 min | Build of the datapath (dae, einat, qosify and their kmods) on a partly matching ccache |
+| 2026-09-29 | 36514179961 | system-test (system) job total | 88 min | Tests: 77 min 09 s, 121 passed |
+| 2026-09-29 | 36514179961 | system-test (network) job total | 29 min | Failed: einat and qosify were not back on pppoe-wan within 180 s after restarts and a redial under TCG |
+| 2026-09-29 | 36615831750 | host-toolchain job total | 10 min | Toolchain cache hit |
+| 2026-09-29 | 36615831750 | firmware job total | 205 min | Build: 21,372 of 24,295 cacheable calls hit (88%); failed at the kernel configuration check: the ci profile's kmods made modules of four PCI USB drivers that `config/kernel.config` leaves out, which `config/ci.seed` now leaves out of the repository as well |
 
 The first full pipeline on a cold cache took about 3 hours 6 minutes; both build jobs are well within the 6-hour limit.
 

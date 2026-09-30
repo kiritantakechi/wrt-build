@@ -44,10 +44,13 @@ CONFIG_PACKAGE_wrt-keyring=y
 # CONFIG_SIGN_FIRMWARE is not set
 ```
 
+- **`BUILDBOT`'s other defaults**: `BUILDBOT` also turns on the SDK, the image builder, the toolchain archive, the target-wide package set (`ALL_NONSHARED`) and the kernel debug archive. `ci.seed` turns them off again: none of them is published, and each costs build time.
+
 - **The `wrt-keyring` package**: Lives in the project's own feed and installs `/etc/apk/keys/wrt-release-<id>.pem` (the EC public key used by apk) and the usign public key. It can hold several keys at once for rotation.
 - **Signing during the build**: The build still generates a one-time apk private key for installs and indexing inside the build. Because `BUILDBOT` is enabled, that key's public key does not enter the image. The build does not sign the firmware either.
 - **Development builds**: The dev profile does not enable `BUILDBOT` and keeps the upstream behavior, so the image trusts the locally built key. These images are for debugging only and are never published.
-- **Impact on existing tests**: The foundation test "Install a kmod from the same build" switches to the `signed_repo` fixture. This fixture re-signs the current build's repository with an ephemeral key and writes the ephemeral public key into the test overlay (see D7).
+- **Impact on existing tests**: The foundation test "Install a kmod from the same build" switches to the `signed_repo` fixture. This fixture re-signs the current build's repository with an ephemeral key, and the router's snapshot trusts the ephemeral public keys instead of the image's (see D7).
+- **Every image requires signed upgrades**: `/lib/upgrade/wrt-release.sh` (in `files/`, so in every profile) sets sysupgrade's own `REQUIRE_IMAGE_SIGNATURE=1`. A dev image therefore also refuses unsigned upgrade images; the tests sign theirs with `release-sign.sh` (D7).
 - **Alternatives**:
   - Patch base-files to skip installing the build public key. Rejected, because upstream already provides the ready-made `BUILDBOT` path.
   - Add a separate release profile. Rejected, because then the image CI tests and the image that is published would not be the same.
@@ -62,9 +65,13 @@ job sign  (needs: firmware; environment: release-signing -> required reviewer)
                              pinned first-party sources; no package build, no feeds)
   4. scripts/release-sign.sh <in> <out> --apk-key $APK_KEY --fw-key $FW_KEY
        apk adbsign every packages.adb; usign + ucert + fwtool on factory image and upgrade tar;
+       usign manifest.json (manifest.json.sig, what devices trust a release by);
        verify the result against the public keys shipped in wrt-keyring; write SHA256SUMS
   5. upload signed set for upgrade-drill and publish
 ```
+
+- **When it runs**: `sign` needs `system-test`, and runs only on main and `bump/*`, never for a pull request, and only while the repository variable `RELEASE_SIGNING` is `enabled`. The variable is set once the release keys are in the environment (Migration Plan), so the pipeline runs green before the keys exist.
+- **The firmware certificate**: Each signing issues a new ucert certificate for the firmware key, valid from the signing time for one year, and appends the image's signature to it. ucert checks the validity against the device clock, so a device accepts an upgrade only once its clock has passed the signing time, which NTP ensures on a device in service. (`ucert -A` reports failure after it has appended; the script checks the result by verifying it instead.)
 
 - **Where the signing tools come from**: The flake builds the signing tools itself from pinned sources and does not use the host tools produced by the build job. Those tools come from a job that may be compromised, so signing with them would bypass the isolation.
 - **One signing script**: `release-sign.sh` takes only an input directory, an output directory, and the two keys. CI passes the production keys; tests pass ephemeral keys and cover the tampering, rotation, and trust anchor scenarios.
@@ -79,37 +86,40 @@ The `publish` job runs after `upgrade-drill` passes (D5). `scripts/release-publi
 
 - **Consistency check**: First confirm that the run identifier in `manifest.json` matches every artifact; abort on a mismatch.
 - **Release naming**: The tag is `r<YYYYMMDD>-<openwrt-short-sha>-<run-number>`. PR builds are published as prereleases, and main-branch builds as stable releases.
-- **Attachments**: The factory image, the upgrade tar, `repo.tar.zst` (organized in apk's repository directory layout, including targets and packages), `manifest.json`, and `SHA256SUMS`.
+- **Attachments**: The factory image, the upgrade tar, `repo.tar` (organized in apk's repository directory layout, including targets and packages), `manifest.json`, `manifest.json.sig`, and `SHA256SUMS`. `repo.tar` is not compressed again: the packages in it are compressed already, and the device unpacks it with busybox tar.
+- **Upload**: `--upload` runs `gh release create`, with `--prerelease --latest=false` for a candidate and `--latest` for a stable release.
 - **Release notes**: Generated automatically from `upstream.lock` and the patch queue hash.
 - **Size limit**: Each attachment can be at most 2 GB; the repository archive is expected to be a few hundred MB.
 
 ### D4. Device-side sync
 
 ```
-wrt-sync (procd service, mount trigger /mnt/data)
-  -> podman kube play pods/wrt-sync.yaml   (image: minimal curl+jq, network: podman bridge
-                                             -> proxied by dae)
-       container: query GitHub Releases API (channel: stable | candidate)
-                  download assets into /mnt/data/repo/.incoming/<tag>/
+wrt-sync (procd service, mount trigger /mnt/data/repo; cron daily)
+  -> podman run --rootfs /mnt/data/repo/.root  (the router's own programs mounted read-only,
+                                               no image; network: podman bridge -> proxied by dae)
+       container: query the Releases API (channel: stable | candidate)
+                  download manifest.json(.sig), repo.tar and the upgrade tar
+                  into /mnt/data/repo/.incoming/<tag>/   (not the factory image)
   -> host side (after container exits 0):
-       verify sha256 against manifest.json  AND  apk index signature with /etc/apk/keys
+       usign manifest.json.sig with /etc/opkg/keys
+       sha256 of the upgrade tar and every index against manifest.json
+       apk verify every index with /etc/apk/keys
        mv .incoming/<tag> -> releases/<tag>; ln -sfn releases/<tag> current
-       keep newest 3, delete older
-cron: daily
+       keep newest 3 (by activation), delete older
 ```
 
 - **Configurable Releases address**: The UCI option `wrt-sync.main.api` defaults to `https://api.github.com`; tests point it at a mock service in the sandbox.
-- **The container does not need to be trusted**: The host verifies integrity with the release public key in the image. So the sync container can use a minimal third-party image; its only job is downloading.
+- **The container does not need to be trusted**: The host verifies integrity with the release public keys in the image. The container needs no image at all: its root is an empty directory on the data disk with the router's own `uclient-fetch` and `jsonfilter` mounted read-only, so nothing is pulled and nothing third-party runs. Its only writable mount is `.incoming`.
 - **Atomic switch**: A new release is first downloaded to `.incoming`, and the `current` symlink changes only after all checks pass.
 - **apk feed list**: `/etc/apk/repositories.d/distfeeds.list` is overwritten to point to the local repository under `current`, as a `file`-style `packages.adb` path.
 - **Local upgrade**: `wrt-update` calls sysupgrade to upgrade to the upgrade tar in `current`.
-- **Mandatory signature check**: `platform_check_image` (from the A/B change) additionally requires the image to carry a valid signature. On top of `REQUIRE_IMAGE_METADATA`, it uses ucert to verify against the public key in the image.
+- **Mandatory signature check**: sysupgrade's own `fwtool_check_signature` does the check once `REQUIRE_IMAGE_SIGNATURE=1` (D1): ucert verifies the image's certificate chain with the usign keys in `/etc/opkg/keys`. A missing or wrong signature makes the image invalid; only `sysupgrade -F` would force it, and `wrt-update` never passes it. The A/B change's `platform_check_image` is left as it is.
 
 ### D5. Weekly bump
 
-- **Scheduled workflow**: Runs every Monday and reads the HEAD of main in the three upstream repositories. If anything changed, it updates `upstream.lock` and opens a PR with a GitHub App or the default token. The PR description includes the old and new SHAs and a `git log --oneline` summary of at most 50 lines.
+- **Scheduled workflow**: Runs every Monday and reads the HEAD of main in the three upstream repositories. If anything changed, it updates `upstream.lock` and opens a PR from `bump/<date>` with the default token. The PR description includes the old and new SHAs and a `git log --oneline` summary of at most 50 lines. A PR opened with the default token starts no workflows, so the bump workflow starts `check` and `build` on the bump branch itself (`gh workflow run`); their check runs belong to the PR's head commit.
 - **PR checks**: The foundation CI fails on a patch conflict and reports the name of the conflicting patch file.
-- **Upgrade drill gate**: Branch protection requires the `upgrade-drill` job to pass. It runs after signing and uses the production-signed artifacts and the production trust anchor:
+- **Upgrade drill gate**: A ruleset on main requires the `check` and `upgrade-drill` checks (administrators may bypass it). `upgrade-drill` runs after signing and uses the production-signed artifacts and the production trust anchor. Its base is made by `just drill-base`: the latest stable release's factory image with this build's `u-boot-qemu.bin`, which the emulator boots:
 
 ```
 build.yml   host-toolchain -> firmware (ci) -> system-test (emulation, ephemeral keys)
@@ -135,21 +145,25 @@ upgrade-drill (emulation):
 
 ```
 wrt-config (private repo)
-  .sops.yaml                  age recipients (your workstation key)
-  secrets/*.enc.yaml          pppoe, dae subscriptions, wg keys, tailscale authkey, smb users
-  dae/*.dae(.enc)             user dae config (no lan_interface / wan_interface)
+  .sops.yaml                  age recipient (your workstation key)
+  secrets/secrets.enc.yaml    pppoe, wg key, tailscale authkey + login server, smb users
+  dae/*.dae.enc               user dae config (no lan_interface / wan_interface), encrypted:
+                              its nodes and subscriptions are secrets
   pods/*.yaml                 pod specs
-  uci/*.uci.tmpl              uci batch templates, filled from secrets at push time
+  uci/*.uci.tmpl              uci batch templates; @path@ is filled from the secrets at push time
 ```
+
+- **Skeleton**: `scripts/config-init.d/` holds the skeleton as plain files; `config-init` copies it, encrypts the secrets and the dae configuration with sops for the recipient in `.sops.yaml`, and commits.
 
 - **Commands**: `just config-init` generates the private repository skeleton; `just config-push <host>` performs the push, with the private repository location given by `WRT_CONFIG_DIR`. Both share their names with their scripts, following the foundation's "object-verb" naming rule. The push runs these steps in order:
   1. Decrypt with sops into a temporary directory, which is cleaned up on exit;
   2. Render the templates;
-  3. Validate locally: `uci` syntax checks, plus a pre-validation with `dae validate` on the device. The pre-validation runs in a temporary directory on the device and changes no existing configuration;
-  4. Compute a configuration hash for each service, compare it with the record on the device, and push and reload only the services that changed;
-  5. Transfer the files to the device over `ssh -o PasswordAuthentication=no` and run `uci batch`;
-  6. If a service fails to reload, restore its pre-push backup, reload it again, and exit with a nonzero status.
-- **Preservation across upgrades**: The paths the push writes (`/etc/dae/`, the relevant entries in `/etc/config/*`, and local files other than the Pod YAML) are appended to the image's `/etc/sysupgrade.conf` so they survive A/B upgrades.
+  3. Transfer the files to `/tmp/wrt-push` on the device over SSH with key authentication only (`BatchMode`, `PasswordAuthentication=no`, `PreferredAuthentications=publickey`, and `IdentitiesOnly` with `--identity`);
+  4. Validate on the device without changing anything: `dae validate` in a scratch directory set up as the dae service sets up its own (the firmware's `lan_interface` and DNS listener, an include of the configuration file), and each `uci batch` on a copy of `/etc/config`. A rejected push removes `/tmp/wrt-push` and changes nothing else;
+  5. Compare each service's hash with the one recorded in `/etc/wrt-config/<service>` at its last push, and write and reload only the services that changed;
+  6. Wait until each reloaded service is back (dae: its health check; network: the LAN up; tailscale: logged in). If it is not, restore its pre-push files, reload it again, and exit with a nonzero status.
+- **The device side**: `scripts/config-push.d/device.sh` is sent over SSH for each step (`sh -s -- validate | hashes | apply <service>`), so the image carries nothing of the push.
+- **Preservation across upgrades**: What the push writes outside `/etc/config` (`/etc/dae/`, `/etc/tailscale/`, and `/etc/wrt-config/` with the hashes and the tailnet login) is listed in the image's `/lib/upgrade/keep.d/wrt-config`, sysupgrade's own list of what the backup keeps, so it survives A/B upgrades; the uci configuration, the SMB user database and `/etc/passwd` are kept as conffiles already. The Pods live on the data disk.
 - **Why encrypt**: If the private repository leaks or is made public by mistake, every plaintext secret is exposed. sops with age fits the Nix ecosystem, and decryption happens only on the workstation. This is a default security measure added by this design; exploration only confirmed "secrets live in a private repository".
 
 ### D7. Verification
@@ -157,12 +171,14 @@ wrt-config (private repo)
 - **Tests map one-to-one to specs**:
   - `tests/release/test_signing.py`: One part runs on the host: it statically audits the workflows (only `sign` references `release-signing`, and the signing job's only steps are the download, `sign-tools`, and `release-sign.sh`) and drives `release-sign.sh` with ephemeral keys. The other part confirms in the emulator that the device rejects an index signed with another key.
   - `tests/release/test_publishing.py`: Drives `release-publish.sh` on the host, covering the attachments, the prerelease versus stable decision, a run identifier mismatch, and the release notes.
-  - `tests/release/test_device_sync.py`: An emulator test. A mock GitHub Releases API runs in `inet` (HTTPS, with a certificate issued by the test CA), while direct connections from the router's WAN address to it are blocked.
+  - `tests/release/test_device_sync.py`: An emulator test. A stand-in for GitHub's Releases API runs in `inet` (HTTPS, with a certificate issued by the test CA, one directory per repository as on GitHub); dae routes it through the proxy, and the ISP blocks direct connections from the router's WAN address to it.
   - `tests/release/test_upstream_bump.py`: Uses local bare repositories on the host as the three upstreams and covers opening a PR, not opening a PR, and patch conflicts; the two upgrade drill scenarios are tagged by the tests that `upgrade-drill` runs.
   - `tests/ops/test_config_push.py`: Runs `just config-push` against the router in the emulator, using a throwaway config repository and an age test key.
-- **Ephemeral key fixtures**: `wrt_tests/keys.py` generates a one-time apk EC key and usign key and provides two fixtures:
+- **Ephemeral key fixtures**: `wrt_tests/keys.py` generates a one-time apk EC key and usign key (`release_keys`), and:
   - `signed_repo`: re-signs the current build's artifacts with `release-sign.sh`;
-  - `trust`: writes the matching public keys into the router's test overlay, replacing the existing public keys in `/etc/apk/keys`.
+  - the router's snapshot trusts the matching public keys (`install_trust`), in place of the image's own in `/etc/apk/keys` and `/etc/opkg/keys`, as a release image trusts the release keys.
+  - With `WRT_SIGNED` naming a production-signed build (the `upgrade-drill` job), nothing is signed and the image's own trust anchors decide.
+- **What the emulator lacks**: The harness logs in with a key of its own, authorized in the snapshot, because the config push tests give root a password. The emulated internet has no time server and a snapshot restore rewinds the clock, so the harness sets the router's clock after every boot and restore, as NTP does on a device in service (the firmware certificate is valid from the signing time, D2).
 - **Drill tests**: The tests run by the `upgrade-drill` job carry a `drill` marker and are selected separately with pytest's `-m drill`. `system-test` runs the same tests with ephemeral keys, so the drill logic itself is tested on every commit; after signing, the same tests simply run again with the production keys and the production trust anchor.
 - **GitHub-side settings**: The environment reviewers and the branch protection required checks are GitHub repository settings, not code. `scripts/github-audit.sh` reads and checks them with `gh api`, and runs periodically in the check workflow.
 - **Device**: no step needs the device; every scenario runs in the emulator or on the host.
@@ -170,7 +186,7 @@ wrt-config (private repo)
 ## Risks / Trade-offs
 
 - **[If the build job is compromised, the current artifacts may already be tampered with]** Signing isolation cannot prevent this. → Long term, reproducible builds and comparison against third-party rebuilds can detect it; short term, manual approval plus reading the diff are the safeguard.
-- **[GitHub API rate limiting or throttling]** → Sync runs once a day and uses conditional requests (ETag).
+- **[GitHub API rate limiting or throttling]** → Sync runs once a day and makes one API request; a release it has already is not downloaded again.
 - **[Arguments and behavior of `apk adbsign`]** → The last step of `release-sign.sh` verifies with the public keys in `wrt-keyring` and treats a failed check as a failure; `test_signing.py` covers this path.
 - **[The previous stable release used for the drill is itself defective]** For example, if the old release's upgrade logic has a bug, the drill keeps failing. → The maintainer then decides, and ships an interim release after the fix; the drill baseline is always the latest stable release.
 - **[The emulator cannot cover the hardware path]** → A/B rollback is the safety net: if the device fails to boot after an upgrade, it automatically returns to the previous slot.
@@ -180,12 +196,14 @@ wrt-config (private repo)
 
 ## Migration Plan
 
-1. Generate the release apk EC key pair and usign key pair. Store the private keys as secrets of the `release-signing` environment, and put the public keys into `wrt-keyring`.
-2. Set up the private config repository and the age key, and migrate the existing configuration into it.
-3. After the first stable release passes its upgrade drill, flash its factory image (which already includes `wrt-keyring`) and push the configuration. All later updates go through sync plus `wrt-update`.
-4. Rollback: `wrt-slot switch` returns to the previous slot; the local repository keeps the latest 3 releases, so you can also upgrade again to a specific older release.
+1. Set up GitHub: the `release-signing` environment with the maintainer as required reviewer and `main` and `bump/*` as its only deployment branches, and a ruleset on main requiring `check` and `upgrade-drill`. `just github-audit` reads them back.
+2. The maintainer generates the release apk EC key pair and usign key pair with `just release-keys --upload` on their own machine: the private keys go to the environment's secrets and an offline backup, never into the repository; the public keys go into `wrt-keyring` and are committed.
+3. Set the repository variable `RELEASE_SIGNING` to `enabled`: from then on main and bump builds are signed, drilled and published.
+4. Set up the private config repository and the age key (`just config-init`), and migrate the existing configuration into it.
+5. After the first stable release passes its upgrade drill, flash its factory image (which already includes `wrt-keyring`) and push the configuration. All later updates go through sync plus `wrt-update`.
+6. Rollback: `wrt-slot switch` returns to the previous slot; the local repository keeps the latest 3 releases, so you can also upgrade again to a specific older release.
 
 ## Open Questions
 
 - The Release tag format can be adjusted later without affecting the specs.
-- For the sync container's base image, pick a minimal, well-maintained image during implementation; this does not affect the specs.
+- The sync container needs no base image (D4).
