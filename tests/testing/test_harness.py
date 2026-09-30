@@ -69,13 +69,23 @@ def _coverage(openspec: Path, tests: Path, *args: str) -> subprocess.CompletedPr
 
 @spec(CAPABILITY, "One test per spec scenario", "Generate coverage report")
 def test_coverage_report(demo: tuple[Path, Path]) -> None:
-    result = _coverage(*demo, "--change", "demo-change")
+    openspec, tests = demo
+    result = _coverage(openspec, tests, "--change", "demo-change")
     assert "covered    demo/widget / Demo / covered one  demo/test_widget.py::test_covered" in (
         result.stdout
     )
     assert "MISSING    demo/widget / Demo / missing one" in result.stdout
     assert "demo-change: no test for demo/widget / Demo / missing one" in result.stderr
     assert result.returncode == 1
+    # Archived, the spec is the system as built: its scenarios need their tests
+    # without being named.
+    change = openspec / "changes" / "demo-change"
+    (change / "specs" / "demo").rename(openspec / "specs" / "demo")
+    shutil.rmtree(change)
+    archived = _coverage(openspec, tests)
+    assert "MISSING    demo/widget / Demo / missing one" in archived.stdout
+    assert "error: no test for demo/widget / Demo / missing one" in archived.stderr
+    assert archived.returncode == 1
 
 
 @spec(CAPABILITY, "One test per spec scenario", "Marker names a missing scenario")

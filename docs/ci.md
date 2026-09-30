@@ -4,7 +4,7 @@ There are three workflows, all on GitHub-hosted ubuntu-24.04 runners (4-core x86
 
 | Workflow | Job | What it does | Cache |
 |---|---|---|---|
-| `check.yml` | `check` | `nix develop .#quality -c just check`, then `spec-coverage` requires every scenario of the implemented changes to have its test; runs on every push, with no path filter | — |
+| `check.yml` | `check` | `nix develop .#quality -c just check`, whose `spec-coverage` requires every scenario of the archived specs to have its test; runs on every push, with no path filter | — |
 | `check.yml` | `github-audit` | Weekly (and on demand): `just github-audit` reads back the settings the release pipeline relies on, the `release-signing` environment's reviewers and branches and the checks main requires | — |
 | `build.yml` | `host-toolchain` | Fetch and patch, then build the tools and the cross toolchain, in `nix develop .#build` | `staging_dir/{host,hostpkg,toolchain-*}` and `build_dir/host`, keyed by `scripts/toolchain-key.sh` |
 | `build.yml` | `firmware` | Restore the toolchain, then build with the ci profile (all kmods), in `nix develop .#build`; produces unsigned artifacts and `manifest.json` | `dl/` and ccache |

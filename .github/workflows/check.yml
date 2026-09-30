@@ -41,15 +41,9 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@v23
 
       - name: Check
+        # spec-coverage among the checks: every scenario of the archived specs has
+        # its one test (or is verified elsewhere), which build.yml's system-test runs.
         run: nix develop .#quality -c just check
-
-      - name: Spec coverage of the implemented changes
-        # Every scenario of these changes has its one test (or is verified
-        # elsewhere); the system-test jobs of build.yml run those tests.
-        run: >-
-          nix develop .#quality -c uv run --directory tests --locked spec-coverage --summary
-          --change r4s-build-foundation --change r4s-ab-rollback --change r4s-ebpf-datapath
-          --change r4s-services --change r4s-release-pipeline
 
   github-audit:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

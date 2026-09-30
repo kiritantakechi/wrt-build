@@ -8,7 +8,8 @@ The report lists, for each scenario, the test that verifies it, or the job named
 * a spec test outside ``<domain>/test_<capability>.py``, a module test without
   exactly one ``@spec`` of that module's capability, or a ``@spec`` in ``unit/``.
 
-With ``--change NAME`` the scenarios of that change must all be covered as well.
+Every scenario of the archived specs (``openspec/specs``, the system as built)
+must be covered; with ``--change NAME`` so must those of that change in flight.
 """
 
 import argparse
@@ -133,7 +134,7 @@ def coverage_errors(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Print the coverage report; exit 1 on structural errors or uncovered gated scenarios."""
+    """Print the coverage report; exit 1 on structural errors or uncovered required scenarios."""
     parser = argparse.ArgumentParser(prog="spec-coverage", description=__doc__.splitlines()[0])
     parser.add_argument(
         "--change",
@@ -168,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
             status, detail = "elsewhere", by
         else:
             status, detail = "MISSING", ""
-            if scenario.change in args.change:
+            if scenario.change is None or scenario.change in args.change:
                 missing.append(scenario)
         totals[status] += 1
         if not args.summary:
@@ -183,7 +184,8 @@ def main(argv: list[str] | None = None) -> int:
     for error in errors:
         print(f"error: {error}", file=sys.stderr)
     for scenario in missing:
-        print(f"error: {scenario.change}: no test for {scenario.id}", file=sys.stderr)
+        change = f"{scenario.change}: " if scenario.change else ""
+        print(f"error: {change}no test for {scenario.id}", file=sys.stderr)
     return 1 if errors or missing else 0
 
 
