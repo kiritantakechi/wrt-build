@@ -37,6 +37,11 @@
           actionlint
           editorconfig-checker
           gitleaks
+          # releases and the checks of the repository's GitHub settings
+          gh
+          # the private configuration: secrets encrypted to an age key
+          sops
+          age
           unstable.uv
         ];
 
@@ -196,6 +201,13 @@
           samba
           curl
           openssl
+          # the release pipeline (r4s-release-pipeline D7): the signing tools the
+          # sign job uses, the tests signing with keys of their own; the private
+          # configuration's tools, and a secret scanner for its history
+          (import ./nix/sign-tools.nix { inherit pkgs; })
+          sops
+          age
+          gitleaks
         ])
         ++ testSsh pkgs;
 
@@ -216,7 +228,9 @@
         map (tool: pkgs.writeShellScriptBin tool ''exec ${pkgs.openssh}/bin/${tool} -F ${config} "$@"'') [
           "ssh"
           "scp"
-        ];
+        ]
+        # the harness's own key, and the keys the configuration push tests use
+        ++ [ (pkgs.writeShellScriptBin "ssh-keygen" ''exec ${pkgs.openssh}/bin/ssh-keygen "$@"'') ];
 
       # Fingerprint of everything that shapes host-built tools and the cross
       # toolchain: the build package set and the build profile. The toolchain
@@ -266,6 +280,8 @@
         environmentsFor pkgs unstable
         // {
           default = (environmentsFor pkgs unstable).wrt-build-fhs;
+          # The release signing tools (r4s-release-pipeline D2): `nix run .#sign-tools`.
+          sign-tools = import ./nix/sign-tools.nix { inherit pkgs; };
         }
       );
 

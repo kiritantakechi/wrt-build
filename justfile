@@ -63,6 +63,16 @@ check *names:
 fmt *names:
     scripts/fmt.sh {{ names }}
 
+# Create release keys: public halves into wrt-keyring, --upload the private (maintainer)
+[group('release')]
+release-keys directory *args:
+    nix run .#sign-tools -- scripts/release-keys.sh {{ directory }} {{ args }}
+
+# Sign one build's outputs for release with the pinned signing tools (no build tools)
+[group('release')]
+release-sign build signed *args:
+    nix run .#sign-tools -- scripts/release-sign.sh {{ build }} {{ signed }} {{ args }}
+
 # Prepare a GitHub-hosted runner (CI only)
 [group('ci')]
 runner-prepare:

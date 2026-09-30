@@ -8,3 +8,19 @@ CONFIG_ALL_KMODS=y
 # CONFIG_PACKAGE_kmod-usb-net2280 is not set
 CONFIG_CCACHE=y
 CONFIG_BUILD_LOG=y
+
+# The release build (r4s-release-pipeline D1), which CI tests, signs and publishes:
+# buildbot mode keeps the key made for the build out of the image, whose only
+# trust anchors are the release keys of wrt-keyring; the firmware is signed
+# afterwards by the sign job, never here.
+CONFIG_BUILDBOT=y
+# CONFIG_PACKAGE_openwrt-keyring is not set
+CONFIG_PACKAGE_wrt-keyring=y
+# CONFIG_SIGN_FIRMWARE is not set
+# Buildbot mode's other defaults, not wanted here: no SDK, image builder or
+# toolchain archives, no target-wide package set, no kernel debug archive.
+# CONFIG_SDK is not set
+# CONFIG_IB is not set
+# CONFIG_MAKE_TOOLCHAIN is not set
+# CONFIG_ALL_NONSHARED is not set
+# CONFIG_COLLECT_KERNEL_DEBUG is not set
