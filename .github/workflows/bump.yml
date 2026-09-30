@@ -1,0 +1,62 @@
+# The weekly bump of upstream.lock (r4s-release-pipeline D5): when openwrt,
+# packages or luci moved, a pull request from bump/<date> with the new lock, the
+# old and new SHAs and the commits in between. A pull request opened with the
+# workflow's token starts no workflows, so this one starts check and build on the
+# bump branch itself: build signs the candidate, drills the upgrade to it and
+# publishes it as a pre-release, and main's rules merge nothing before the drill
+# passed.
+name: bump
+
+on:
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: bump
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NIX_CONFIG: experimental-features = nix-command flakes
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      - name: Bump upstream.lock
+        run: nix develop .#quality -c just upstream-bump "$RUNNER_TEMP/pull-request.md"
+
+      - name: Open the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          description="$RUNNER_TEMP/pull-request.md"
+          if [ ! -s "$description" ]; then
+            echo "upstream has not moved"
+            exit 0
+          fi
+          branch="bump/$(date -u +%Y-%m-%d)"
+          title=$(head -n 1 "$description")
+          tail -n +3 "$description" >"$RUNNER_TEMP/body.md"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -q -m "$title" upstream.lock
+          git push -q origin "$branch"
+          gh pr create --base main --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          gh workflow run check.yml --ref "$branch"
+          gh workflow run build.yml --ref "$branch"

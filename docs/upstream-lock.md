@@ -26,20 +26,10 @@
 
 Why feeds are not fetched by `scripts/feeds update`: if a feed directory already exists and the config says `^sha`, upstream `scripts/feeds update` skips it without updating anything. So when a SHA in the lock changes, the local feed would not follow. That is why `fetch` checks out each feed itself and afterwards only runs `feeds update -i` to rebuild the index.
 
-## Currently pinned versions
-
-| Repository | SHA | Commit time |
-|---|---|---|
-| openwrt | `101929399c12644ac8c3fe9b11b83c93fe9ee755` | 2026-09-27 22:07:24 +0200 |
-| packages | `a637759c3aae15f112bff2f3a845c74ee331b978` | 2026-09-27 22:10:12 +0200 |
-| luci | `05dc750ddb5e5c4aacf4ae0635bbf8b14a494909` | 2026-09-27 16:42:14 UTC |
-
-luci is pinned to the last commit on luci master before that openwrt commit.
-
 ## Updating
 
-Updates happen only through the weekly bump PR (see `r4s-release-pipeline`). Do not change a SHA by hand without running a full build. When changing a SHA, update `commit-epoch` along with it:
+`upstream.lock` itself is the record of what is pinned. It changes through the weekly bump (`.github/workflows/bump.yml`, `scripts/upstream-bump.sh`): every Monday the heads of the three default branches are compared with the lock, and when any moved, a pull request from `bump/<date>` updates the SHA and commit time of each and lists the commits in between. It merges once its candidate has passed the upgrade drill (docs/release-flow.md). To bump by hand, run the same script and build before committing:
 
 ```sh
-git -C <checkout> log -1 --format=%ct <sha>
+just upstream-bump /tmp/pull-request.md
 ```

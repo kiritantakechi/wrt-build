@@ -73,6 +73,26 @@ release-keys directory *args:
 release-sign build signed *args:
     nix run .#sign-tools -- scripts/release-sign.sh {{ build }} {{ signed }} {{ args }}
 
+# Prepare the upgrade drill's base: the latest stable release, or this build before one
+[group('release')]
+drill-base:
+    scripts/drill-base.sh
+
+# Assemble a signed build into a release; --upload publishes it on GitHub
+[group('release')]
+release-publish signed release *args:
+    scripts/release-publish.sh {{ signed }} {{ release }} {{ args }}
+
+# Move upstream.lock to the upstream heads; the pull request's text to a file
+[group('release')]
+upstream-bump description *args:
+    scripts/upstream-bump.sh {{ description }} {{ args }}
+
+# Check the repository's GitHub settings the release pipeline relies on
+[group('release')]
+github-audit *args:
+    scripts/github-audit.sh {{ args }}
+
 # Prepare a GitHub-hosted runner (CI only)
 [group('ci')]
 runner-prepare:

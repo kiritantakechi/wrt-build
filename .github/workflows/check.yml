@@ -1,16 +1,22 @@
 # Code standards (design D12) on every push and pull request: `just check` with
 # the quality devShell. No paths filter, so documentation-only changes are
 # checked as well. The whole history is fetched because gitleaks scans it.
+# Weekly, github-audit reads back the settings the release pipeline relies on
+# (r4s-release-pipeline D7), which no push changes.
 name: check
 
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "41 4 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
+  # github-audit reads the release-signing environment.
+  actions: read
 
 concurrency:
   group: check-${{ github.ref }}
@@ -43,4 +49,18 @@ jobs:
         run: >-
           nix develop .#quality -c uv run --directory tests --locked spec-coverage --summary
           --change r4s-build-foundation --change r4s-ab-rollback --change r4s-ebpf-datapath
-          --change r4s-services
+          --change r4s-services --change r4s-release-pipeline
+
+  github-audit:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      - name: Audit the repository's settings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: nix develop .#quality -c just github-audit

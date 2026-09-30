@@ -1,10 +1,19 @@
-# Build the R4S firmware in two stages that each fit in the 6-hour job limit, then
-# test the result in the emulator (design D11):
+# Build the R4S firmware in two stages that each fit in the 6-hour job limit, test
+# the result in the emulator (design D11), then sign and release it
+# (r4s-release-pipeline D2, D3, D5):
 #   host-toolchain: tools + cross toolchain, cached by the inputs that affect them
 #   firmware:       everything else (ci profile: all kmods), unsigned artifacts
-#   system-test:    the system tests against the shipped image, JUnit reports; two
-#                   emulators in parallel: the base system, and the network
-# No job here uses any secret; signing happens elsewhere (r4s-release-pipeline).
+#   system-test:    the system tests against the shipped image, JUnit reports, in
+#                   parallel emulators (the drill among them, with test keys)
+#   sign:           the pinned signing tools on the unsigned artifacts; the keys
+#                   exist only in the release-signing environment, whose reviewers
+#                   approve every run
+#   upgrade-drill:  the latest stable release upgraded to the signed candidate in
+#                   the emulator, with the production trust anchors
+#   publish:        the release: a candidate (pre-release) from a bump branch,
+#                   stable from main
+# Signing and what follows run on main and bump/* once the release keys are in
+# place (repository variable RELEASE_SIGNING = enabled). Only sign has a secret.
 name: build
 
 on:
@@ -162,6 +171,8 @@ jobs:
             paths: network
           - name: services
             paths: storage services
+          - name: release
+            paths: release ops
     steps:
       - uses: actions/checkout@v7
 
@@ -192,3 +203,113 @@ jobs:
           path: tests/.reports
           include-hidden-files: true
           if-no-files-found: error
+
+  # The keys exist only in the release-signing environment, whose reviewers
+  # approve every run; this job runs nothing but the pinned signing tools on
+  # what the firmware job built. Main and the weekly bump branches only, never
+  # a pull request, once the release keys are in place.
+  sign:
+    needs: system-test
+    if: >-
+      vars.RELEASE_SIGNING == 'enabled' && github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/bump/'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release-signing
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: firmware-unsigned
+          path: ${{ runner.temp }}/unsigned
+
+      - name: Sign
+        env:
+          APK_KEY: ${{ secrets.RELEASE_APK_KEY }}
+          FW_KEY: ${{ secrets.RELEASE_FW_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$APK_KEY" >"$RUNNER_TEMP/apk.key"
+          printf '%s\n' "$FW_KEY" >"$RUNNER_TEMP/fw.key"
+          nix run .#sign-tools -- scripts/release-sign.sh "$RUNNER_TEMP/unsigned" "$RUNNER_TEMP/signed" \
+            --apk-key "$RUNNER_TEMP/apk.key" --fw-key "$RUNNER_TEMP/fw.key"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firmware-signed
+          path: ${{ runner.temp }}/signed
+          if-no-files-found: error
+
+  # The latest stable release (or this build, before the first) upgraded to the
+  # signed candidate in the emulator, trusting only its own release keys: the
+  # drill tests, as system-test runs them with test keys.
+  upgrade-drill:
+    needs: sign
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Prepare runner
+        # Before Nix is installed, so the script runs directly rather than via just.
+        run: scripts/runner-prepare.sh
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: firmware-unsigned
+          path: ${{ env.WRT_WORKDIR }}/out/ci
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: firmware-signed
+          path: ${{ env.WRT_WORKDIR }}/signed
+
+      - name: Drill base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: nix develop -c just drill-base
+
+      - name: Upgrade drill
+        env:
+          WRT_SIGNED: ${{ env.WRT_WORKDIR }}/signed
+        run: nix develop -c just test drill-base -m drill -rs
+
+      - name: Test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: upgrade-drill-report
+          path: tests/.reports
+          include-hidden-files: true
+          if-no-files-found: error
+
+  # A candidate (pre-release) from a bump branch, a stable release from main,
+  # never before the drill passed.
+  publish:
+    needs: upgrade-drill
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: firmware-signed
+          path: ${{ runner.temp }}/signed
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE: ${{ github.ref != 'refs/heads/main' && '--prerelease' || '' }}
+        run: >-
+          nix develop .#quality -c scripts/release-publish.sh "$RUNNER_TEMP/signed" "$RUNNER_TEMP/release"
+          ${CANDIDATE:+"$CANDIDATE"} --upload
