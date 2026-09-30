@@ -12,6 +12,7 @@ Any PR, issue or push to a repository the maintainer does not own requires expli
 | 6 | openwrt/openwrt | `patches/openwrt/0007-rockchip-set-a-NIC-s-IRQ-affinity-only-when-that-NIC.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
 | 7 | openwrt/packages | `patches/packages/0001-ksmbd-tools-share-only-what-is-mounted-and-start-onc.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
 | 8 | openwrt/openwrt | `patches/openwrt/0008-ubox-log-to-a-file-only-while-its-mount-point-is-mou.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
+| 9 | openwrt/openwrt | `patches/openwrt/0009-toolchain-check-the-version-stamp-without-a-race.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
 
 ## 1. EROFS compression algorithm
 
@@ -86,3 +87,13 @@ What the patch does: the log file is left out whenever its mount point is not mo
 How this project uses it: the persistent log is `/mnt/data/logs/messages`, on the data disk (r4s-services D2).
 
 Verification log: 2026-09-29, in the emulator the log service restarted while the data disk is absent writes nothing to the SD card, and starts writing to the disk when it is plugged in (`tests/storage/test_data_disk.py`).
+
+## 9. toolchain: the buildbot version check races under make -j
+
+Problem: in buildbot mode, every make that reads the top-level Makefile checks the toolchain's version stamp while `tmp/.build` is newer than the stamp. Each make run from the top level touches `tmp/.build`, and a stamp that names the current version is left as it is, so the check runs in every one of these makes. Under `-j`, world starts several at once (those for `package/cleanup` and `target/compile`), and each writes the version to the same file, `tmp/.ver_check`, before comparing that file with the stamp. When one truncates the file while another compares it, the other sees a different version: it deletes the toolchain along with the build and staging directories, restarts, and the build fails for want of a compiler ("Could not find compiler").
+
+Why it matters here: the release profile builds in buildbot mode, on a toolchain unpacked from the cache, whose stamp is older than `tmp/.build` from the first make on. A CI run lost the R4S firmware job this way (run 36736937629), while the R6S job of the same run, on the same toolchain, got through.
+
+What the patch does: the version is kept in a shell variable instead of `tmp/.ver_check`, so concurrent checks share no file. A stamp of another version still deletes the toolchain and the build and staging directories, as before, and a failing git still stops the build.
+
+Verification log: 2026-10-01, eight makes started a millisecond apart delete the toolchain in 38 of 40 rounds with the upstream check and in none with the patch; `tests/build/test_boards.py` ("Check the version from parallel makes") runs the patched check this way.

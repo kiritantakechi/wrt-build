@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Thu, 1 Oct 2026 06:40:00 +0800
+Subject: [PATCH] toolchain: check the version stamp without a race
+
+In buildbot mode, every make that reads the top-level Makefile checks
+the toolchain's version stamp while tmp/.build is newer than the stamp.
+Each make run from the top level touches tmp/.build, and a stamp that
+names the current version is left as it is, so the check runs in every
+one of these makes. Under -j, world starts several of them at once, such
+as those for package/cleanup and target/compile, and each writes the
+version to the same file, tmp/.ver_check, before comparing that file
+with the stamp. When one truncates the file while another compares it,
+the other sees a different version: it deletes the toolchain along with
+the build and staging directories, and the build fails for want of a
+compiler.
+
+Keep the version in a shell variable instead, so that concurrent checks
+share no file.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+---
+ toolchain/Makefile | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/toolchain/Makefile b/toolchain/Makefile
+index 67b1540..e9cc95f 100644
+--- a/toolchain/Makefile
++++ b/toolchain/Makefile
+@@ -65,11 +65,11 @@ endif
+ ifdef CONFIG_BUILDBOT
+ ifneq ($(wildcard $(TOPDIR)/.git),)
+   $(TOOLCHAIN_DIR)/stamp/.ver_check: $(TMP_DIR)/.build
+-	cd "$(TOPDIR)"; git log --no-show-signature --format=%h -1 toolchain > $(TMP_DIR)/.ver_check
+-	cmp -s $(TMP_DIR)/.ver_check $@ || { \
++	ver=$$(git -C "$(TOPDIR)" log --no-show-signature --format=%h -1 toolchain) || exit; \
++	[ "$$ver" = "$$(cat $@ 2>/dev/null)" ] || { \
+ 		rm -rf $(BUILD_DIR) $(STAGING_DIR) $(TOOLCHAIN_DIR) $(BUILD_DIR_TOOLCHAIN); \
+ 		mkdir -p $(TOOLCHAIN_DIR)/stamp; \
+-		mv $(TMP_DIR)/.ver_check $@; \
++		echo "$$ver" > $@; \
+ 	}
+ 
+ $(TOOLCHAIN_DIR)/info.mk $(STAGING_DIR)/.prepared: $(TOOLCHAIN_DIR)/stamp/.ver_check

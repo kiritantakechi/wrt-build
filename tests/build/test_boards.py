@@ -3,9 +3,11 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -35,6 +37,15 @@ GIT_IDENTITY = {
     "GIT_COMMITTER_NAME": "upstream",
     "GIT_COMMITTER_EMAIL": "upstream@example.net",
 }
+PATCHES = REPO / "patches" / "openwrt"
+# Buildbot mode's version check in toolchain/Makefile: the rule and its recipe.
+VERSION_CHECK = re.compile(
+    r"^  \$\(TOOLCHAIN_DIR\)/stamp/\.ver_check:.*\n(?:\t.*\n)+", re.MULTILINE
+)
+# Makes started a millisecond apart check at once, as world's sub-makes do; the
+# unpatched check deletes the toolchain in most rounds.
+MAKES = 8
+ROUNDS = 20
 
 
 def _builds_beside(build_output: Path) -> list[tuple[Board, Path]]:
@@ -243,15 +254,8 @@ def _board_toolchains() -> list[tuple[str, dict[str, str] | None, str | None]]:
     ]
 
 
-def _tree_to_build_toolchain(workdir: Path, libc: bytes | None, record: bytes | None) -> Path:
-    """Write a stand-in tree whose toolchain holds ``libc``, recorded as ``record``'s.
-
-    Its Makefile answers toolchain-build.sh's val.* queries and builds a toolchain,
-    with LIBC for its C library, only where there is none, as make does; it
-    marks the tree when it does.
-    """
-    tree = workdir / "openwrt"
-    toolchain = tree / "staging_dir" / "toolchain"
+def _commit_toolchain(tree: Path) -> None:
+    """Make ``tree`` a repository whose one commit holds ``toolchain/``."""
     (tree / "toolchain").mkdir(parents=True)
     (tree / "toolchain" / "Makefile").touch()
     subprocess.run(["git", "init", "-q"], cwd=tree, check=True)
@@ -262,6 +266,46 @@ def _tree_to_build_toolchain(workdir: Path, libc: bytes | None, record: bytes | 
         check=True,
         env={**os.environ, **GIT_IDENTITY},
     )
+
+
+def _toolchain_version(tree: Path) -> str:
+    """Return the version buildbot mode stamps a toolchain with: the last commit of toolchain/."""
+    return subprocess.run(
+        ["git", "log", "--format=%h", "-1", "toolchain"],
+        cwd=tree,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def _version_check() -> str:
+    """Return buildbot mode's version check as the patch series leaves toolchain/Makefile."""
+    for patch in sorted(PATCHES.glob("*.patch")):
+        for diff in patch.read_text().split("\ndiff --git ")[1:]:
+            if not diff.startswith("a/toolchain/Makefile "):
+                continue
+            # The patched side of each hunk: its context and its added lines.
+            patched = "".join(
+                f"{line[1:]}\n"
+                for line in diff.splitlines()
+                if line.startswith((" ", "+")) and not line.startswith("+++")
+            )
+            if rule := VERSION_CHECK.search(patched):
+                return rule.group()
+    pytest.fail("no patch in patches/openwrt carries the version check of toolchain/Makefile")
+
+
+def _tree_to_build_toolchain(workdir: Path, libc: bytes | None, record: bytes | None) -> Path:
+    """Write a stand-in tree whose toolchain holds ``libc``, recorded as ``record``'s.
+
+    Its Makefile answers toolchain-build.sh's val.* queries and builds a toolchain,
+    with LIBC for its C library, only where there is none, as make does; it
+    marks the tree when it does.
+    """
+    tree = workdir / "openwrt"
+    toolchain = tree / "staging_dir" / "toolchain"
+    _commit_toolchain(tree)
     (tree / "feeds.conf").touch()
     neutral = workdir / "neutral-libc.so"
     neutral.write_bytes(LIBC)
@@ -323,15 +367,66 @@ def test_the_toolchain_names_its_version(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     # Buildbot mode deletes a toolchain whose version stamp does not name the
     # last commit of toolchain/ (toolchain/Makefile).
-    last = subprocess.run(
-        ["git", "log", "--format=%h", "-1", "toolchain"],
-        cwd=tree,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
     stamp = tree / "staging_dir" / "toolchain" / "stamp" / ".ver_check"
-    assert stamp.read_text() == last
+    assert stamp.read_text() == _toolchain_version(tree)
+
+
+def _stamped_toolchain(tree: Path, version: str) -> tuple[Path, Path]:
+    """Put a toolchain stamped with ``version`` into ``tree``; return its compiler and stamp.
+
+    The stamp is older than tmp/.build, as a stamp that names the current version
+    stays after every make from the top level, which touches tmp/.build.
+    """
+    toolchain = tree / "staging_dir" / "toolchain"
+    shutil.rmtree(toolchain, ignore_errors=True)
+    compiler = toolchain / "bin" / "gcc"
+    stamp = toolchain / "stamp" / ".ver_check"
+    compiler.parent.mkdir(parents=True)
+    compiler.touch()
+    stamp.parent.mkdir()
+    stamp.write_text(version)
+    os.utime(stamp, (0, 0))
+    (tree / "tmp").mkdir(exist_ok=True)
+    (tree / "tmp" / ".build").touch()
+    return compiler, stamp
+
+
+@spec(CAPABILITY, "One toolchain for every board", "Check the version from parallel makes")
+def test_parallel_makes_check_the_version(tmp_path: Path) -> None:
+    tree = tmp_path / "openwrt"
+    _commit_toolchain(tree)
+    version = _toolchain_version(tree)
+    (tree / "Makefile").write_text(
+        f"TOPDIR := {tree}\n"
+        "TMP_DIR := $(TOPDIR)/tmp\n"
+        "BUILD_DIR := $(TOPDIR)/build_dir/target\n"
+        "STAGING_DIR := $(TOPDIR)/staging_dir/target\n"
+        "TOOLCHAIN_DIR := $(TOPDIR)/staging_dir/toolchain\n"
+        "BUILD_DIR_TOOLCHAIN := $(TOPDIR)/build_dir/toolchain\n" + _version_check()
+    )
+    for _ in range(ROUNDS):
+        compiler, stamp = _stamped_toolchain(tree, version)
+        makes = []
+        for _ in range(MAKES):
+            makes.append(
+                subprocess.Popen(
+                    ["make", "-s", "-C", tree, stamp],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            )
+            time.sleep(0.001)
+        for make in makes:
+            _, errors = make.communicate()
+            assert make.returncode == 0, errors
+        assert compiler.exists()
+        assert stamp.read_text() == version
+    # A toolchain of another version is still deleted, and stamped anew.
+    compiler, stamp = _stamped_toolchain(tree, "0000000\n")
+    subprocess.run(["make", "-s", "-C", tree, stamp], check=True)
+    assert not compiler.exists()
+    assert stamp.read_text() == version
 
 
 @spec(CAPABILITY, "One toolchain for every board", "A toolchain built for a board")
