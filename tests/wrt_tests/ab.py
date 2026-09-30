@@ -18,6 +18,7 @@ ENV_OFFSET, ENV_SIZE = 0x3F8000, 0x8000
 # environment: MBR, loader (sector 64 on) and u-boot.itb (8 MiB on).
 BOOT_AREA = ((0, 0x200), (0x8000, ENV_OFFSET), (0x800000, 0x2000000))
 PARTITIONS = {"a": (1, 2), "b": (3, 4)}
+READ_BLOCK = 1 << 20
 
 
 def slot(router: Router) -> str:
@@ -49,10 +50,18 @@ def setenv(router: Router, **variables: str | int) -> None:
 
 
 def region_sha256(router: Router, device: str, start: int, end: int) -> str:
-    """Return the SHA-256 of bytes ``start`` up to ``end`` of a block device."""
+    """Return the SHA-256 of bytes ``start`` up to ``end`` of a block device.
+
+    dd reads in the largest block (up to 1 MiB) both ends are a multiple of:
+    a sector at a time, the emulated SD card takes minutes for a slot.
+    """
+    block = READ_BLOCK
+    while start % block or end % block:
+        block //= 2
     return router.run(
-        f"dd if={device} bs=512 skip={start // 512} count={(end - start) // 512} 2>/dev/null"
-        " | sha256sum | cut -d' ' -f1"
+        f"dd if={device} bs={block} skip={start // block} count={(end - start) // block}"
+        " 2>/dev/null | sha256sum | cut -d' ' -f1",
+        timeout=300,
     )
 
 

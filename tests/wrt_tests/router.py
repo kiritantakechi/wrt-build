@@ -38,11 +38,17 @@ BOOT_ID = "cat /proc/sys/kernel/random/boot_id"
 class Router:
     """Run commands on the router and wait for it."""
 
-    def __init__(self, target: Target, emulator: Emulator) -> None:
-        """Bind to the SSHDriver of ``target``; ``emulator`` is the machine it runs on."""
+    def __init__(self, target: Target, emulator: Emulator, key: Path) -> None:
+        """Bind to the SSHDriver of ``target`` on ``emulator``; log in with ``key``.
+
+        root has no password on a fresh router, and dropbear lets it in without
+        one; the key logs in once it has one.
+        """
         self.target = target
         self.emulator = emulator
+        self.key = key
         self.ssh: SSHDriver = target.get_driver("SSHDriver", activate=False)
+        self.ssh.keyfile = str(key)
         self.address = str(target.get_resource("NetworkService").address)
 
     def _connected(self) -> SSHDriver:
@@ -61,13 +67,30 @@ class Router:
             raise AssertionError(msg)
         return "\n".join(map(str, stdout))
 
+    def poll(self, command: str, *, timeout: float = 30) -> str | None:
+        """Run a shell command if the router answers; return stdout, or None if not or it failed.
+
+        For states the router passes through while it reboots, when SSH comes
+        and goes, or hangs while the old system goes down.
+        """
+        try:
+            stdout, _, code = self._connected().run(command, timeout=timeout)
+        # labgrid raises a bare Exception for a connection that never came up.
+        except Exception:  # noqa: BLE001
+            self.disconnect()
+            return None
+        if code != 0:
+            self.disconnect()
+            return None
+        return "\n".join(map(str, stdout))
+
     def returncode(self, command: str, *, timeout: float = 60) -> int:
         """Run a shell command on the router and return only its exit status."""
         _, _, code = self._connected().run(command, timeout=timeout)
         return int(code)
 
     def _ssh(self, *options: str) -> list[str]:
-        return ["ssh", *options, "-o", "BatchMode=yes", f"root@{self.address}"]
+        return ["ssh", *options, "-o", "BatchMode=yes", "-i", str(self.key), f"root@{self.address}"]
 
     def login(self, script: str, *, timeout: float = 60) -> str:
         """Log in interactively (with a terminal) and type ``script``; return the session output.
@@ -113,7 +136,7 @@ class Router:
             time.sleep(2)
 
     def wait_ready(self, timeout: float = BOOT_TIMEOUT) -> None:
-        """Wait until SSH answers and procd has run every init script."""
+        """Wait until SSH answers and procd has run every init script; set the clock."""
         deadline = time.monotonic() + timeout
         self.wait_ssh(timeout)
         # procd logs through ulog, which writes to logd (not the kernel log) once
@@ -121,6 +144,17 @@ class Router:
         while self.returncode(f"logread | grep -qF -- '{READY_MARK}'") != 0:
             _check(deadline, "procd never reported init complete")
             time.sleep(2)
+        self.set_clock()
+
+    def set_clock(self) -> None:
+        """Set the router's clock to the runner's, as NTP does on a router in service.
+
+        The emulated internet has no time server: a router boots with the time
+        of its newest file in /etc, and a restored snapshot rewinds the clock to
+        when it was taken. What is signed now (a release's certificate) is valid
+        from now on.
+        """
+        self.run(f"date -s @{int(time.time())} >/dev/null")
 
     def http(
         self,
@@ -153,7 +187,8 @@ class Router:
         """Wait until the router has booted again after ``previous_boot`` and is ready.
 
         The old system may still answer while it shuts down, and the reboot may
-        cut the connection in the middle of a command; either only means waiting on.
+        cut or hang the connection in the middle of a command; each only means
+        waiting on.
         """
         deadline = time.monotonic() + timeout
         while True:
@@ -162,7 +197,7 @@ class Router:
                 stdout, _, code = self._connected().run(BOOT_ID)
                 if code == 0 and "\n".join(map(str, stdout)) != previous_boot:
                     return
-            except ExecutionError:
+            except ExecutionError, subprocess.TimeoutExpired:
                 pass
             self.disconnect()
             _check(deadline, "the router never rebooted")
@@ -199,9 +234,10 @@ class Router:
             service.address = self.address = original
 
     def reset(self) -> None:
-        """Return to the state right after boot, the emulator's snapshot."""
+        """Return to the state right after boot (the emulator's snapshot), at the time of now."""
         self.disconnect()
         self.emulator.restore()
+        self.set_clock()
 
 
 def _port_open(address: str, port: int) -> bool:

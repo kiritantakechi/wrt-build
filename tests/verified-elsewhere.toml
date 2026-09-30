@@ -137,3 +137,11 @@ capability = "testing/harness"
 requirement = "Emulator run on every build"
 scenario = "Test failure"
 by = "build.yml system-test fails and publishes the JUnit report (task 11.6)"
+
+# release/signing: GitHub's environment protection holds the sign job.
+
+[[scenario]]
+capability = "release/signing"
+requirement = "Every signing requires manual approval"
+scenario = "No approval"
+by = "the release-signing environment's required reviewers; scripts/github-audit.sh reads them back (check.yml, weekly)"

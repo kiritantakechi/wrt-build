@@ -41,7 +41,8 @@ def _wg(*args: str, key: str | None = None) -> str:
     ).stdout.strip()
 
 
-def _key_pair() -> tuple[str, str]:
+def key_pair() -> tuple[str, str]:
+    """Return a new WireGuard private key and its public key."""
     private = _wg("genkey")
     return private, _wg("pubkey", key=private)
 
@@ -55,8 +56,8 @@ class WireGuard:
     @classmethod
     def connect(cls, online: Online, routes: Sequence[str]) -> Self:
         """Key both ends and bring the tunnel up; wg-peer routes ``routes`` through it."""
-        router_private, router_public = _key_pair()
-        peer_private, peer_public = _key_pair()
+        router_private, router_public = key_pair()
+        peer_private, peer_public = key_pair()
         online.router.run(
             "uci -q batch <<'EOF' && /etc/init.d/network reload\n"
             f"set network.wg0.private_key='{router_private}'\n"
@@ -120,8 +121,8 @@ class Tailnet:
 
         The tailnet starts empty: a node an earlier module left behind goes first.
         """
-        _clear(online.network)
-        key = _preauth_key(online.network)
+        clear(online.network)
+        key = preauth_key(online.network)
         login = (f"--login-server={HEADSCALE_URL}", f"--auth-key={key}", "--accept-dns=false")
         # tailscaled loads the trusted CAs once: after the test CA came.
         online.router.run("/etc/init.d/tailscale restart")
@@ -175,7 +176,7 @@ class Tailnet:
     def leave(self) -> None:
         """Log ts-peer out and remove both nodes from headscale."""
         self.peer_tailscale("logout")
-        _clear(self.network)
+        clear(self.network)
 
 
 def _headscale(network: Network, *args: str) -> Any:  # noqa: ANN401 (JSON)
@@ -184,7 +185,8 @@ def _headscale(network: Network, *args: str) -> Any:  # noqa: ANN401 (JSON)
     return json.loads(output) if output.strip() else None
 
 
-def _preauth_key(network: Network) -> str:
+def preauth_key(network: Network) -> str:
+    """Return a new reusable preauth key of the tailnet's user, valid for an hour."""
     users = cast("list[dict[str, Any]]", _headscale(network, "users", "list") or [])
     if not any(user["name"] == TAILNET_USER for user in users):
         _headscale(network, "users", "create", TAILNET_USER)
@@ -200,8 +202,8 @@ def _nodes(network: Network) -> list[dict[str, Any]]:
     return cast("list[dict[str, Any]]", _headscale(network, "nodes", "list") or [])
 
 
-def _clear(network: Network) -> None:
-    """Remove every node from headscale, each one's routes withdrawn first.
+def clear(network: Network) -> None:
+    """Remove every node from headscale (the tailnet starts empty), routes withdrawn first.
 
     headscale (0.27) lets go of the routes a node serves when their approval
     changes or the node goes offline, not when it is deleted: a router deleted

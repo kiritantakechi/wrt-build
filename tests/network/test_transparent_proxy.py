@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.datapath import DAE, DAE_CONFIG, DAE_TIMEOUT, dae_start, hooks
+from wrt_tests.datapath import DAE, DAE_TIMEOUT, PROXIED, dae_config, dae_start, hooks
 from wrt_tests.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
 from wrt_tests.netprobe import HTTP_PORT
 from wrt_tests.poll import until
@@ -128,7 +128,7 @@ def test_luci_save_hot_reloads(dae_restored: Online) -> None:
         text=True,
     )
     # The edit LuCI makes: the proxied target now goes direct as well.
-    config = DAE_CONFIG.replace(f"dip({PROXIED_TARGET[0]}, '{PROXIED_TARGET[1]}') -> proxy\n", "")
+    config = dae_config([address for address in PROXIED if address not in PROXIED_TARGET])
     _ubus(
         router,
         session,

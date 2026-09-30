@@ -15,12 +15,13 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self, cast
 
+from wrt_tests.internet import RELEASES
 from wrt_tests.isp import DELEGATED_PREFIX, LOGIN
 from wrt_tests.net import PROXIED_TARGET, PROXY, PROXY_PORT
 from wrt_tests.poll import until
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from wrt_tests.isp import Isp, Session
     from wrt_tests.net import Netns, Network
@@ -40,12 +41,20 @@ DAE = {"tcx/ingress": ["tproxy_lan_ingress_l2"], "tcx/egress": ["tproxy_lan_egre
 EINAT_RULE = re.compile(r"ubus:einat\[\w+\] (nat|rule) \d+")
 LAN_CLIENTS = ("client-a", "client-b")
 
-# dae in the tests: the socks5 exit on the emulated internet is the only node,
-# PROXIED_TARGET goes through it and everything else goes direct; DNS goes to
-# the resolver the ISP hands out. Debug logging shows every DNS query. dae would
-# first wait (up to 5 minutes) until public test URLs answer, which the emulated
-# internet does not serve.
-DAE_CONFIG = f"""\
+# dae in the tests: the socks5 exit on the emulated internet is the only node;
+# PROXIED_TARGET goes through it, and so does the Releases stand-in, as GitHub
+# does for an administrator whose ISP reaches it badly (r4s-release-pipeline
+# D4); everything else goes direct. DNS goes to the resolver the ISP hands out.
+# Debug logging shows every DNS query. dae would first wait (up to 5 minutes)
+# until public test URLs answer, which the emulated internet does not serve.
+PROXIED = (*PROXIED_TARGET, RELEASES[1])
+
+
+def dae_config(proxied: Sequence[str] = PROXIED) -> str:
+    """Return dae's test configuration, with ``proxied`` (addresses) through the proxy."""
+    addresses = ", ".join(f"'{address}'" if ":" in address else address for address in proxied)
+    rule = f"dip({addresses}) -> proxy\n    " if proxied else ""
+    return f"""\
 global {{
     log_level: debug
     disable_waiting_network: true
@@ -74,10 +83,12 @@ dns {{
 }}
 
 routing {{
-    dip({PROXIED_TARGET[0]}, '{PROXIED_TARGET[1]}') -> proxy
-    fallback: direct
+    {rule}fallback: direct
 }}
 """
+
+
+DAE_CONFIG = dae_config()
 
 
 def hooks(router: Router, device: str) -> dict[str, list[str]]:

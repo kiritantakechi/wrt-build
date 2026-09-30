@@ -184,6 +184,12 @@ TOPOLOGY = Topology(
                 *(("iperf3", "--server", "--port", str(port)) for port in IPERF_PORTS),
                 ("registry", "serve", "{workdir}/registry.yml"),
                 ("headscale", "serve", "--config", "{workdir}/headscale.yaml"),
+                (
+                    *(sys.executable, "-m", "wrt_tests.releases", "{workdir}/releases"),
+                    *("--address", internet.RELEASES[1], "--name", internet.RELEASES[0]),
+                    "--certificate={workdir}/../pki/server.crt",
+                    "--key={workdir}/../pki/server.key",
+                ),
             ),
         ),
         Namespace(

@@ -1,10 +1,11 @@
 """The sandbox's test CA and the certificate of the emulated internet's servers.
 
-One CA per sandbox, made with openssl: the registry and headscale present its
-certificate, and the router and the peers trust the CA for the length of the
-test session only (it never enters the image). The certificates are valid from
-long before now: the emulated router keeps its image's time, which lags the
-runner's, as a router without NTP would.
+One CA per sandbox, made with openssl: the emulated internet's servers present
+its certificate, and the router (``trust``) and the peers trust the CA for the
+length of the test session only (it never enters the image, nor an upgrade's
+backup). The certificates are valid from long before now: until the harness
+sets its clock, the emulated router keeps its image's time, which lags the
+runner's, as a router before NTP does.
 """
 
 import subprocess
@@ -16,8 +17,17 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
+    from wrt_tests.router import Router
+
 NOT_BEFORE = "20200101000000Z"
 VALIDITY = timedelta(days=30)
+# Where the router trusts the CA, and its Go programs (podman, tailscale) find it.
+CA_ON_ROUTER = "/etc/ssl/certs/wrt-test-ca.crt"
+
+
+def trust(router: Router, workdir: Path) -> None:
+    """Have the router trust the CA of the sandbox in ``workdir``."""
+    router.put(workdir / "pki" / "ca.crt", CA_ON_ROUTER)
 
 
 @dataclass(frozen=True, slots=True)

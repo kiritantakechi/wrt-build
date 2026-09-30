@@ -1,8 +1,9 @@
-"""The emulated internet's servers for the services (r4s-services D10).
+"""The emulated internet's servers (r4s-services D10, r4s-release-pipeline D7).
 
-inet also serves a container registry (distribution) and a tailnet's control
-server (headscale, with its embedded DERP relay), both over TLS with a
-certificate of the sandbox's test CA. ``configure`` writes their configuration,
+inet also serves a container registry (distribution), a tailnet's control
+server (headscale, with its embedded DERP relay) and a stand-in for GitHub's
+Releases API (wrt_tests.releases), all over TLS with a certificate of the
+sandbox's test CA. ``configure`` writes their configuration,
 the CA, and the sandbox's own hosts file, which names them for the processes of
 the sandbox (the router resolves them over DNS like any other name).
 """
@@ -17,10 +18,11 @@ if TYPE_CHECKING:
 
 REGISTRY = ("registry.example.net", "203.0.113.30")
 HEADSCALE = ("headscale.example.net", "203.0.113.40")
+RELEASES = ("releases.example.net", "203.0.113.50")
 TAILNET = ("100.64.0.0/10", "fd7a:115c:a1e0::/48")
 WG_PEER = ("203.0.113.60", "2001:db8:ffff::60")
 TS_PEER = ("203.0.113.70", "2001:db8:ffff::70")
-SERVERS = (REGISTRY, HEADSCALE)
+SERVERS = (REGISTRY, HEADSCALE, RELEASES)
 
 
 def configure(workdir: Path) -> pki.Pki:

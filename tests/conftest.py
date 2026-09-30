@@ -9,11 +9,19 @@ So a module that goes online (r4s-ebpf-datapath D11) or plugs in the data disk
 (r4s-services D10) takes the router from its snapshot once, as ``module_router``,
 and keeps it for all of its tests; a test puts back what it changed. At the end
 of the module the disks come out and the router returns to its snapshot.
+
+The session signs the build under test with release keys of its own (the
+script CI signs releases with) and its router trusts those keys instead of the
+image's, as a release image trusts the release keys: upgrades and packages are
+the build's, signed. The upgrade drill (r4s-release-pipeline D5) instead names
+the production-signed candidate in $WRT_SIGNED; then nothing is signed here
+and the image's own trust anchors decide.
 """
 
 import functools
 import json
 import os
+import subprocess
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -21,11 +29,12 @@ from typing import TYPE_CHECKING, cast, override
 
 import pytest
 
-from wrt_tests import app
+from wrt_tests import app, pki
 from wrt_tests.datapath import Online, dae_start
 from wrt_tests.emu import SOURCE_FILE, Emulator
 from wrt_tests.internet import REGISTRY
 from wrt_tests.isp import Isp
+from wrt_tests.keys import Keys, install_trust, sign
 from wrt_tests.net import RUNNER_ADDRESS, TOPOLOGY, Network
 from wrt_tests.oci import IMAGE, TAG, extract_root, image_layout, push
 from wrt_tests.poll import until
@@ -33,8 +42,7 @@ from wrt_tests.router import Router
 from wrt_tests.storage import Disk, initialize, wait_mounted
 
 UPGRADE_IMAGE = "targets/*-sysupgrade.tar.gz"
-# The test CA, where the router's Go programs (podman, tailscale) find it.
-CA_ON_ROUTER = "/etc/ssl/certs/wrt-test-ca.crt"
+SIGNED_ENV = "WRT_SIGNED"
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -79,10 +87,29 @@ def emulator(
 
 
 @pytest.fixture(scope="session")
-def booted_router(target: Target, emulator: Emulator) -> Router:
-    """Wait for the router to finish booting, then snapshot the emulator."""
-    router = Router(target, emulator)
+def harness_key(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Return the key the harness logs in to the router with (its public half next to it)."""
+    key = tmp_path_factory.mktemp("ssh") / "harness"
+    subprocess.run(
+        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "wrt-build tests", "-f", key],
+        check=True,
+    )
+    return key
+
+
+@pytest.fixture(scope="session")
+def booted_router(
+    target: Target, emulator: Emulator, release_keys: Keys | None, harness_key: Path
+) -> Router:
+    """Wait for the router to finish booting, then snapshot it, trusting the session's keys.
+
+    The harness's key is authorized as well, for when root has a password.
+    """
+    router = Router(target, emulator, harness_key)
     router.wait_ready()
+    router.put(harness_key.with_suffix(".pub"), "/etc/dropbear/authorized_keys")
+    if release_keys is not None:
+        install_trust(router, release_keys)
     router.disconnect()
     emulator.save()
     return router
@@ -170,7 +197,7 @@ def app_image(
 @pytest.fixture(scope="module")
 def trusted_ca(internet_zone: Online) -> Online:
     """Have the router resolve and trust the emulated internet's servers (test CA)."""
-    internet_zone.router.put(internet_zone.network.workdir / "pki" / "ca.crt", CA_ON_ROUTER)
+    pki.trust(internet_zone.router, internet_zone.network.workdir)
     return internet_zone
 
 
@@ -197,9 +224,27 @@ def build_output(emulation_source: dict[str, str]) -> Path:
 
 
 @pytest.fixture(scope="session")
-def upgrade_image(build_output: Path) -> Path:
-    """Return the single-slot upgrade image of the build under test."""
-    (image,) = build_output.glob(UPGRADE_IMAGE)
+def release_keys(tmp_path_factory: pytest.TempPathFactory) -> Keys | None:
+    """Return the session's release keys, or None when $WRT_SIGNED names a signed build."""
+    if os.environ.get(SIGNED_ENV):
+        return None
+    return Keys.make(tmp_path_factory.mktemp("keys"))
+
+
+@pytest.fixture(scope="session")
+def signed_repo(
+    build_output: Path, release_keys: Keys | None, tmp_path_factory: pytest.TempPathFactory
+) -> Path:
+    """Return the build under test signed with the session's keys (or $WRT_SIGNED)."""
+    if release_keys is None:
+        return Path(os.environ[SIGNED_ENV])
+    return sign(build_output, tmp_path_factory.mktemp("signed") / "build", release_keys)
+
+
+@pytest.fixture(scope="session")
+def upgrade_image(signed_repo: Path) -> Path:
+    """Return the signed single-slot upgrade image of the build under test."""
+    (image,) = signed_repo.glob(UPGRADE_IMAGE)
     return image
 
 
@@ -210,10 +255,10 @@ class _QuietHandler(SimpleHTTPRequestHandler):
 
 
 @pytest.fixture(scope="session")
-def repository(build_output: Path, network: Network) -> Iterator[str]:
-    """Serve the build's packages on the runner's LAN address; yield the base URL."""
+def repository(signed_repo: Path, network: Network) -> Iterator[str]:
+    """Serve the build's signed packages on the runner's LAN address; yield the base URL."""
     del network  # requested for the runner's LAN address
-    handler = functools.partial(_QuietHandler, directory=str(build_output))
+    handler = functools.partial(_QuietHandler, directory=str(signed_repo))
     with ThreadingHTTPServer((RUNNER_ADDRESS, 0), handler) as server:
         threading.Thread(target=server.serve_forever, daemon=True).start()
         yield f"http://{RUNNER_ADDRESS}:{server.server_address[1]}"
