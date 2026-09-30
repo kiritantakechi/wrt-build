@@ -60,18 +60,21 @@ let
     nativeBuildInputs = [ pkgs.cmake ];
   };
 
+  # Revision b5a31c0 of Alpine's apk-tools, as OpenWrt's source mirror packs it
+  # for package/system/apk: the tree's PKG_MIRROR_HASH is this tarball's hash.
+  # Alpine's own git refuses automated clients such as CI runners.
   apk = stdenv.mkDerivation {
     pname = "apk-tools";
     version = "3.0.5";
-    src = pkgs.fetchgit {
-      url = "https://gitlab.alpinelinux.org/alpine/apk-tools.git";
-      rev = "b5a31c0d865342ad80be10d68f1bb3d3ad9b0866";
-      hash = "sha256-iuJFgsn4yfQYqichMVhnOHFYj+5xPZYnXaCW0ZkKbRU=";
+    src = pkgs.fetchurl {
+      url = "https://sources.openwrt.org/apk-3.0.5.tar.zst";
+      hash = "sha256-vbcFcTAtS66v1FWFIqSc5Mg0wqy1G5VKGaPup/ILAbc=";
     };
     nativeBuildInputs = [
       pkgs.meson
       pkgs.ninja
       pkgs.pkg-config
+      pkgs.zstd
     ];
     buildInputs = [
       pkgs.openssl
