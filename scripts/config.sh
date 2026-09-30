@@ -1,53 +1,35 @@
 #!/bin/sh
-# config: compose the seeds of a profile into .config and verify the result.
-# Usage: scripts/config.sh [profile]   (profiles: config/profiles; default dev)
-# Fails if make defconfig dropped or changed any seed line (renamed or removed
-# options, unmet dependencies). Writes the diffconfig to $WRT_WORKDIR/out.
+# config: compose a board's configuration and verify the result.
+# Usage: scripts/config.sh <board> [profile]   (boards/<board>.json; profiles: config/profiles, default dev)
+# The profile's seeds, then the board's seed (board-model D2): the board builds in
+# build and output directories of its own. Fails on an unknown board before the
+# tree is touched, and if make defconfig dropped or changed any seed line
+# (renamed or removed options, unmet dependencies). Writes the composed seeds and
+# the diffconfig to $WRT_WORKDIR/out/<board>.
 set -eu
 # shellcheck source=scripts/lib.sh
 . "$(dirname -- "$0")/lib.sh"
 
-profile=${1:-dev}
+board=${1:-}
+profile=${2:-dev}
 
 require_linux
 require_workdir
 ensure_fhs build "$@"
 
-seeds=$(awk -v p="${profile}" -F: '
-	/^[[:space:]]*(#|$)/ { next }
-	$1 == p { print $2; found = 1 }
-	END { if (!found) exit 1 }
-' "${REPO_DIR}/config/profiles") || die "unknown profile '${profile}' (see config/profiles)"
-
+[ -n "${board}" ] || die "usage: config <board> [profile]"
+board_field "${board}" .device >/dev/null
 [ -f "${TREE}/feeds.conf" ] || die "no source tree; run 'just fetch' and 'just patch' first"
 
-# Rootfs overlay, kernel configuration overlay (design D7) and compiler cache live
-# outside the tree; files/, env/ and .ccache are all gitignored upstream. The cache
-# reads its settings from config/ccache.conf.
-ln -sfn "${REPO_DIR}/files" "${TREE}/files"
-mkdir -p "${TREE}/env" "${WRT_WORKDIR}/ccache" "${WRT_WORKDIR}/out"
-ln -sfn "${REPO_DIR}/config/kernel.config" "${TREE}/env/kernel-config"
-ln -sfn "${WRT_WORKDIR}/ccache" "${TREE}/.ccache"
-ln -sfn "${REPO_DIR}/config/ccache.conf" "${WRT_WORKDIR}/ccache/ccache.conf"
+link_tree
+write_board_table
+out="${WRT_WORKDIR}/out/${board}"
+mkdir -p "${out}"
+wanted="${out}/seed-${profile}.config"
+compose_seeds "${profile}" "${board}" "${wanted}"
+info "make defconfig (${board}, ${profile})"
+configure_tree "${wanted}"
 
-wanted="${WRT_WORKDIR}/out/seed-${profile}.config"
-: >"${wanted}"
-for seed in ${seeds}; do
-	file="${REPO_DIR}/config/${seed}.seed"
-	[ -f "${file}" ] || die "missing seed file config/${seed}.seed"
-	cat "${file}" >>"${wanted}"
-done
-
-cp "${wanted}" "${TREE}/.config"
-info "make defconfig (${profile}:${seeds})"
-make -C "${TREE}" defconfig >/dev/null
-
-missing=$(missing_config_lines "${wanted}" "${TREE}/.config")
-if [ -n "${missing}" ]; then
-	printf 'error: defconfig dropped or changed these seed lines:\n%s\n' "${missing}" >&2
-	exit 1
-fi
-
-diffconfig="${WRT_WORKDIR}/out/diffconfig-${profile}"
+diffconfig="${out}/diffconfig-${profile}"
 (cd "${TREE}" && ./scripts/diffconfig.sh) >"${diffconfig}" 2>/dev/null || die "scripts/diffconfig.sh failed"
 info "config ok; diffconfig in ${diffconfig}"

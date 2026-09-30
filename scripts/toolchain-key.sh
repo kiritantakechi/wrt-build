@@ -1,11 +1,14 @@
 #!/bin/sh
 # toolchain-key: print the host-toolchain cache key as key=<value>.
-# Usage: scripts/toolchain-key.sh >>"$GITHUB_OUTPUT"
+# Usage: scripts/toolchain-key.sh [profile] >>"$GITHUB_OUTPUT"   (default dev)
 # The key covers exactly the inputs that change the cached host tools and cross
-# toolchain (design D11).
+# toolchain of the profile (design D11): among them the configuration
+# toolchain-build.sh builds it from.
 set -eu
 # shellcheck source=scripts/lib.sh
 . "$(dirname -- "$0")/lib.sh"
+
+profile=${1:-dev}
 
 require_linux
 require_workdir
@@ -17,7 +20,12 @@ ensure_fhs build "$@"
 arch=$(uname -m)
 trees=$(git -C "${TREE}" rev-parse HEAD:tools HEAD:toolchain)
 langs=$(git -C "${TREE}/feeds/packages" rev-parse HEAD:lang/golang HEAD:lang/rust)
-seed=$(cat "${REPO_DIR}/config/toolchain.seed")
+# The board-neutral configuration of the profile, as toolchain-build.sh composes
+# it: every seed of the profile and every board's device (board-model D2).
+configuration=$(mktemp)
+trap 'rm -f "${configuration}"' EXIT INT TERM
+compose_seeds "${profile}" "" "${configuration}"
+seed=$(sha256sum <"${configuration}")
 # Build environment fingerprint (flake.nix: buildInputsId): the store paths of the
 # host packages plus the build profile. Test and quality tooling are not part of
 # it, so adding them keeps the cached toolchain.

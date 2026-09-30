@@ -1,4 +1,4 @@
-# NanoPi R4S (RK3399, 4GB LPDDR4) on the rockchip/armv8 target.
+# The rockchip/armv8 target every board builds for. The board's own seed
+# (boards/<board>.json, scripts/config.sh) selects its device.
 CONFIG_TARGET_rockchip=y
 CONFIG_TARGET_rockchip_armv8=y
-CONFIG_TARGET_rockchip_armv8_DEVICE_friendlyarm_nanopi-r4s=y

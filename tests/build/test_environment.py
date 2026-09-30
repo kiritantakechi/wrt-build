@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from wrt_tests import spec
+from wrt_tests.boards import load_all
 
 CAPABILITY = "build/environment"
 REPO = Path(__file__).resolve().parents[2]
@@ -48,7 +49,7 @@ def test_failed_step_stops_the_build(tmp_path: Path) -> None:
     not_a_directory = tmp_path / "work"
     not_a_directory.write_text("")
     result = subprocess.run(
-        ["just", "--justfile", str(REPO / "justfile"), "build", "dev"],
+        ["just", "--justfile", str(REPO / "justfile"), "build", load_all()[0].id, "dev"],
         env={**os.environ, "WRT_WORKDIR": str(not_a_directory)},
         capture_output=True,
         text=True,

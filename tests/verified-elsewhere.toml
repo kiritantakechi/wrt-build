@@ -20,7 +20,7 @@ by = "build.yml host-toolchain restores the toolchain cache; firmware builds on 
 capability = "build/ci"
 requirement = "Cache keyed on actual inputs"
 scenario = "Only the packages feed updated"
-by = "scripts/toolchain-key.sh hashes tools/, toolchain/, lang/golang, lang/rust, toolchain.seed and WRT_BUILD_INPUTS only"
+by = "scripts/toolchain-key.sh hashes tools/, toolchain/, lang/golang, lang/rust, the board-neutral configuration composed from the profile's seeds and WRT_BUILD_INPUTS only"
 
 [[scenario]]
 capability = "build/ci"
@@ -33,12 +33,6 @@ capability = "build/ci"
 requirement = "Build all kmods"
 scenario = "Repository contains all kmods"
 by = "build.yml firmware: ci profile with CONFIG_ALL_KMODS; artifact firmware-unsigned"
-
-[[scenario]]
-capability = "build/ci"
-requirement = "Image and kmods from the same build"
-scenario = "Complete manifest"
-by = "scripts/build.sh writes manifest.json in build.yml firmware; system-test compares it with the image"
 
 [[scenario]]
 capability = "build/ci"
@@ -64,7 +58,7 @@ by = "flake.lock pins nixpkgs and nixpkgs-unstable; env-report prints both revis
 capability = "build/environment"
 requirement = "Common build entry points"
 scenario = "Full build in one command"
-by = "just build dev on the local VM; build.yml firmware"
+by = "just build <board> dev on the local VM; build.yml firmware"
 
 [[scenario]]
 capability = "build/environment"
@@ -117,12 +111,6 @@ capability = "firmware/toolchain"
 requirement = "Target toolchain version"
 scenario = "Check toolchain version"
 by = "build.yml firmware: staging_dir/toolchain-aarch64_generic_gcc-15.*_musl"
-
-[[scenario]]
-capability = "firmware/toolchain"
-requirement = "Optimization flags for big.LITTLE cores"
-scenario = "Check compile command"
-by = "V=s build log of a target package (task 4.4; docs/validation/foundation.md)"
 
 [[scenario]]
 capability = "firmware/toolchain"

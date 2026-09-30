@@ -23,25 +23,30 @@ fetch:
 patch:
     scripts/patch.sh
 
-# Compose config/*.seed for a profile (dev, ci) and verify the result
+# Compose a board's configuration, a profile's seeds (dev, ci) and the board's, and verify it
 [group('build')]
-config profile="dev":
-    scripts/config.sh {{ profile }}
+config board profile="dev":
+    scripts/config.sh {{ board }} {{ profile }}
 
-# Fetch, patch, configure and build a profile
+# Print every board's id (boards/*.json), or check the named ones, as a JSON list
 [group('build')]
-build profile="dev": fetch patch (config profile)
-    scripts/build.sh {{ profile }}
+boards *ids:
+    scripts/boards.sh {{ ids }}
+
+# Check the board, fetch, patch, build the toolchain, then configure and build the board
+[group('build')]
+build board profile="dev": (boards board) fetch patch (toolchain-build profile) (config board profile)
+    scripts/build.sh {{ board }} {{ profile }}
 
 # Check a built sysupgrade image against the base-system spec
 [group('image')]
 image-audit image:
     scripts/image-audit.sh {{ image }}
 
-# Run the system tests against the emulator, booting a built profile's image
+# Run the system tests against the emulator, booting a board's built image
 [group('test')]
-test profile="dev" *args:
-    scripts/test.sh {{ profile }} {{ args }}
+test board profile="dev" *args:
+    scripts/test.sh {{ board }} {{ profile }} {{ args }}
 
 # Open the host kernel's PPP to the test sandbox, after each VM restart (root)
 [group('test')]
@@ -73,10 +78,10 @@ release-keys directory *args:
 release-sign build signed *args:
     nix run .#sign-tools -- scripts/release-sign.sh {{ build }} {{ signed }} {{ args }}
 
-# Prepare the upgrade drill's base: the latest stable release, or this build before one
+# Prepare a board's upgrade drill base: its latest stable release, or this build before one
 [group('release')]
-drill-base:
-    scripts/drill-base.sh
+drill-base board:
+    scripts/drill-base.sh {{ board }}
 
 # Assemble a signed build into a release; --upload publishes it on GitHub
 [group('release')]
@@ -108,15 +113,15 @@ config-push host *args:
 runner-prepare:
     scripts/runner-prepare.sh
 
-# Print the host-toolchain cache key
+# Print the host-toolchain cache key of a profile's toolchain
 [group('ci')]
-toolchain-key:
-    scripts/toolchain-key.sh
+toolchain-key profile="dev":
+    scripts/toolchain-key.sh {{ profile }}
 
-# Build the host tools and the cross toolchain
+# Build the host tools and the board-neutral cross toolchain
 [group('ci')]
-toolchain-build:
-    scripts/toolchain-build.sh
+toolchain-build profile="dev":
+    scripts/toolchain-build.sh {{ profile }}
 
 # Pack the host tools and cross toolchain into an archive
 [group('ci')]
