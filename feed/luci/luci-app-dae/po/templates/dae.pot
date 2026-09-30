@@ -106,5 +106,5 @@ msgstr ""
 msgid "Pin to the big cores"
 msgstr ""
 
-msgid "Run dae on the Cortex-A72 cores (cpu4-5) only. When off, the scheduler places it."
+msgid "Run dae on the big cores, the CPUs of the highest capacity, only. When off, the scheduler places it."
 msgstr ""

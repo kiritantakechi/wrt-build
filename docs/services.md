@@ -1,6 +1,6 @@
 # Services
 
-The router's services beyond routing (r4s-services): a USB SSD as the data disk, app containers, SMB file sharing, WireGuard and Tailscale, and metrics for Prometheus. Everything that writes a lot lives on the data disk; the SD card holds the system only. Without the data disk the router routes, filters, translates, proxies and resolves as before, and the services that keep their data there wait for it.
+The router's services beyond routing (r4s-services): a USB SSD as the data disk, app containers, SMB file sharing, WireGuard and Tailscale, and metrics for Prometheus. Everything that writes a lot lives on the data disk; the boot disk (the R4S's SD card, the R6S's eMMC) holds the system only. Without the data disk the router routes, filters, translates, proxies and resolves as before, and the services that keep their data there wait for it.
 
 ## The data disk
 
@@ -28,7 +28,7 @@ It creates the filesystem (label `wrtdata`) and the subvolumes, names the disk b
 
 ### What waits for it
 
-The container service, SMB and the persistent log start only while `/mnt/data` is mounted, and start again each time it is. Until then they run nothing and write nothing: `/mnt/data` on the SD card stays an empty directory. A disk plugged in after boot brings them up without a reboot. Take it out with the router off: pulled out while in use, the filesystem stays behind, detached, for as long as a file on it is open, and the disk comes back cleanly only after a reboot.
+The container service, SMB and the persistent log start only while `/mnt/data` is mounted, and start again each time it is. Until then they run nothing and write nothing: `/mnt/data` on the boot disk stays an empty directory. A disk plugged in after boot brings them up without a reboot. Take it out with the router off: pulled out while in use, the filesystem stays behind, detached, for as long as a file on it is open, and the disk comes back cleanly only after a reboot.
 
 ### Snapshots
 
@@ -53,7 +53,7 @@ A whole directory comes back the same way with `cp -a` of the directory.
 
 ### An enclosure that drops out
 
-The R4S's USB 3 port runs the disk with UAS. Some USB-to-SATA bridges reset under load in that mode (the kernel log shows `uas_eh_abort_handler` or `reset SuperSpeed USB device` over and over). Such an enclosure works with the older, slower mass storage protocol (BOT) instead: give `usb-storage` a quirk for its USB ID (from `/sys/bus/usb/devices/*/idVendor` and `idProduct`, e.g. `152d:0578`) with the flag `u`, which ignores UAS, and keep the file through upgrades:
+The boards' USB 3 ports run the disk with UAS. Some USB-to-SATA bridges reset under load in that mode (the kernel log shows `uas_eh_abort_handler` or `reset SuperSpeed USB device` over and over). Such an enclosure works with the older, slower mass storage protocol (BOT) instead: give `usb-storage` a quirk for its USB ID (from `/sys/bus/usb/devices/*/idVendor` and `idProduct`, e.g. `152d:0578`) with the flag `u`, which ignores UAS, and keep the file through upgrades:
 
 ```sh
 echo 'options usb-storage quirks=152d:0578:u' >>/etc/modules.conf
@@ -149,4 +149,4 @@ Tailscale marks its packets with bits of `0x00ff0000`, which `config/marks.tsv` 
 
 ## Metrics
 
-The node exporter (prometheus-node-exporter-ucode) answers on the LAN only, at `http://10.0.0.1:9101/metrics`: CPU, memory, network interfaces, filesystems (the SD card's, and the data disk's while mounted) and temperatures (the SoC's, through `rockchip-thermal` and hwmon). It needs no data disk.
+The node exporter (prometheus-node-exporter-ucode) answers on the LAN only, at `http://10.0.0.1:9101/metrics`: CPU, memory, network interfaces, filesystems (the boot disk's, and the data disk's while mounted) and temperatures (the SoC's, through `rockchip-thermal` and hwmon). It needs no data disk.

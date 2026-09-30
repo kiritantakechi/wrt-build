@@ -21,6 +21,27 @@ LOG_DIR=/var/log/dae
 # The LAN side: br-lan, and the container and tailnet interfaces while they exist.
 INTERFACES="br-lan podman0 tailscale0"
 
+# big_cores: the CPUs of the highest capacity, which are the big cores of a
+# big.LITTLE SoC, as a taskset list; empty where the kernel reports no
+# capacities (board-model D6).
+big_cores() {
+	highest=0
+	cores=
+	for file in /sys/devices/system/cpu/cpu[0-9]*/cpu_capacity; do
+		[ -r "${file}" ] || continue
+		capacity=$(cat "${file}")
+		cpu=${file%/cpu_capacity}
+		cpu=${cpu##*/cpu}
+		if [ "${capacity}" -gt "${highest}" ]; then
+			highest=${capacity}
+			cores=${cpu}
+		elif [ "${capacity}" -eq "${highest}" ]; then
+			cores="${cores},${cpu}"
+		fi
+	done
+	echo "${cores}"
+}
+
 # bound: the interfaces dae binds now, comma-separated.
 bound() {
 	list=
@@ -62,7 +83,10 @@ start_service() {
 	set -- "${PROG}" run -c "${ENTRY}" --disable-timestamp \
 		--logfile "${LOG_DIR}/dae.log" \
 		--logfile-maxbackups "${log_maxbackups}" --logfile-maxsize "${log_maxsize}"
-	[ "${cpu_pinning}" = 0 ] || set -- taskset -c 4,5 "$@"
+	if [ "${cpu_pinning}" = 1 ]; then
+		cores=$(big_cores)
+		[ -z "${cores}" ] || set -- taskset -c "${cores}" "$@"
+	fi
 
 	procd_open_instance
 	procd_set_param command "$@"

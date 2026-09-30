@@ -74,7 +74,7 @@ def test_pull_goes_to_the_data_disk(registry: tuple[Online, str]) -> None:
         f"podman image inspect --format '{{{{.GraphDriver.Data.UpperDir}}}}' {image}"
     )
     assert layer.startswith(f"{STORAGE}/")
-    # The SD card's overlay took no part of it: what little came there since came
+    # The boot disk's overlay took no part of it: what little came there since came
     # from elsewhere (ksmbd starting on the same mount writes a few bytes).
     image = int(router.run(f"podman image inspect --format '{{{{.Size}}}}' {image}"))
     written = router.run(f"find /overlay/upper -newer {mark} -type f -exec cat {{}} + | wc -c")

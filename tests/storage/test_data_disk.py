@@ -48,8 +48,8 @@ SNAPSHOTTED = ("containers", "shares")
 KEEP_DAYS = 7
 DAYS_RUN = 9  # more than eight days
 CRON_TIMEOUT = 90
-# The SD card's own directory under the mount point: the overlay's upper layer.
-SD_CARD = f"/overlay/upper{MOUNT}"
+# The boot disk's own directory under the mount point: the overlay's upper layer.
+BOOT_DISK = f"/overlay/upper{MOUNT}"
 HEALTHCHECK = (
     "uci set wrt-ab.healthcheck.total=30 && uci set wrt-ab.healthcheck.interval=3"
     " && uci commit wrt-ab && wrt-healthcheck"
@@ -86,9 +86,9 @@ def rebooted(pod: Online) -> str:
     return line
 
 
-def _sd_card_entries(router: Router) -> list[str]:
-    """Return what the SD card itself holds under /mnt/data."""
-    return router.run(f"ls -A {SD_CARD} 2>/dev/null || true").split()
+def _boot_disk_entries(router: Router) -> list[str]:
+    """Return what the boot disk itself holds under /mnt/data."""
+    return router.run(f"ls -A {BOOT_DISK} 2>/dev/null || true").split()
 
 
 def _services(router: Router) -> dict[str, bool]:
@@ -233,11 +233,11 @@ def test_boot_without_the_data_disk(without_disk: Online) -> None:
     assert resolved["answers"] == [DIRECT_TARGET[0]]
     assert mount_options(router) is None
     # The log service restarted without the disk (as any change to the system
-    # configuration does) still keeps its file off the SD card.
+    # configuration does) still keeps its file off the boot disk.
     router.run("/etc/init.d/log restart")
     services = _services(router)
     assert not any(services.values()), services
-    assert _sd_card_entries(router) == []
+    assert _boot_disk_entries(router) == []
     router.run(HEALTHCHECK, timeout=180)
     assert json.loads(router.run(f"cat {HEALTH}"))["result"] == "pass"
 
@@ -270,4 +270,4 @@ def test_data_disk_mounts_late(without_disk: Online, data_disk: Disk) -> None:
         timeout=app.START_TIMEOUT,
         what="every service on the data disk",
     )
-    assert _sd_card_entries(router) == []
+    assert _boot_disk_entries(router) == []

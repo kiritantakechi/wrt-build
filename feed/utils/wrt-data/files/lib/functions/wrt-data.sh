@@ -1,7 +1,7 @@
 # The USB data disk (r4s-services D1): btrfs, its top level mounted by UUID at
 # /mnt/data, and the subvolumes at fixed paths in it. Services that keep their
 # data there start only while it is mounted: its paths are otherwise plain
-# directories on the SD card.
+# directories on the boot disk.
 # shellcheck shell=sh disable=SC2034 # for the scripts that source this
 
 WRT_DATA=/mnt/data

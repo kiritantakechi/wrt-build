@@ -3,8 +3,9 @@
 # configuration only: config_generate has already written a DHCP WAN by now, so
 # "fill in what is unset" cannot apply them, and a configuration that an upgrade
 # carries over brings /etc/wrt-datapath along (keep.d) and is left as it is.
-#  - WAN dials PPPoE on eth0 without credentials, which the config push brings;
-#    wan6 asks DHCPv6 over the PPP link for a delegated prefix;
+#  - WAN dials PPPoE without credentials, which the config push brings, on the
+#    board's WAN port as config_generate set it (board-model D6); wan6 asks
+#    DHCPv6 over the PPP link for a delegated prefix;
 #  - LAN hands out /64s by RA and DHCPv6 (odhcpd);
 #  - the firewall clamps MSS on WAN and offloads flows in software, and lets no
 #    new flow from WAN into LAN but those einat translated back: OpenWrt's
@@ -17,7 +18,6 @@
 
 uci -q batch <<-EOF
 	set network.wan.proto='pppoe'
-	set network.wan.device='eth0'
 	delete network.wan.username
 	delete network.wan.password
 	set network.wan.ipv6='1'

@@ -113,5 +113,5 @@ msgstr "基于 eBPF 的 Linux 高性能透明代理解决方案。"
 msgid "Pin to the big cores"
 msgstr "绑定到大核"
 
-msgid "Run dae on the Cortex-A72 cores (cpu4-5) only. When off, the scheduler places it."
-msgstr "仅在 Cortex-A72 大核（cpu4-5）上运行 dae。关闭时由调度器安排。"
+msgid "Run dae on the big cores, the CPUs of the highest capacity, only. When off, the scheduler places it."
+msgstr "仅在大核（容量最高的 CPU）上运行 dae。关闭时由调度器安排。"

@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from wrt_tests.boards import Board
     from wrt_tests.datapath import Online
     from wrt_tests.router import Router
 
@@ -32,9 +33,9 @@ DOWNLOAD_SECONDS = 20
 
 
 @spec(CAPABILITY, "PPPoE dial-up", "Image contains no credentials")
-def test_image_has_no_credentials(router: Router) -> None:
+def test_image_has_no_credentials(router: Router, board: Board) -> None:
     assert router.run("uci get network.wan.proto") == "pppoe"
-    assert router.run("uci get network.wan.device") == "eth0"
+    assert router.run("uci get network.wan.device") == board.wan.device
     for option in ("username", "password"):
         assert router.returncode(f"uci -q get network.wan.{option}") != 0, option
     # The rest of the datapath's defaults (uci-defaults 91-wrt-datapath).

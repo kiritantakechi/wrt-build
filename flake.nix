@@ -1,5 +1,5 @@
 {
-  description = "wrt-build: reproducible OpenWrt build environment for NanoPi R4S";
+  description = "wrt-build: reproducible OpenWrt build environment for the boards of boards/";
 
   inputs = {
     # Stable base for the build environment: the host tools behind the cached toolchain.

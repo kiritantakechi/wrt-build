@@ -1,5 +1,5 @@
 // Size and use of the mounted filesystems, named as node_exporter names them
-// (r4s-services D8): the SD card's overlay and the data disk above all. The
+// (r4s-services D8): the boot disk's overlay and the data disk above all. The
 // exporter's jail sees only its own mounts, so the host's come over ubus.
 const reply = ubus.call("wrt-metrics", "filesystems");
 

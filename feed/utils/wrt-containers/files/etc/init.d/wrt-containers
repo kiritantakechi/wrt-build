@@ -1,7 +1,7 @@
 #!/bin/sh /etc/rc.common
 # wrt-containers: the Pods on the data disk (r4s-services D2, D4). They start once
 # /mnt/data is mounted, and again whenever it is. podman runs only while it is
-# mounted: run anywhere else, it would make its storage on the SD card. podman's
+# mounted: run anywhere else, it would make its storage on the boot disk. podman's
 # own API service stays off.
 # shellcheck source=../../../../wrt-data/files/lib/functions/wrt-data.sh
 

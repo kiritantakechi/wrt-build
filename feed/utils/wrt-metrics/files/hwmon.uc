@@ -1,5 +1,5 @@
 // Temperatures of the hwmon devices, named as node_exporter names them
-// (r4s-services D8). On the R4S, rockchip-thermal registers the SoC's thermal
+// (r4s-services D8). On every board, rockchip-thermal registers the SoC's thermal
 // zones there; a system without sensors has no series, which is no failure.
 const root = "/sys/class/hwmon/";
 const chips = fs.lsdir(root);

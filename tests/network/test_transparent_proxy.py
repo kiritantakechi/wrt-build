@@ -22,6 +22,7 @@ from wrt_tests.poll import until
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from wrt_tests.boards import Board
     from wrt_tests.datapath import Online
     from wrt_tests.router import Router
 
@@ -182,12 +183,25 @@ def test_health_check_fails_without_dae(dae_restored: Online) -> None:
 
 
 @spec(CAPABILITY, "Optional CPU pinning", "Enable CPU pinning")
-def test_cpu_pinning_takes_the_big_cores(dae_restored: Online) -> None:
+def test_cpu_pinning_takes_the_big_cores(dae_restored: Online, board: Board) -> None:
     router = dae_restored.router
     assert router.run("uci get dae.config.cpu_pinning") == "0"
+    # The big cores: the CPUs of the highest capacity the router reports, which
+    # the emulator gives the board's SoC's (testing/emulation). They are fewer
+    # than all, so a dae that is not pinned runs elsewhere too.
+    listing = router.run("grep -H . /sys/devices/system/cpu/cpu[0-9]*/cpu_capacity")
+    capacities = {
+        int(cpu): int(capacity)
+        for cpu, capacity in re.findall(r"/cpu(\d+)/cpu_capacity:(\d+)", listing)
+    }
+    highest = max(capacities.values())
+    cores = sorted(cpu for cpu, capacity in capacities.items() if capacity == highest)
+    assert cores == list(board.big_cores)
+    assert len(cores) < len(capacities)
+    big = sum(1 << cpu for cpu in cores)
     router.run("uci set dae.config.cpu_pinning=1 && uci commit dae && /etc/init.d/dae restart")
     try:
         until(lambda: hooks(router, "br-lan") == DAE, timeout=DAE_TIMEOUT, what="dae on br-lan")
-        assert router.run("taskset -p $(pidof dae)").split()[-1] == "30"
+        assert int(router.run("taskset -p $(pidof dae)").split()[-1], 16) == big
     finally:
         router.run("uci set dae.config.cpu_pinning=0 && uci commit dae")

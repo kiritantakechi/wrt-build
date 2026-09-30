@@ -67,7 +67,7 @@ return view.extend({
 		o.readonly = true;
 
 		o = s.option(form.Flag, 'cpu_pinning', _('Pin to the big cores'),
-			_('Run dae on the Cortex-A72 cores (cpu4-5) only. When off, the scheduler places it.'));
+			_('Run dae on the big cores, the CPUs of the highest capacity, only. When off, the scheduler places it.'));
 
 		o = s.option(form.Value, 'log_maxbackups', _('Max log backups'),
 			_('The maximum number of old log files to retain.'));

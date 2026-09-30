@@ -1,6 +1,6 @@
 # CI builds: every kmod goes into the package repository of the same build, but
 # for the USB controllers on PCI that config/kernel.config leaves out of the
-# kernel: the R4S has none, and the emulator's qemu-xhci needs none of them.
+# kernel: the boards have none, and the emulator's qemu-xhci needs none of them.
 CONFIG_ALL_KMODS=y
 # CONFIG_PACKAGE_kmod-usb-ohci-pci is not set
 # CONFIG_PACKAGE_kmod-usb-uhci is not set

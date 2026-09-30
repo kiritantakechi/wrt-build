@@ -50,7 +50,7 @@ def test_temperature_metrics(online: Online, metrics: str) -> None:
     assert re.search(
         r'^node_scrape_collector_success\{collector="hwmon"\} 1$', metrics, re.MULTILINE
     )
-    # The SoC's sensor driver is in the kernel; on the R4S it feeds hwmon.
+    # The sensor driver of both SoCs is in the kernel; on a board it feeds hwmon.
     assert online.router.returncode("test -d /sys/bus/platform/drivers/rockchip-thermal") == 0
 
 
