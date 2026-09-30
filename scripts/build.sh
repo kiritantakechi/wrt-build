@@ -1,6 +1,7 @@
 #!/bin/sh
 # build: build a board's configured tree and collect the outputs with a manifest.
 # Usage: scripts/build.sh <board> [profile]   (after fetch, patch, toolchain-build and config)
+# With WRT_CCACHE_TRIM set, the compiler cache keeps only what the build used.
 # Images and the package repository of one run belong together: kmods only load
 # on the kernel of the same build (vermagic), so they are collected side by side,
 # in $WRT_WORKDIR/out/<board>/<profile>. The toolchain must be the board-neutral
@@ -62,11 +63,20 @@ make -C "${TREE}" -j"${jobs}" download
 # Statistics of this build alone: the cache itself carries them from earlier builds.
 ccache_run --zero-stats >/dev/null
 info "make -j${jobs} (${board}, ${profile}) on ${cpu}"
+start=$(date +%s)
 status=0
 make -C "${TREE}" -j"${jobs}" || status=$?
 ccache_run --show-stats --verbose
 [ "${status}" -eq 0 ] ||
 	die "build failed; rerun 'make -C ${TREE} -j1 V=s' on the failing package for details"
+# WRT_CCACHE_TRIM (CI, where each board's cache is its own): drop the entries this
+# build did not use; a hit refreshes an entry's time. Those of an earlier
+# toolchain or kernel configuration would otherwise pile up to max_size, past the
+# cache quota. Locally the boards share the cache, which keeps all up to max_size.
+if [ -n "${WRT_CCACHE_TRIM:-}" ]; then
+	now=$(date +%s)
+	ccache_run --evict-older-than "$((now - start + 1))s"
+fi
 libc_after=$(toolchain_libc "${toolchain_dir}")
 [ "${libc_after}" = "${libc}" ] ||
 	die "the build rebuilt the toolchain's C library with ${board}'s flags; run 'just toolchain-build' and build again"

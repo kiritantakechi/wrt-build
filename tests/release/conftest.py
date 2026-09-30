@@ -59,11 +59,11 @@ def drill(
     trusted_ca: Online,
     drill_configuration: dict[str, str],
     data_disk: Disk,
-    signed_repo: Path,
+    signed_boards: Path,
     release_keys: Keys | None,
 ) -> Drill:
     """Return the drill of the signed build on the configured router."""
     del data_disk  # the local repository's place
-    drill = Drill(trusted_ca, signed_repo, release_keys)
+    drill = Drill(trusted_ca, signed_boards, release_keys)
     drill.remember(**drill_configuration)
     return drill

@@ -7,7 +7,8 @@ its ``browser_download_url`` (``/<owner>/<repo>/releases/download/<tag>/<asset>`
 as on GitHub). A repository's releases are directories under
 ``<root>/<owner>/<repo>``, each an assembled release (release-publish.sh) that
 ``publish`` put there. A release with a ``.cut`` file sends only that many bytes
-of each asset, then drops the connection: a sync interrupted halfway.
+of each asset, then drops the connection: a sync interrupted halfway. Every
+download is recorded in the release's ``.downloads``, which ``downloads`` reads.
 """
 
 import argparse
@@ -23,6 +24,7 @@ from typing import Any, override
 
 PORT = 443
 CHUNK = 1 << 16
+DOWNLOADS = ".downloads"
 # Where the sandbox's stand-in serves from, in the sandbox's directory.
 ROOT = Path("inet") / "releases"
 
@@ -58,6 +60,12 @@ def cut(root: Path, repository: str, tag: str, size: int | None) -> None:
         marker.unlink(missing_ok=True)
     else:
         marker.write_text(str(size))
+
+
+def downloads(root: Path, repository: str, tag: str) -> list[str]:
+    """Return the assets of ``tag`` downloaded so far, in order, each as often as it was."""
+    record = root / repository / tag / DOWNLOADS
+    return record.read_text().splitlines() if record.is_file() else []
 
 
 def _releases(directory: Path, base: str) -> list[dict[str, Any]]:
@@ -130,6 +138,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self.send_error(HTTPStatus.NOT_FOUND)
 
     def _download(self, file: Path, cut_file: Path) -> None:
+        with (file.parent / DOWNLOADS).open("a") as record:
+            record.write(f"{file.name}\n")
         size = file.stat().st_size
         limit = int(cut_file.read_text()) if cut_file.is_file() else size
         self.send_response(HTTPStatus.OK)

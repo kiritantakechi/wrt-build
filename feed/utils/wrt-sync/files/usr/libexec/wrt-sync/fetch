@@ -1,18 +1,21 @@
 #!/bin/sh
 # fetch: download the newest release of a channel (runs in wrt-sync's container).
-# Usage: fetch <api> <repository> <stable|candidate> <releases> <incoming>
+# Usage: fetch <api> <repository> <stable|candidate> <device> <releases> <incoming>
 # Prints the release's tag. A release already in <releases> is not downloaded
 # again; of a new one, what the router uses goes to <incoming>/<tag>, whose files
-# the host verifies: the signed manifest, the package repository and the upgrade
-# image (not the factory image, which only a first flash needs). Every request
-# is tried a few times: the first may leave before dae holds the bridge.
+# the host verifies. That is the asset set of the router's device alone
+# (board-model D10): its signed manifest and package repository, named after the
+# device (<device>-manifest.json, ...), and the upgrade image the manifest names;
+# never the factory image, which only a first flash needs. Every request is
+# tried a few times: the first may leave before dae holds the bridge.
 set -eu
 
 api=$1
 repository=$2
 channel=$3
-releases=$4
-incoming=$5
+device=$4
+releases=$5
+incoming=$6
 TRIES=5
 
 # get <url> <file>: fetch with retries.
@@ -44,14 +47,32 @@ tag=$(jsonfilter -i /tmp/release.json -e "${release}.tag_name")
 	echo "fetch: no ${channel} release" >&2
 	exit 1
 }
+urls=$(jsonfilter -i /tmp/release.json -e "${release}.assets[*].browser_download_url")
+
+# asset <name> <file>: download the release's asset <name> as <file> of the release.
+asset() {
+	for url in ${urls}; do
+		[ "${url##*/}" = "$1" ] || continue
+		get "${url}" "${incoming}/${tag}/$2"
+		return
+	done
+	echo "fetch: ${tag} has no $1" >&2
+	exit 1
+}
+
 if [ ! -d "${releases}/${tag}" ]; then
 	mkdir -p "${incoming}/${tag}"
-	for url in $(jsonfilter -i /tmp/release.json -e "${release}.assets[*].browser_download_url"); do
-		case "${url##*/}" in
-			manifest.json | manifest.json.sig | repo.tar | *-sysupgrade.tar.gz) ;;
-			*) continue ;;
-		esac
-		get "${url}" "${incoming}/${tag}/${url##*/}"
+	for file in manifest.json manifest.json.sig repo.tar; do
+		asset "${device}-${file}" "${file}"
 	done
+	image=$(ucode -e 'for (let file in json(readfile(ARGV[0])).files) {
+		let image = match(file, /^targets\/(.+-sysupgrade\.tar\.gz)$/);
+		if (image) print(image[1], "\n");
+	}' -- "${incoming}/${tag}/manifest.json")
+	[ -n "${image}" ] || {
+		echo "fetch: ${tag}'s manifest names no upgrade image" >&2
+		exit 1
+	}
+	asset "${image}" "${image}"
 fi
 echo "${tag}"

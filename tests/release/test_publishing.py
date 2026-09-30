@@ -1,14 +1,14 @@
-"""release/publishing: one signed build, assembled into a release that says where it came from.
+"""release/publishing: the boards' signed builds, assembled into a release that names its sources.
 
-scripts/release-publish.sh assembles the session's signed build (conftest); its
-upload is judged by what it hands to gh, a stand-in on PATH that records its
-arguments. The workflow checks read .github/workflows/build.yml.
+scripts/release-publish.sh assembles the session's signed build (conftest), as
+the sign job hands it on (board-model D10); its upload is judged by what it hands
+to gh, a stand-in on PATH that records its arguments. The workflow checks read
+.github/workflows/build.yml.
 """
 
 import json
 import os
 import re
-import shutil
 import subprocess
 import tarfile
 from pathlib import Path
@@ -18,9 +18,13 @@ import pytest
 import yaml
 
 from wrt_tests import spec
+from wrt_tests.boards import load_all
+from wrt_tests.trees import linked_copy, replace
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from wrt_tests.boards import Board
 
 CAPABILITY = "release/publishing"
 REPO = Path(__file__).resolve().parents[2]
@@ -33,14 +37,20 @@ KMODS = "targets/packages/packages.adb"
 
 
 def _publish(
-    signed: Path, release: Path, *options: str, gh: Path | None = None
+    signed: Path, release: Path, *options: str, gh: Path | None = None, every_board: bool = False
 ) -> subprocess.CompletedProcess[str]:
-    """Run release-publish.sh; with ``gh``, the stand-in's directory goes first on PATH."""
+    """Run release-publish.sh on the boards ``signed`` holds, or on every board.
+
+    ``every_board`` leaves ``--boards`` out, for the script's default of every
+    board; with ``gh``, the stand-in's directory goes first on PATH.
+    """
     environment = dict(os.environ)
     if gh is not None:
         environment["PATH"] = f"{gh}{os.pathsep}{environment['PATH']}"
+    held = ",".join(sorted(path.name for path in signed.iterdir()))
+    boards = () if every_board else ("--boards", held)
     return subprocess.run(
-        [PUBLISH, signed, release, *options],
+        [PUBLISH, signed, release, *boards, *options],
         capture_output=True,
         text=True,
         check=False,
@@ -64,21 +74,25 @@ def _gh_args(gh: Path) -> Sequence[str]:
 
 
 @spec(CAPABILITY, "Publish after signing and drill", "Inspect Release contents")
-def test_release_contents(signed_repo: Path, tmp_path: Path) -> None:
+def test_release_contents(board: Board, signed_boards: Path, tmp_path: Path) -> None:
     release = tmp_path / "release"
-    assert _publish(signed_repo, release).returncode == 0
+    assert _publish(signed_boards, release).returncode == 0
     info = json.loads((release / "release.json").read_text())
+    assert info["boards"] == [board.id]
+    # Each board's set is named after its device.
+    device = board.device
     assets = set(info["assets"])
-    assert {"repo.tar", "manifest.json", "manifest.json.sig", "SHA256SUMS"} <= assets
-    assert any(name.endswith(FACTORY) for name in assets)
-    assert any(name.endswith(UPGRADE) for name in assets)
+    named = {f"{device}-{name}" for name in ("repo.tar", "manifest.json", "manifest.json.sig")}
+    assert {*named, "SHA256SUMS"} <= assets
+    assert any(f"-{device}-" in name and name.endswith(FACTORY) for name in assets)
+    assert any(f"-{device}-" in name and name.endswith(UPGRADE) for name in assets)
     sums = subprocess.run(
         ["sha256sum", "--check", "SHA256SUMS"], cwd=release, capture_output=True, check=False
     )
     assert sums.returncode == 0
     # The kmods in the repository depend on the kernel the manifest names.
-    manifest = json.loads((release / "manifest.json").read_text())
-    with tarfile.open(release / "repo.tar") as repo:
+    manifest = json.loads((release / f"{device}-manifest.json").read_text())
+    with tarfile.open(release / f"{device}-repo.tar") as repo:
         repo.extract(KMODS, tmp_path / "repo", filter="data")
     index = subprocess.run(
         ["apk", "adbdump", tmp_path / "repo" / KMODS], capture_output=True, text=True, check=True
@@ -89,19 +103,49 @@ def test_release_contents(signed_repo: Path, tmp_path: Path) -> None:
 
 
 @spec(CAPABILITY, "Publish after signing and drill", "Upgrade drill fails")
-def test_nothing_is_published_without_the_drill() -> None:
+@pytest.mark.parametrize(
+    ("results", "passes"),
+    [
+        (("success", "success", "success"), True),
+        # Signing did not run, so neither did any drill: a pull request.
+        (("success", "skipped", "skipped"), True),
+        (("success", "success", "failure"), False),
+        (("success", "success", "cancelled"), False),
+        # A failed or rejected signing skips the drills.
+        (("success", "failure", "skipped"), False),
+        (("failure", "skipped", "skipped"), False),
+    ],
+)
+def test_nothing_is_published_without_the_drill(
+    results: tuple[str, str, str], *, passes: bool
+) -> None:
     jobs = cast("dict[str, Any]", yaml.safe_load(BUILD.read_text()))["jobs"]
-    # publish runs only after upgrade-drill succeeded (no always() or failure()).
-    assert jobs["publish"]["needs"] == "upgrade-drill"
+    # publish runs only after every board's drill and the check succeeded (no
+    # always() or failure()).
+    assert jobs["publish"]["needs"] == ["drill", "upgrade-drill"]
     assert "if" not in jobs["publish"]
-    assert jobs["upgrade-drill"]["needs"] == "sign"
     assert "--upload" in jobs["publish"]["steps"][-1]["run"]
+    assert "sign" in jobs["drill"]["needs"]
+    # The check main's rules require judges the results of the jobs it needs.
+    check = jobs["upgrade-drill"]
+    assert check["needs"] == ["system-test", "sign", "drill"]
+    assert check["if"] == "always()"
+    (step,) = check["steps"]
+    names = ("SYSTEM_TEST", "SIGN", "DRILL")
+    assert list(step["env"]) == list(names)
+    result = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", step["run"]],
+        env={**os.environ, **dict(zip(names, results, strict=True))},
+        capture_output=True,
+        check=False,
+    )
+    assert (result.returncode == 0) == passes
 
 
 @spec(CAPABILITY, "Candidates and stable releases", "PR build")
-def test_a_bump_is_a_candidate(signed_repo: Path, tmp_path: Path, gh: Path) -> None:
+def test_a_bump_is_a_candidate(signed_boards: Path, tmp_path: Path, gh: Path) -> None:
     release = tmp_path / "release"
-    result = _publish(signed_repo, release, "--prerelease", "--upload", gh=gh)
+    result = _publish(signed_boards, release, "--prerelease", "--upload", gh=gh)
     assert result.returncode == 0, result.stderr
     assert json.loads((release / "release.json").read_text())["prerelease"] is True
     args = _gh_args(gh)
@@ -115,26 +159,46 @@ def test_a_bump_is_a_candidate(signed_repo: Path, tmp_path: Path, gh: Path) -> N
 
 
 @spec(CAPABILITY, "Candidates and stable releases", "Post-merge build")
-def test_main_is_a_stable_release(signed_repo: Path, tmp_path: Path, gh: Path) -> None:
+def test_main_is_a_stable_release(
+    board: Board, signed_boards: Path, tmp_path: Path, gh: Path
+) -> None:
     release = tmp_path / "release"
-    result = _publish(signed_repo, release, "--upload", gh=gh)
+    result = _publish(signed_boards, release, "--upload", gh=gh)
     assert result.returncode == 0, result.stderr
     assert json.loads((release / "release.json").read_text())["prerelease"] is False
     args = _gh_args(gh)
     assert "--latest" in args
     assert "--prerelease" not in args
     uploaded = {Path(arg).name for arg in args if arg.startswith(str(release))}
-    assert "repo.tar" in uploaded
+    assert f"{board.device}-repo.tar" in uploaded
     assert "release.json" not in uploaded
 
 
+@spec(CAPABILITY, "Publish after signing and drill", "A board missing")
+def test_a_release_carries_every_board(
+    board: Board, signed_boards: Path, tmp_path: Path, gh: Path
+) -> None:
+    # The session has this board's build alone, and boards/ describes more.
+    others = sorted(other.id for other in load_all() if other.id != board.id)
+    assert others
+    result = _publish(signed_boards, tmp_path / "release", "--upload", gh=gh, every_board=True)
+    assert result.returncode != 0
+    asked = " ".join(sorted(other.id for other in load_all()))
+    assert f"the release is of {asked}, but {signed_boards} holds the builds of {board.id}" in (
+        result.stderr
+    )
+    assert not (tmp_path / "release").exists()
+    assert not (gh / "gh.args").exists()
+
+
 @spec(CAPABILITY, "Artifacts come from one build", "Artifacts mixed from two builds")
-def test_two_builds_are_not_mixed(signed_repo: Path, tmp_path: Path, gh: Path) -> None:
+def test_two_builds_are_not_mixed(
+    board: Board, signed_repo: Path, tmp_path: Path, gh: Path
+) -> None:
     mixed = tmp_path / "mixed"
-    shutil.copytree(signed_repo, mixed)
-    (upgrade,) = (mixed / "targets").glob(f"*{UPGRADE}")
-    with upgrade.open("ab") as image:
-        image.write(b"another build")
+    linked_copy(signed_repo, mixed / board.id)
+    (upgrade,) = (mixed / board.id / "targets").glob(f"*{UPGRADE}")
+    replace(upgrade, upgrade.read_bytes() + b"another build")
     result = _publish(mixed, tmp_path / "release", "--upload", gh=gh)
     assert result.returncode != 0
     assert "not all from the build" in result.stderr
@@ -143,12 +207,36 @@ def test_two_builds_are_not_mixed(signed_repo: Path, tmp_path: Path, gh: Path) -
 
 
 @spec(CAPABILITY, "Traceable release notes", "View release notes")
-def test_release_notes_name_the_sources(signed_repo: Path, tmp_path: Path) -> None:
+def test_release_notes_name_the_sources(
+    signed_repo: Path, signed_boards: Path, tmp_path: Path
+) -> None:
     release = tmp_path / "release"
-    assert _publish(signed_repo, release).returncode == 0
+    assert _publish(signed_boards, release).returncode == 0
     notes = json.loads((release / "release.json").read_text())["notes"]
     for line in LOCK.read_text().splitlines():
         if line.strip() and not line.startswith("#"):
             assert line.split()[2] in notes
     patches = json.loads((signed_repo / "manifest.json").read_text())["patches_sha256"]
     assert patches in notes
+
+
+@spec(CAPABILITY, "Artifacts come from one build", "Boards built from different sources")
+@pytest.mark.parametrize("field", ["upstream_lock_sha256", "patches_sha256", "openwrt_head"])
+def test_boards_from_different_sources_are_not_mixed(
+    board: Board, signed_repo: Path, tmp_path: Path, gh: Path, field: str
+) -> None:
+    # Beside the build under test, a build of another board from other sources:
+    # a copy of it, whose manifest names that board and another source.
+    other = next(other for other in load_all() if other.id != board.id)
+    signed = tmp_path / "signed"
+    signed.mkdir()
+    (signed / board.id).symlink_to(signed_repo)
+    linked_copy(signed_repo, signed / other.id)
+    manifest = signed / other.id / "manifest.json"
+    built = {"board": other.id, "device": other.device, field: "0" * 40}
+    replace(manifest, json.dumps(json.loads(manifest.read_text()) | built))
+    result = _publish(signed, tmp_path / "release", "--upload", gh=gh)
+    assert result.returncode != 0
+    assert f"were built from different sources: their {field} differs" in result.stderr
+    assert not (tmp_path / "release").exists()
+    assert not (gh / "gh.args").exists()

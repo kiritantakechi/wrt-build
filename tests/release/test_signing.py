@@ -16,6 +16,7 @@ import yaml
 from wrt_tests import spec
 from wrt_tests.keys import APK_KEYS, FIRMWARE_KEYS, Keys, sign
 from wrt_tests.oci import extract_root
+from wrt_tests.trees import linked_copy, replace
 
 if TYPE_CHECKING:
     from wrt_tests.router import Router
@@ -73,10 +74,8 @@ def test_the_sign_job_runs_only_the_signing_tools() -> None:
 def test_a_changed_artifact_is_not_signed(
     build_output: Path, release_keys: Keys, tmp_path: Path
 ) -> None:
-    changed = tmp_path / "build"
-    shutil.copytree(build_output, changed)
-    with (changed / INDEX).open("ab") as index:
-        index.write(b"\0")
+    changed = linked_copy(build_output, tmp_path / "build")
+    replace(changed / INDEX, (changed / INDEX).read_bytes() + b"\0")
     with pytest.raises(subprocess.CalledProcessError) as failure:
         sign(changed, tmp_path / "signed", release_keys)
     assert "do not match manifest.json" in failure.value.stderr

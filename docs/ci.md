@@ -6,17 +6,19 @@ There are three workflows, all on GitHub-hosted ubuntu-24.04 runners (4-core x86
 |---|---|---|---|
 | `check.yml` | `check` | `nix develop .#quality -c just check`, whose `spec-coverage` requires every scenario of the archived specs to have its test; runs on every push, with no path filter | — |
 | `check.yml` | `github-audit` | Weekly (and on demand): `just github-audit` reads back the settings the release pipeline relies on, the `release-signing` environment's reviewers and branches and the checks main requires | — |
-| `build.yml` | `host-toolchain` | Fetch and patch, then build the tools and the cross toolchain, in `nix develop .#build` | `staging_dir/{host,hostpkg,toolchain-*}` and `build_dir/host`, keyed by `scripts/toolchain-key.sh` |
-| `build.yml` | `firmware` | Restore the toolchain, then build with the ci profile (all kmods), in `nix develop .#build`; produces unsigned artifacts and `manifest.json` | `dl/` and ccache |
-| `build.yml` | `system-test` | Four jobs in parallel, each with its own emulator: `system` (`build firmware quality testing unit`), `network` (the datapath's tests behind the emulated ISP), `services` (`storage services`: the data disk, containers, SMB, VPN and metrics) and `release` (`release ops`: signing, publishing, device sync, the config push and the upgrade drill, with keys made for the run). Each downloads the firmware artifacts, runs `just env-report` (PPP and WireGuard for the sandbox included) and `just test ci <paths>`, and uploads its JUnit report | — |
-| `build.yml` | `sign` | Main and `bump/*` only, once `RELEASE_SIGNING` is `enabled`: waits for the maintainer's approval of the `release-signing` environment, then signs the firmware artifacts with the pinned signing tools (`nix run .#sign-tools -- scripts/release-sign.sh`) | — |
-| `build.yml` | `upgrade-drill` | Boots the latest stable release (`just drill-base`) and drills the upgrade to the signed candidate (`just test drill-base -m drill`, `WRT_SIGNED`) | — |
-| `build.yml` | `publish` | After the drill: `scripts/release-publish.sh --upload`, a pre-release from a bump branch, the stable release from main | — |
+| `build.yml` | `host-toolchain` | Fetch and patch, then build the tools and the board-neutral cross toolchain, in `nix develop .#build`; lists the boards of `boards/` (`just boards`) for the jobs that run per board | `staging_dir/{host,hostpkg,toolchain-*}` and `build_dir/host`, keyed by `scripts/toolchain-key.sh` |
+| `build.yml` | `firmware` | Per board: restore the toolchain, then build the board with the ci profile (all kmods), in `nix develop .#build`; produces the board's unsigned artifacts and `manifest.json` (`firmware-unsigned-<board>`) | `dl/`, and a ccache per board |
+| `build.yml` | `caches` | After the firmware jobs, on pushes and dispatched runs: of the ref's caches it keeps the current toolchain and the newest download cache and compiler cache of each board, and deletes the rest (`actions: write`, no build code runs) | — |
+| `build.yml` | `system-test` | Per board, four jobs in parallel, each with its own emulator: `system` (`build firmware quality testing unit`), `network` (the datapath's tests behind the emulated ISP), `services` (`storage services`: the data disk, containers, SMB, VPN and metrics) and `release` (`release ops`: signing, publishing, device sync, the config push and the upgrade drill, with keys made for the run). Each downloads the board's firmware artifacts, runs `just env-report` (PPP and WireGuard for the sandbox included) and `just test <board> ci <paths>`, and uploads its JUnit report | — |
+| `build.yml` | `sign` | Main and `bump/*` only, once `RELEASE_SIGNING` is `enabled`: waits for the maintainer's approval of the `release-signing` environment, then signs every board's firmware artifacts with the pinned signing tools (`nix run .#sign-tools -- scripts/release-sign.sh`), into `signed/<board>` | — |
+| `build.yml` | `drill` | Per board: boots the board's latest stable release (`just drill-base <board>`) and drills the upgrade to its signed candidate (`just test <board> drill-base -m drill`, `WRT_SIGNED`) | — |
+| `build.yml` | `upgrade-drill` | The check main's rules require: passes when the system tests passed and every board's drill passed, or when signing, and so every drill, did not run (a pull request, or no release keys yet) | — |
+| `build.yml` | `publish` | After every board's drill: `scripts/release-publish.sh --upload` with every board's signed build, a pre-release from a bump branch, the stable release from main | — |
 | `bump.yml` | `bump` | Weekly: `just upstream-bump`; when upstream moved, a pull request from `bump/<date>`, and `check` and `build` started on that branch (`docs/release-flow.md`) | — |
 
 `build.yml` runs only when code changes (changes to `openspec/`, `docs/` and Markdown files do not trigger it), and a new push to the same branch cancels the older pipeline that is still running.
 
-The toolchain cache key depends only on these inputs: the runner architecture, the tree SHAs of openwrt's `tools/` and `toolchain/` directories, the tree SHAs of the packages feed's `lang/golang` and `lang/rust` directories, `config/toolchain.seed`, the build environment fingerprint `WRT_BUILD_INPUTS` (the store paths of the build packages plus the build profile; see `buildInputsId` in `flake.nix`), and the two scripts that build and pack the archive, `toolchain-build.sh` and `toolchain-pack.sh`. The ccache key is the hash of `config/ccache.conf`, which decides whether an entry can hit, followed by the run ID. Neither key carries a version number: what changes a cache's contents changes its key. So changing only the packages or luci SHA, or adding tools to the test environment, still hits the toolchain cache.
+The toolchain cache key depends only on these inputs: the runner architecture, the tree SHAs of openwrt's `tools/` and `toolchain/` directories, the tree SHAs of the packages feed's `lang/golang` and `lang/rust` directories, `config/toolchain.seed`, the build environment fingerprint `WRT_BUILD_INPUTS` (the store paths of the build packages plus the build profile; see `buildInputsId` in `flake.nix`), and the two scripts that build and pack the archive, `toolchain-build.sh` and `toolchain-pack.sh`. The ccache key is the board, whose packages no other board's build compiles alike, then the hash of `config/ccache.conf`, which decides whether an entry can hit, then the run ID. Neither key carries a version number: what changes a cache's contents changes its key. So changing only the packages or luci SHA, or adding tools to the test environment, still hits the toolchain cache.
 
 The build jobs enter `.#build`, which holds only the build environment, so they never build the emulator's QEMU: it carries a patch (`patches/qemu/`), so no binary cache has it, and building it takes a few minutes. `system-test` enters the default shell with both environments.
 
@@ -50,6 +52,13 @@ Only `sign` references secrets, the release keys of the `release-signing` enviro
 | 2026-09-29 | 36514179961 | system-test (network) job total | 29 min | Failed: einat and qosify were not back on pppoe-wan within 180 s after restarts and a redial under TCG |
 | 2026-09-29 | 36615831750 | host-toolchain job total | 10 min | Toolchain cache hit |
 | 2026-09-29 | 36615831750 | firmware job total | 205 min | Build: 21,372 of 24,295 cacheable calls hit (88%); failed at the kernel configuration check: the ci profile's kmods made modules of four PCI USB drivers that `config/kernel.config` leaves out, which `config/ci.seed` now leaves out of the repository as well |
+| 2026-09-30 | 36736937629 | host-toolchain job total | 64 min | The board-neutral toolchain under its new key, built cold |
+| 2026-09-30 | 36736937629 | firmware (r6s) job total | 192 min | The first R6S build in CI |
+| 2026-09-30 | 36736937629 | firmware (r4s) job total | 7 min | Failed: in buildbot mode two of world's sub-makes checked the toolchain's version at once, and one deleted the toolchain (`patches/openwrt/0009`) |
+| 2026-10-01 | 36793323171 | host-toolchain job total | 83 min | `toolchain/` changed with patch 0009, so a cold rebuild: tools 43 min, toolchain 36 min |
+| 2026-10-01 | 36793323171 | firmware (r6s) job total | 214 min | Build: 205 min on an AMD EPYC 9V74; the new compiler left the old entries behind: 4,189 of 24,288 cacheable calls hit (17%) |
+| 2026-10-01 | 36793323171 | firmware (r4s) job total | 261 min | Build: 254 min, at the same hit rate |
+| 2026-10-01 | 36793323171 | system-test jobs | 19 to 118 min | R6S: network 19, services 24 and system 97 min passed; release (51 min) failed, as its image trusted the attended sysupgrade CA key (`config/ci.seed`). R4S: system (118 min) passed; network (31 min) failed, qosify lost pppoe-wan after a redial (`patches/openwrt/0010`); services (33 min) was cancelled by a runner shutdown; release (84 min) failed as the R6S's did |
 
 The first full pipeline on a cold cache took about 3 hours 6 minutes; both build jobs are well within the 6-hour limit.
 
@@ -62,6 +71,8 @@ Until run 36412223299 the restored ccache hit almost nothing, for two reasons:
 
 `scripts/build.sh` prints the ccache statistics of each build (OpenWrt's own go to its silenced output) and the CPU, since runners differ (an Intel Xeon 6973P-C and an AMD EPYC 7763 in the two attempts above). A ci build fills about 4.5 GB of the 12 GB the cache may grow to.
 
+A new toolchain leaves every target entry of the old one behind, as the compiler's content changed: run 36793323171 hit 17% of its cacheable calls and grew the R6S cache from 4.7 to 9.3 GB, saved as 2.7 GB. Left alone, each board's cache would grow to its 12 GB, some 3.5 GB compressed, and the two past the quota. In CI `scripts/build.sh` therefore drops what the build did not use (`WRT_CCACHE_TRIM`; a hit refreshes an entry's time), so each board's cache holds one build, about 1.4 GB compressed. Locally both boards share one cache, which keeps everything up to `max_size`.
+
 ## Cache usage
 
 The total cache quota for a GitHub repository is 10 GB.
@@ -69,5 +80,6 @@ The total cache quota for a GitHub repository is 10 GB.
 | Date | Toolchain archive | ccache | dl | Nix installer | Total |
 |---|---|---|---|---|---|
 | 2026-09-28 | 776 MiB | 1243 MiB | 1456 MiB | 45 MiB | 3521 MiB |
+| 2026-09-30 | 775 MiB | 1370 MiB per board, two boards | 2685 MiB | 45 MiB | 6245 MiB |
 
-Each run saves a new ccache (its key includes the run ID); GitHub evicts old ones least recently used first. At current usage the toolchain can stay in the cache, and there is no need to store it as a Release asset instead (the fallback in design D11).
+Each run saves a new ccache per board (its key includes the run ID), and a new download cache or toolchain whenever their inputs change (a feed's Makefile, the toolchain's key). One set takes about 6.2 GB of the 10 GB with two boards. Beyond the quota GitHub evicts the least recently used cache, and the firmware jobs used to restore their toolchain first: on 2026-09-30 two download caches and four ccaches pushed out the toolchain the same run's second attempt needed. The firmware jobs now restore the toolchain last, so that a download cache or ccache the run supersedes goes before it, and the `caches` job keeps one set per ref, the current toolchain and the newest download cache and ccache of each board. At that usage the toolchain can stay in the cache, and there is no need to store it as a Release asset instead (the fallback in design D11).

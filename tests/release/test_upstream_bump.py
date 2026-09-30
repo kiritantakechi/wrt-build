@@ -7,6 +7,7 @@ production keys and the latest stable release as the base; here, and in
 system-test, they run with the session's keys and this build as the base.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -17,8 +18,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
+from wrt_tests.boards import load_all
 
 if TYPE_CHECKING:
+    from wrt_tests.boards import Board
     from wrt_tests.datapath import Online
     from wrt_tests.drill import Drill
 
@@ -26,6 +29,36 @@ CAPABILITY = "release/upstream-bump"
 REPO = Path(__file__).resolve().parents[2]
 NAMES = ("openwrt", "packages", "luci")
 BBR_PATCH = "patches/openwrt/0001-generic-6.18-add-TCP-BBRv3.patch"
+DRILL_BASE = REPO / "scripts" / "drill-base.sh"
+# A stand-in for gh: the latest release is latest.json beside it, or GitHub's
+# error in latest.error, and the release's assets are the files in assets/.
+GH = """#!/bin/sh
+here=$(dirname "$0")
+case "$1" in
+    api)
+        [ -f "$here/latest.json" ] && exec cat "$here/latest.json"
+        cat "$here/latest.error" >&2
+        exit 1
+        ;;
+    release)
+        shift 3
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --pattern) pattern=$2 ;;
+                --dir) dir=$2 ;;
+            esac
+            shift 2
+        done
+        found=
+        for asset in "$here"/assets/$pattern; do
+            [ -e "$asset" ] && cp "$asset" "$dir/" && found=1
+        done
+        [ -n "$found" ] || { echo "no assets match the file pattern" >&2; exit 1; }
+        ;;
+esac
+"""
+NOT_FOUND = "gh: Not Found (HTTP 404)"
+TAG = "r20260930-23fd10a-7"
 GIT_IDENTITY = {
     "GIT_AUTHOR_NAME": "upstream",
     "GIT_AUTHOR_EMAIL": "upstream@example.net",
@@ -148,6 +181,107 @@ def test_a_patch_that_does_not_apply_is_named(tmp_path: Path) -> None:
     )
     assert result.returncode != 0
     assert f"patch does not apply: {BBR_PATCH}" in result.stderr
+
+
+def _factory(board: Board, *, suffix: str = "") -> str:
+    return f"openwrt-rockchip-armv8-{board.device}{suffix}-erofs-factory.img.gz"
+
+
+def _drill_base(
+    root: Path, board: Board, latest: str | None, error: str = NOT_FOUND
+) -> subprocess.CompletedProcess[str]:
+    """Run drill-base.sh for ``board`` beside this build's stand-in outputs, in ``root``.
+
+    ``latest`` is the latest release's tag, with its assets in ``root/gh/assets``,
+    or None when GitHub answers the lookup with ``error``: by default, that there
+    is no stable release.
+    """
+    ci = root / "work" / "out" / board.id / "ci"
+    (ci / "targets").mkdir(parents=True)
+    (ci / "manifest.json").write_text("{}")
+    (ci / "targets" / _factory(board)).write_bytes(b"this build's factory image")
+    (ci / "u-boot-qemu.bin").write_bytes(b"this build's emulator firmware")
+    gh = root / "gh"
+    (gh / "assets").mkdir(parents=True, exist_ok=True)
+    (gh / "gh").write_text(GH)
+    (gh / "gh").chmod(0o755)
+    if latest is None:
+        (gh / "latest.error").write_text(error)
+    else:
+        assets = [{"name": path.name} for path in sorted((gh / "assets").iterdir())]
+        (gh / "latest.json").write_text(json.dumps({"tag_name": latest, "assets": assets}))
+    return subprocess.run(
+        [DRILL_BASE, board.id],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "PATH": f"{gh}{os.pathsep}{os.environ['PATH']}",
+            "WRT_WORKDIR": str(root / "work"),
+        },
+    )
+
+
+def _release(root: Path, board: Board, image: bytes, *, listed: bytes | None = None) -> None:
+    """Put the board's set in the stand-in's release: its manifest and factory image.
+
+    The manifest lists ``listed`` (``image`` unless given) as the factory image. A
+    longer device name's image beside it must not be taken for the board's.
+    """
+    assets = root / "gh" / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    (assets / _factory(board)).write_bytes(image)
+    (assets / _factory(board, suffix="-enterprise")).write_bytes(b"another device's image")
+    digest = hashlib.sha256(image if listed is None else listed).hexdigest()
+    files = {f"targets/{_factory(board)}": digest}
+    (assets / f"{board.device}-manifest.json").write_text(json.dumps({"files": files}))
+
+
+def _base(root: Path, board: Board) -> tuple[str, bytes]:
+    """Return what the drill starts from: the base's tag and its factory image."""
+    base = root / "work" / "out" / board.id / "drill-base"
+    (image,) = (base / "targets").iterdir()
+    assert image.name == _factory(board)
+    tag = json.loads((base / "manifest.json").read_text())["profile"]
+    assert isinstance(tag, str)
+    return tag, image.read_bytes()
+
+
+@spec(CAPABILITY, "Merge only after the upgrade drill passes", "Drill base of each board")
+def test_each_drill_starts_from_the_board_s_latest_release(tmp_path: Path) -> None:
+    board, other = load_all()[:2]
+    _release(tmp_path, board, b"the released factory image")
+    result = _drill_base(tmp_path, board, TAG)
+    assert result.returncode == 0, result.stderr
+    assert _base(tmp_path, board) == (TAG, b"the released factory image")
+    # A board that no stable release carries yet starts from this build...
+    result = _drill_base(tmp_path, other, TAG)
+    assert result.returncode == 0, result.stderr
+    assert f"carries no {other.id}" in result.stderr
+    assert _base(tmp_path, other) == ("this-build", b"this build's factory image")
+    # ...as every board does before the first release.
+    first = tmp_path / "first"
+    result = _drill_base(first, board, None)
+    assert result.returncode == 0, result.stderr
+    assert "no stable release yet" in result.stderr
+    assert _base(first, board) == ("this-build", b"this build's factory image")
+
+
+@spec(CAPABILITY, "Merge only after the upgrade drill passes", "Drill base cannot be had")
+@pytest.mark.parametrize("failure", ["lookup", "image"])
+def test_a_drill_base_that_cannot_be_had_stops_the_drill(failure: str, tmp_path: Path) -> None:
+    board = load_all()[0]
+    if failure == "lookup":
+        result = _drill_base(tmp_path, board, None, error="gh: Server Error (HTTP 502)")
+        refusal = "cannot look up the latest release"
+    else:
+        _release(tmp_path, board, b"a changed factory image", listed=b"the released one")
+        result = _drill_base(tmp_path, board, TAG)
+        refusal = f"of {TAG} does not match {board.device}-manifest.json"
+    assert result.returncode != 0
+    assert refusal in result.stderr, result.stderr
+    assert not (tmp_path / "work" / "out" / board.id / "drill-base" / "manifest.json").exists()
 
 
 @pytest.mark.drill

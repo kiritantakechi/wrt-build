@@ -49,7 +49,10 @@ class Outcome:
 
 @dataclass
 class Drill:
-    """A drill of one candidate on the router of ``online``."""
+    """A drill of one candidate on the router of ``online``.
+
+    ``candidate`` holds the boards' signed builds, as the sign job hands them on.
+    """
 
     online: Online
     candidate: Path
@@ -61,8 +64,12 @@ class Drill:
         """Assemble the candidate and put it at the Releases stand-in; return its tag."""
         if self.published is None:
             release = workdir / "candidate"
+            boards = ",".join(path.name for path in self.candidate.iterdir())
             subprocess.run(
-                [PUBLISH, self.candidate, release, "--prerelease", "--run", "drill"],
+                [
+                    *(PUBLISH, self.candidate, release),
+                    *("--boards", boards, "--prerelease", "--run", "drill"),
+                ],
                 check=True,
                 capture_output=True,
             )

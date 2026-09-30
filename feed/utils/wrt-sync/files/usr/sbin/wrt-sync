@@ -3,7 +3,9 @@
 # Usage: wrt-sync [--candidate]
 # A container on podman's network, so that dae routes its traffic as it does the
 # LAN's, fetches the newest release of the channel (wrt-sync.main.channel, or
-# --candidate for pre-releases too) into /mnt/data/repo/.incoming/<tag>. The
+# --candidate for pre-releases too) into /mnt/data/repo/.incoming/<tag>: the
+# asset set of the router's device, which upstream names after the board name
+# (board-model D10). The
 # container gets the router's own programs read-only and only that directory to
 # write, and nothing it fetches is trusted: the release becomes current only
 # once its manifest's signature verifies with /etc/opkg/keys, its upgrade image
@@ -31,6 +33,7 @@ api=$(uci -q get wrt-sync.main.api) || api=https://api.github.com
 repository=$(uci -q get wrt-sync.main.repository) || repository=kiritantakechi/wrt-build
 channel=$(uci -q get wrt-sync.main.channel) || channel=stable
 keep=$(uci -q get wrt-sync.main.keep) || keep=3
+device=$(tr ',' '_' </tmp/sysinfo/board_name)
 case "${1:-}" in
 	--candidate) channel=candidate ;;
 	'') ;;
@@ -50,7 +53,8 @@ done
 # --rootfs takes the first argument after the options as the container's root.
 tag=$(podman run --rm --network podman "$@" \
 	--volume "${REPO}/releases:/releases:ro" --volume "${REPO}/.incoming:/incoming" \
-	--rootfs "${REPO}/.root" "${FETCH}" "${api}" "${repository}" "${channel}" /releases /incoming) ||
+	--rootfs "${REPO}/.root" "${FETCH}" "${api}" "${repository}" "${channel}" "${device}" \
+	/releases /incoming) ||
 	die "fetching the ${channel} release failed; the current release stays"
 release="${REPO}/releases/${tag}"
 
