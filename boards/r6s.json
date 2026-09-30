@@ -1,0 +1,42 @@
+{
+  "model": "FriendlyElec NanoPi R6S",
+  "device": "friendlyarm_nanopi-r6s",
+  "board_name": "friendlyarm,nanopi-r6s",
+  "soc": {
+    "compatible": "rockchip,rk3588s",
+    "loader": {
+      "signature": "RKNS",
+      "offset": 0
+    }
+  },
+  "cpu": "cortex-a76.cortex-a55+crypto",
+  "uboot": {
+    "variant": "nanopi-r6s-rk3588s",
+    "env_dir": "board/friendlyelec/nanopi-r6s-rk3588s"
+  },
+  "boot_disk": "emmc",
+  "ports": [
+    {
+      "device": "eth0",
+      "role": "lan"
+    },
+    {
+      "device": "eth1",
+      "role": "wan"
+    },
+    {
+      "device": "eth2",
+      "role": "lan"
+    }
+  ],
+  "drivers": {
+    "platform": ["rk_gmac-dwmac", "rockchip-dw-pcie"],
+    "pci": ["r8169"]
+  },
+  "dt_enabled": ["/ethernet@fe1c0000", "/pcie@fe180000", "/pcie@fe190000"],
+  "emulator": {
+    "cpu": "cortex-a76",
+    "cores": 8,
+    "memory": "8G"
+  }
+}

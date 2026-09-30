@@ -8,7 +8,7 @@ set -eu
 # shellcheck source=scripts/lib.sh
 . "$(dirname -- "$0")/lib.sh"
 
-checks='shfmt shellcheck nixfmt actionlint editorconfig-checker gitleaks forbidden-patterns skeleton marks ruff-format ruff-check ty spec-coverage'
+checks='shfmt shellcheck nixfmt actionlint editorconfig-checker gitleaks forbidden-patterns skeleton marks boards ruff-format ruff-check ty spec-coverage'
 requested=$*
 for name in ${requested}; do
 	case " ${checks} " in
@@ -141,6 +141,7 @@ run() {
 	run forbidden-patterns forbidden_patterns
 	run skeleton skeleton
 	run marks "${REPO_DIR}/scripts/marks-check.sh"
+	run boards uv run --directory tests --locked board-check
 	run ruff-format uv run --directory tests --locked ruff format --check
 	run ruff-check uv run --directory tests --locked ruff check
 	run ty uv run --directory tests --locked ty check

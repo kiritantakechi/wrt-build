@@ -5,10 +5,12 @@ description = "System tests for the wrt-build firmware: one test per spec scenar
 requires-python = ">=3.14"
 dependencies = [
     "labgrid>=26.0",
+    "pydantic>=2.12",
     "pytest>=9.1",
 ]
 
 [project.scripts]
+board-check = "wrt_tests.boards:main"
 emu-prepare = "wrt_tests.emu:main"
 spec-coverage = "wrt_tests.coverage:main"
 

@@ -27,6 +27,7 @@ ignore = [
 "**/test_*.py" = ["S101", "D103", "INP001"]
 "*/conftest.py" = ["INP001"]
 # Command-line tools print their report.
+"wrt_tests/boards.py" = ["T201"]
 "wrt_tests/coverage.py" = ["T201"]
 
 [lint.flake8-pytest-style]

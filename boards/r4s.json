@@ -1,0 +1,38 @@
+{
+  "model": "FriendlyElec NanoPi R4S",
+  "device": "friendlyarm_nanopi-r4s",
+  "board_name": "friendlyarm,nanopi-r4s",
+  "soc": {
+    "compatible": "rockchip,rk3399",
+    "loader": {
+      "signature": "RK33",
+      "offset": 2048
+    }
+  },
+  "cpu": "cortex-a72.cortex-a53+crypto",
+  "uboot": {
+    "variant": "nanopi-r4s-rk3399",
+    "env_dir": "board/rockchip/evb_rk3399"
+  },
+  "boot_disk": "sd",
+  "ports": [
+    {
+      "device": "eth0",
+      "role": "wan"
+    },
+    {
+      "device": "eth1",
+      "role": "lan"
+    }
+  ],
+  "drivers": {
+    "platform": ["rk_gmac-dwmac", "rockchip-pcie"],
+    "pci": ["r8169"]
+  },
+  "dt_enabled": ["/ethernet@fe300000", "/pcie@f8000000"],
+  "emulator": {
+    "cpu": "cortex-a72",
+    "cores": 6,
+    "memory": "4G"
+  }
+}
