@@ -1,0 +1,4 @@
+# Every file sops encrypts here is for this recipient (config-init).
+creation_rules:
+  - path_regex: \.enc(\.yaml)?$
+    age: @recipient@

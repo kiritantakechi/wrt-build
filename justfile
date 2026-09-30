@@ -93,6 +93,16 @@ upstream-bump description *args:
 github-audit *args:
     scripts/github-audit.sh {{ args }}
 
+# Create the private configuration repository and, if missing, the age key
+[group('ops')]
+config-init directory:
+    scripts/config-init.sh {{ directory }}
+
+# Push the private configuration ($WRT_CONFIG_DIR) to a router over SSH
+[group('ops')]
+config-push host *args:
+    scripts/config-push.sh {{ host }} {{ args }}
+
 # Prepare a GitHub-hosted runner (CI only)
 [group('ci')]
 runner-prepare:

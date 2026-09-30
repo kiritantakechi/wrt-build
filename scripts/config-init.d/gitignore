@@ -1,0 +1,3 @@
+# Plain text never goes in: sops decrypts into temporary directories only.
+*.dec
+*.plain

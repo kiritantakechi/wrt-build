@@ -1,0 +1,18 @@
+# dae's configuration without lan_interface and wan_interface, which the
+# firmware sets (r4s-ebpf-datapath D5). Files next to it are included from here.
+global {
+	log_level: info
+}
+
+node {
+}
+
+group {
+	proxy {
+		policy: min_moving_avg
+	}
+}
+
+routing {
+	fallback: direct
+}
