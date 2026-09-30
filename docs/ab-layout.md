@@ -1,12 +1,12 @@
 # A/B slots
 
-The SD card holds two complete systems, slot A and slot B. U-Boot boots the slot named by `boot_slot`; an upgrade writes the other slot and makes it a trial slot, which the health check confirms or U-Boot rolls back (r4s-ab-rollback).
+The boot disk holds two complete systems, slot A and slot B: the SD card on the NanoPi R4S, the eMMC on the NanoPi R6S. The layout is the same on both. U-Boot boots the slot named by `boot_slot`; an upgrade writes the other slot and makes it a trial slot, which the health check confirms or U-Boot rolls back (r4s-ab-rollback).
 
 ## Layout
 
 | Offset | Content | Size |
 |---|---|---|
-| `0x8000` | idbloader (TPL + SPL) | < 4 MiB |
+| `0x8000` | idbloader: the SoC's loader (TPL and SPL on the RK3399; rkbin's DRAM initialization and SPL on the RK3588S) | < 4 MiB |
 | `0x3F8000` | U-Boot environment | 32 KiB |
 | `0x800000` | u-boot.itb (U-Boot + TF-A) | < 24 MiB |
 | 32 MiB | p1 boot-A (ext4: `kernel.img`, the configuration handed over on upgrade) | 64 MiB |
@@ -14,7 +14,7 @@ The SD card holds two complete systems, slot A and slot B. U-Boot boots the slot
 | | p3 boot-B | 64 MiB |
 | | p4 root-B | 1024 MiB |
 
-The whole card is 2.2 GiB, so any 4 GB card holds it. U-Boot is shared by both slots and only changes when the factory image is written again.
+The whole image is 2.2 GiB, so any 4 GB SD card holds it; on the R6S's 32 GB eMMC the rest stays unused. U-Boot is shared by both slots and only changes when the factory image is written again.
 
 ## Variables
 
@@ -41,7 +41,7 @@ Within one power cycle U-Boot also falls back to the other slot when a slot's ke
 
 ## Recovering by hand over the serial console
 
-Connect to the R4S debug UART (1500000 baud; the emulator's console is the PL011), press a key while U-Boot counts down, and make a slot the confirmed one:
+Connect to the board's debug UART (1500000 baud on both boards; the emulator's console is the PL011), press a key while U-Boot counts down, and make a slot the confirmed one:
 
 ```
 => setenv boot_slot a

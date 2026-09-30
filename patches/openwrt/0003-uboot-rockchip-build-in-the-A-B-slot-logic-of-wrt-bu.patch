@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 28 Sep 2026 23:55:25 +0800
+Subject: [PATCH] uboot-rockchip: build in the A/B slot logic of wrt-build's
+ boards
+
+Include wrt-build's A/B glue, env/uboot/wrt-ab.mk, after the variants'
+definitions. When the variant being built is one of the boards listed in
+env/wrt-boards.mk, the glue adds the configuration fragments wrt-ab.config
+and board-<id>.config after its defconfig, and prepares its default
+environment: the board's constants followed by the shared slot logic. The
+stored environment may set only boot_slot, bootcount and
+upgrade_available (ENV_WRITEABLE_LIST). Every other variant is unchanged.
+---
+ package/boot/uboot-rockchip/Makefile | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/package/boot/uboot-rockchip/Makefile b/package/boot/uboot-rockchip/Makefile
+index 7161e56..8b38de5 100644
+--- a/package/boot/uboot-rockchip/Makefile
++++ b/package/boot/uboot-rockchip/Makefile
+@@ -514,4 +514,8 @@ endef
+ define Package/u-boot/install/default
+ endef
+ 
++# The A/B slot logic of wrt-build for the U-Boot variants of its boards
++# (env/wrt-boards.mk), whose definitions above env/uboot/wrt-ab.mk extends.
++include $(TOPDIR)/env/uboot/wrt-ab.mk
++
+ $(eval $(call BuildPackage/U-Boot))

@@ -1,0 +1,25 @@
+#!/bin/sh
+# The stored U-Boot environment of an A/B system, for fw_printenv and fw_setenv
+# (board-model D4): on the boot disk, which holds the root partition, at the
+# offset and size of every board's U-Boot (uboot/wrt-ab.config). Only a system
+# booted from a slot has one, and only uboot-envtools' own defaults
+# (30_uboot-envtools) found none: a configuration an upgrade carries over keeps
+# its own.
+# shellcheck source=../../lib/functions/wrt-ab.sh
+. /lib/functions/wrt-ab.sh
+# shellcheck source=/dev/null # parts of base-files and uboot-envtools on the router
+. /lib/functions.sh
+# shellcheck source=/dev/null
+. /lib/uboot-envtools.sh
+# shellcheck source=/dev/null
+. /lib/upgrade/common.sh
+
+wrt_ab_slot >/dev/null || exit 0
+uci -q get ubootenv.@ubootenv[0] >/dev/null && exit 0
+export_bootdevice || exit 1
+export_partdevice wrt_disk 0 || exit 1
+# shellcheck disable=SC2154 # export_partdevice sets wrt_disk
+ubootenv_add_uci_config "/dev/${wrt_disk}" 0x3f8000 0x8000
+config_load ubootenv
+config_foreach ubootenv_add_app_config
+exit 0

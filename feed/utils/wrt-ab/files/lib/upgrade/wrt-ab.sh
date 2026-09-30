@@ -1,4 +1,4 @@
-# A/B sysupgrade of the NanoPi R4S (r4s-ab-rollback design D6). sysupgrade and its
+# A/B sysupgrade (r4s-ab-rollback design D6). sysupgrade and its
 # second stage source every /lib/upgrade/*.sh in name order, so the definitions
 # below replace the whole-disk ones of the rockchip platform.sh before this file.
 # An upgrade writes only the slot that is not running, then makes it the trial slot.

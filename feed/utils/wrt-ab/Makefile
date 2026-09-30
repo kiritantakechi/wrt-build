@@ -12,7 +12,7 @@ include $(INCLUDE_DIR)/package.mk
 define Package/wrt-ab
   SECTION:=utils
   CATEGORY:=Utilities
-  TITLE:=A/B slots of the NanoPi R4S: upgrade, health check, slot switch
+  TITLE:=A/B slots: upgrade, health check, slot switch
   DEPENDS:=@TARGET_rockchip +uboot-envtools +jsonfilter
   PKGARCH:=all
 endef

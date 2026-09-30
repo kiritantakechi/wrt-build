@@ -1,4 +1,4 @@
-# wrt-ab: the two slots on the SD card (r4s-ab-rollback design D1, D4). Sourced by
+# wrt-ab: the two slots on the boot disk (r4s-ab-rollback design D1, D4). Sourced by
 # wrt-slot, wrt-healthcheck and the A/B sysupgrade; POSIX sh, so no locals: every
 # function keeps its variables under a wrt_ prefix of its own.
 

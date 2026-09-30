@@ -49,6 +49,3 @@ index e02cc27..83e0ea2 100644
  		! grep -q ".* $mountpoint " /proc/mounts &&
  		return 0
  
--- 
-2.51.2
-

@@ -1,5 +1,7 @@
 # Kernel configuration
 
+Both boards run one kernel configuration: upstream's rockchip/armv8 configuration, which already builds in what the RK3399 and the RK3588S need (their GMAC, PCIe host controllers, eMMC and SD controllers, thermal sensors and watchdogs), and the layers below. Each board's build compiles it in the board's own build directory, with the board's CPU tuning: OpenWrt passes `CONFIG_EXTRA_OPTIMIZATION`, which holds the board's `-mcpu`, on to the kernel as well.
+
 Kernel configuration comes from three sources, each responsible for one kind of setting:
 
 | Source | What goes there | Examples |
@@ -15,8 +17,8 @@ Kernel configuration comes from three sources, each responsible for one kind of 
 Enabling a symbol often makes a batch of new symbols beneath it visible. Kernel configuration stops outright when it meets a visible symbol with no value, so the new symbols must be given values as well. To find them:
 
 ```sh
-# inside wrt-build-fhs, after one complete build of the tree
-K=$(ls -d "$WRT_WORKDIR"/openwrt/build_dir/target-*/linux-rockchip_armv8/linux-[0-9]*)
+# inside wrt-build-fhs, after one complete build of a board (here r4s)
+K=$(ls -d "$WRT_WORKDIR"/openwrt/build_dir/target-*_r4s/linux-rockchip_armv8/linux-[0-9]*)
 TC=$(ls -d "$WRT_WORKDIR"/openwrt/staging_dir/toolchain-aarch64_*)
 cp "$K/.config" /tmp/try.config
 printf '%s\n' CONFIG_NEW_SYMBOL=y >>/tmp/try.config
@@ -28,9 +30,9 @@ Every symbol listed must be given a value in the kernel config overlay. Also wat
 
 ## Cost of the virt driver group
 
-So that the shipped kernel can boot unchanged in the QEMU `virt` machine, the kernel config overlay builds in the generic PCIe host controller, the SD host controller on PCI (sdhci-pci, for the factory image as the emulator's SD card; r4s-ab-rollback), virtio-pci, virtio-net and the i6300esb watchdog. The PL011 serial console is already built in by the rockchip config. Only modern virtio is enabled, not legacy, and all other virtio devices are off, virtio-blk included since the emulator boots from the SD card.
+So that the shipped kernel can boot unchanged in the QEMU `virt` machine, the kernel config overlay builds in the generic PCIe host controller, the SD host controller on PCI (sdhci-pci, for the factory image as the emulator's boot disk, an SD card or an eMMC; r4s-ab-rollback, board-model), virtio-pci, virtio-net and the i6300esb watchdog. The PL011 serial console is already built in by the rockchip config. Only modern virtio is enabled, not legacy, and all other virtio devices are off, virtio-blk included since the emulator boots from its boot disk on sdhci-pci.
 
-Measured (2026-09-29, kernel 6.18.52): the added object files total 173,008 bytes (text + data + bss), about 169 KiB; the `Image` with BTF is 26,867,720 bytes. The R4S has none of these devices, so these drivers are never probed; they only take up this space.
+Measured (2026-09-29, kernel 6.18.52): the added object files total 173,008 bytes (text + data + bss), about 169 KiB; the `Image` with BTF is 26,867,720 bytes. Neither board has any of these devices, so these drivers are never probed; they only take up this space.
 
 | Object file | Bytes |
 |---|---|

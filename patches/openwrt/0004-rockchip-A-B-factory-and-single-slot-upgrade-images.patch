@@ -1,24 +1,22 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kiritantakechi <kiritantakechi@gmail.com>
 Date: Mon, 28 Sep 2026 23:55:25 +0800
-Subject: [PATCH] rockchip: nanopi-r4s: A/B factory and single-slot upgrade
- images
+Subject: [PATCH] rockchip: A/B factory and single-slot upgrade images
 
-Give the NanoPi R4S two slots: boot-A, root-A, boot-B and root-B on an
-MBR after the 32 MiB that hold u-boot-rockchip.bin. The factory image
-carries the same system in both slots and an empty U-Boot environment,
-so the first boot takes slot A. The upgrade image is a sysupgrade tar
-whose kernel member is the ext4 boot partition of one slot and whose
-root member is the root image; sysupgrade writes it to the slot that is
-not running.
+Give the devices of wrt-build's boards, as env/wrt-boards.mk lists them,
+two slots: boot-A, root-A, boot-B and root-B on an MBR after the 32 MiB
+that hold u-boot-rockchip.bin. The factory image carries the same system
+in both slots and an empty U-Boot environment, so the first boot takes
+slot A. The upgrade image is a sysupgrade tar whose kernel member is the
+ext4 boot partition of one slot and whose root member is the root image;
+sysupgrade writes it to the slot that is not running.
 
 gen_image_ab.sh writes the disk. Both images build the boot partition
-the same way (ab-boot).
+the same way (ab-boot). Every other device is unchanged.
 ---
  scripts/gen_image_ab.sh              | 32 ++++++++++++++++++++++++++++
- target/linux/rockchip/image/Makefile | 25 ++++++++++++++++++++++
- target/linux/rockchip/image/armv8.mk |  2 ++
- 3 files changed, 59 insertions(+)
+ target/linux/rockchip/image/Makefile | 29 +++++++++++++++++++++++++
+ 2 files changed, 61 insertions(+)
  create mode 100755 scripts/gen_image_ab.sh
 
 diff --git a/scripts/gen_image_ab.sh b/scripts/gen_image_ab.sh
@@ -60,10 +58,20 @@ index 0000000..3010fb9
 +	shift 4
 +done
 diff --git a/target/linux/rockchip/image/Makefile b/target/linux/rockchip/image/Makefile
-index d46d192..18338bc 100644
+index d46d192..0b4063f 100644
 --- a/target/linux/rockchip/image/Makefile
 +++ b/target/linux/rockchip/image/Makefile
-@@ -43,6 +43,23 @@ define Build/pine64-img
+@@ -3,6 +3,9 @@
+ include $(TOPDIR)/rules.mk
+ include $(INCLUDE_DIR)/image.mk
+ 
++# The devices of wrt-build's boards, which take the A/B images (Device/wrt-ab).
++include $(TOPDIR)/env/wrt-boards.mk
++
+ DEVICE_VARS += UBOOT_DEVICE_NAME
+ 
+ define Build/Compile
+@@ -43,6 +46,23 @@ define Build/pine64-img
  	dd if="$(STAGING_DIR_IMAGE)"/$(UBOOT_DEVICE_NAME)-u-boot-rockchip.bin of="$@" seek=64 conv=notrunc
  endef
  
@@ -87,38 +95,19 @@ index d46d192..18338bc 100644
  ### Devices ###
  define Device/Default
    PROFILES := Default
-@@ -56,6 +73,14 @@ define Device/Default
+@@ -54,6 +74,15 @@ define Device/Default
+   DEVICE_DTS_DIR = $$(DTS_DIR)/rockchip
+   DEVICE_DTS = $$(SOC)-$(lastword $(subst _, ,$(1)))
    UBOOT_DEVICE_NAME = $(lastword $(subst _, ,$(1)))-$$(SOC)
- endef
- 
++  $(if $(filter $(1),$(WRT_AB_DEVICES)),$(Device/wrt-ab))
++endef
++
 +# A/B slots of wrt-build: a factory image with both slots and a single-slot
 +# upgrade image, whose kernel member is the boot partition of the slot.
 +define Device/wrt-ab
 +  IMAGES := factory.img.gz sysupgrade.tar.gz
 +  IMAGE/factory.img.gz = boot-common | ab-boot | ab-disk | gzip
 +  IMAGE/sysupgrade.tar.gz = boot-common | ab-boot | sysupgrade-tar kernel=$$$$@.bootfs | gzip | append-metadata
-+endef
-+
+ endef
+ 
  include $(SUBTARGET).mk
- 
- $(eval $(call BuildImage))
-diff --git a/target/linux/rockchip/image/armv8.mk b/target/linux/rockchip/image/armv8.mk
-index 3e973b8..b888cce 100644
---- a/target/linux/rockchip/image/armv8.mk
-+++ b/target/linux/rockchip/image/armv8.mk
-@@ -138,6 +138,7 @@ TARGET_DEVICES += friendlyarm_nanopi-r3s
- 
- define Device/friendlyarm_nanopi-r4s
-   $(Device/rk3399)
-+  $(Device/wrt-ab)
-   DEVICE_VENDOR := FriendlyARM
-   DEVICE_MODEL := NanoPi R4S
-   DEVICE_VARIANT := 4GB LPDDR4
-@@ -147,6 +148,7 @@ TARGET_DEVICES += friendlyarm_nanopi-r4s
- 
- define Device/friendlyarm_nanopi-r4s-enterprise
-   $(Device/rk3399)
-+  $(Device/wrt-ab)
-   DEVICE_VENDOR := FriendlyARM
-   DEVICE_MODEL := NanoPi R4S Enterprise Edition
-   DEVICE_VARIANT := 4GB LPDDR4

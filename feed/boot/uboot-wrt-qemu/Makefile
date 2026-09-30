@@ -1,6 +1,7 @@
 # The emulator's U-Boot (r4s-ab-rollback design D3): qemu_arm64 built from the
-# same U-Boot as the R4S's, with the same A/B slot logic. A test artifact: it
-# installs nothing, scripts/build.sh takes it from the image staging directory.
+# same U-Boot as the boards', with the same A/B slot logic (board-model D3). A
+# test artifact: it installs nothing, scripts/build.sh takes it from the image
+# staging directory.
 
 include $(TOPDIR)/rules.mk
 
@@ -25,7 +26,7 @@ define U-Boot/Default
 endef
 
 define U-Boot/wrt-qemu
-  NAME:=the emulated R4S (QEMU virt)
+  NAME:=the emulated boards (QEMU virt)
   UBOOT_CONFIG:=qemu_arm64 $(call WrtAB/config,qemu)
 endef
 
@@ -36,13 +37,7 @@ UBOOT_CUSTOMIZE_CONFIG := \
 	--disable TOOLS_MKEFICAPSULE \
 	--set-str MKIMAGE_DTC_PATH $(PKG_BUILD_DIR)/scripts/dtc/dtc
 
-PKG_FILE_DEPENDS += $(WRT_AB_DIR)/
-KBUILD_CFLAGS += $(WRT_AB_KBUILD_CFLAGS)
-
-define Build/Prepare
-	$(call Build/Prepare/Default)
-	$(call Build/Prepare/WrtAB,qemu,board/emulation/qemu-arm)
-endef
+$(eval $(call WrtAB/Build,qemu,board/emulation/qemu-arm))
 
 define Build/InstallDev
 	$(INSTALL_DIR) $(STAGING_DIR_IMAGE)
