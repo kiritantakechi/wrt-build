@@ -1,9 +1,9 @@
 # r4s-release-pipeline validation
 
-Validation is automated and needs no R4S. Every scenario of the release pipeline's specs maps to a test, or is registered in `tests/verified-elsewhere.toml` with what verifies it instead (the signing approval, which GitHub's environment protection enforces and `scripts/github-audit.sh` reads back). The tool output is authoritative for this mapping:
+Validation is automated and needs no R4S. Every scenario of the release pipeline's specs (`release/*` and `ops/config-push` in `openspec/specs`; the change in `openspec/changes/archive/2026-09-30-r4s-release-pipeline`) maps to a test, or is registered in `tests/verified-elsewhere.toml` with what verifies it instead (the signing approval, which GitHub's environment protection enforces and `scripts/github-audit.sh` reads back). The tool output is authoritative for this mapping, and `just check` fails on any archived scenario without a test:
 
 ```sh
-nix develop .#quality -c uv run --directory tests --locked spec-coverage --change r4s-release-pipeline
+nix develop .#quality -c uv run --directory tests --locked spec-coverage
 ```
 
 The tests run on the host (the workflows' audits, signing, publishing, the weekly bump) and in the emulator (device sync, the config push, the upgrade drill), in the `release` shard of `system-test`, with release keys made for the run:
