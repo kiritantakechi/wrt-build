@@ -11,9 +11,12 @@ CONFIG_BUILD_LOG=y
 
 # The release build (r4s-release-pipeline D1), which CI tests, signs and publishes:
 # buildbot mode keeps the key made for the build out of the image, whose only
-# trust anchors are the release keys of wrt-keyring; the firmware is signed
-# afterwards by the sign job, never here.
+# trust anchors are the release keys of wrt-keyring; the firmware and the package
+# indexes are signed afterwards by the sign job, never here. So the build signs
+# no package lists: with SIGNED_PACKAGES, base-files would also pull in
+# openwrt-keyring, and with it OpenWrt's snapshot key.
 CONFIG_BUILDBOT=y
+# CONFIG_SIGNED_PACKAGES is not set
 # CONFIG_PACKAGE_openwrt-keyring is not set
 CONFIG_PACKAGE_wrt-keyring=y
 # CONFIG_SIGN_FIRMWARE is not set
@@ -24,3 +27,9 @@ CONFIG_PACKAGE_wrt-keyring=y
 # CONFIG_MAKE_TOOLCHAIN is not set
 # CONFIG_ALL_NONSHARED is not set
 # CONFIG_COLLECT_KERNEL_DEBUG is not set
+# Nor the attended sysupgrade clients: they upgrade from OpenWrt's build servers
+# rather than from this project's releases, and attendedsysupgrade-common adds
+# their CA key to the image's trust anchors beside the release keys.
+# CONFIG_PACKAGE_owut is not set
+# CONFIG_PACKAGE_luci-app-attendedsysupgrade is not set
+# CONFIG_PACKAGE_attendedsysupgrade-common is not set

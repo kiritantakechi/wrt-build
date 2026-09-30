@@ -195,9 +195,10 @@ configure_tree() (
 )
 
 # missing_config_lines <wanted> <actual>: print each option line of <wanted>
-# (CONFIG_X=... or "# CONFIG_X is not set") that <actual> lacks verbatim.
+# (CONFIG_X=... or "# CONFIG_X is not set") that <actual> lacks verbatim. Symbols
+# may hold any character but "=" and blanks: packages' hold "-", "." and "+".
 missing_config_lines() (
-	grep -E '^(CONFIG_[A-Za-z0-9_]+=|# CONFIG_[A-Za-z0-9_]+ is not set$)' "$1" |
+	grep -E '^(CONFIG_[^=[:space:]]+=|# CONFIG_[^[:space:]]+ is not set$)' "$1" |
 		while IFS= read -r line; do
 			grep -Fxq -- "${line}" "$2" || printf '  %s\n' "${line}"
 		done
