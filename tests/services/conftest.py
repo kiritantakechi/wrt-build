@@ -49,10 +49,14 @@ def smb_user(data_disk: Disk, module_router: Router) -> tuple[str, str]:
         f" && ksmbd.adduser -a -p {shlex.quote(password)} {user}"
         " && /etc/init.d/ksmbd restart"
     )
+    # The daemon comes before the kernel server listens: wait for both.
     until(
-        lambda: module_router.returncode("pidof ksmbd.mountd >/dev/null") == 0,
+        lambda: (
+            module_router.returncode("pidof ksmbd.mountd >/dev/null") == 0
+            and module_router.run("ss -Htln 'sport = :445'") != ""
+        ),
         timeout=SMB_TIMEOUT,
-        what="ksmbd running",
+        what="ksmbd listening",
     )
     return SMB_USER
 

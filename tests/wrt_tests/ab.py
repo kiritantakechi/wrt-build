@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from wrt_tests.router import Router
 
-SD_CARD = "/dev/mmcblk0"
-# The U-Boot environment on the SD card (design D1): offset and size in bytes.
+# The emulator's boot disk, an SD card or an eMMC on its SD host controller.
+BOOT_DISK = "/dev/mmcblk0"
+# The U-Boot environment on the boot disk (design D1): offset and size in bytes.
 ENV_OFFSET, ENV_SIZE = 0x3F8000, 0x8000
 # The area U-Boot and the partition table occupy before boot-A, without the
 # environment: MBR, loader (sector 64 on) and u-boot.itb (8 MiB on).
@@ -53,7 +54,7 @@ def region_sha256(router: Router, device: str, start: int, end: int) -> str:
     """Return the SHA-256 of bytes ``start`` up to ``end`` of a block device.
 
     dd reads in the largest block (up to 1 MiB) both ends are a multiple of:
-    a sector at a time, the emulated SD card takes minutes for a slot.
+    a sector at a time, the emulated boot disk takes minutes for a slot.
     """
     block = READ_BLOCK
     while start % block or end % block:
@@ -66,8 +67,8 @@ def region_sha256(router: Router, device: str, start: int, end: int) -> str:
 
 
 def partition(number: int) -> str:
-    """Return the device of a partition of the SD card."""
-    return f"{SD_CARD}p{number}"
+    """Return the device of a partition of the boot disk."""
+    return f"{BOOT_DISK}p{number}"
 
 
 def erofs_size(router: Router, device: str) -> int:
@@ -93,4 +94,4 @@ def slot_sha256(router: Router, which: str) -> dict[str, str]:
 
 def boot_area_sha256(router: Router) -> str:
     """Checksum of the partition table, loader and U-Boot, without the environment."""
-    return ",".join(region_sha256(router, SD_CARD, start, end) for start, end in BOOT_AREA)
+    return ",".join(region_sha256(router, BOOT_DISK, start, end) for start, end in BOOT_AREA)

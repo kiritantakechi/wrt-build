@@ -1,11 +1,13 @@
-"""The emulated R4S (design D14, r4s-ab-rollback D7): its files and driving it at run time.
+"""The emulated board (design D14, r4s-ab-rollback D7, board-model D7): its files and driving it.
 
-``emu-prepare`` turns the outputs of a build into what the emulator boots: the
-factory image as a raw SD card, which every test run overlays with copy-on-write;
-the emulator's U-Boot as firmware; and an R4S-identity device tree, which U-Boot
-hands on to the kernel it starts from the slot. The machine parameters come from
-the labgrid target description, so the device tree always matches the machine
-that boots it. The output directory is keyed by the image and firmware and reused.
+``emu-prepare`` turns the outputs of a build into what the emulator boots, as the
+board the build is for: the factory image as the board's kind of boot disk (an
+SD card or an eMMC), which every test run overlays with copy-on-write; the
+emulator's U-Boot as firmware; a device tree with the board's identity, which
+U-Boot hands on to the kernel it starts from the slot; and the labgrid target
+description of the machine, from the board's description. The output directory
+is keyed by the image, the firmware and the board, and reused; directories of
+builds that have since changed are removed.
 
 ``Emulator`` gives the tests power, disk snapshots and the serial console.
 """
@@ -15,7 +17,6 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -29,55 +30,54 @@ from typing import TYPE_CHECKING, Any, Self
 import yaml
 from pexpect import TIMEOUT
 
+from wrt_tests.boards import Board, load
 from wrt_tests.image import SECTOR, Fit, FitNode, gunzip_first_member, parse_fit, read_mbr
+from wrt_tests.net import segments, taps
 
 if TYPE_CHECKING:
     from labgrid import Target
     from labgrid.driver import QEMUDriver
 
-TARGETS_DIR = Path(__file__).resolve().parent.parent / "targets"
-BOARD_COMPATIBLE = "friendlyarm,nanopi-r4s"
-BOARD_MODEL = "FriendlyElec NanoPi R4S"
 MANIFEST_FILE = "manifest.json"
 FACTORY_IMAGE = "targets/*-factory.img.gz"
 FIRMWARE = "u-boot-qemu.bin"
+# The files of an emulator directory.
+DISK_FILE = "disk.raw"
+OVERLAY_FILE = "overlay.qcow2"
+FIRMWARE_FILE = "u-boot.bin"
+DTB_FILE = "board.dtb"
 SOURCE_FILE = "source.json"
-# A 4 GB card: QEMU wants SD cards sized in powers of two.
-SD_CARD_SIZE = 4 << 30
+TARGET_FILE = "target.yaml"
+QEMU = "qemu-system-aarch64"
+MACHINE = "virt,gic-version=3"
+# The boot disk's device, which throttle_writes() slows down.
+BOOT_DISK_ID = "boot-disk"
+# The router's LAN address, which the harness logs in to.
+ROUTER_ADDRESS = "10.0.0.1"
 UNPLUG_TIMEOUT = 30
 
 
-class _TemplateLoader(yaml.SafeLoader):
-    """Loads labgrid descriptions, keeping ``!template`` scalars unexpanded."""
+@dataclass(frozen=True, slots=True)
+class BootDisk:
+    """A kind of boot disk as the emulator attaches it.
+
+    ``device`` is QEMU's device on the SD host controller, ``size`` the disk's size,
+    a power of two as QEMU wants it.
+    """
+
+    device: str
+    size: int
 
 
-_TemplateLoader.add_constructor("!template", lambda loader, node: loader.construct_scalar(node))
+# An SD card as small as an image must fit, and an eMMC as large as the boards'.
+BOOT_DISKS = {"sd": BootDisk("sd-card", 4 << 30), "emmc": BootDisk("emmc", 32 << 30)}
 
 
 @dataclass(frozen=True, slots=True)
 class Machine:
-    """The QEMU machine of the emulation target, as far as the device tree depends on it."""
+    """The QEMU machine that stands in for a board (board-model D7)."""
 
-    qemu: str
-    machine: str
-    cpu: str
-    memory: str
-    smp: str
-
-    @classmethod
-    def from_description(cls, path: Path) -> Self:
-        """Read the QEMUDriver of ``targets.main`` in a labgrid target description."""
-        # _TemplateLoader is a SafeLoader that only adds the !template tag.
-        description: dict[str, Any] = yaml.load(path.read_text(), Loader=_TemplateLoader)  # noqa: S506
-        driver = description["targets"]["main"]["drivers"]["QEMUDriver"]
-        extra = shlex.split(driver["extra_args"])
-        return cls(
-            qemu=description["tools"][driver["qemu_bin"]],
-            machine=driver["machine"],
-            cpu=driver["cpu"],
-            memory=driver["memory"],
-            smp=extra[extra.index("-smp") + 1],
-        )
+    board: Board
 
     def dump_dtb(self, output: Path, firmware: Path) -> None:
         """Write the device tree QEMU generates for this machine running ``firmware``.
@@ -86,17 +86,77 @@ class Machine:
         with an ACPI event device, and a device tree without it would describe a
         device the kernel faults on.
         """
+        emulator, cores = self.board.emulator, len(self.board.soc.cores)
         subprocess.run(
             [
-                self.qemu,
-                *("-machine", f"{self.machine},dumpdtb={output}"),
-                *("-cpu", self.cpu, "-m", self.memory, "-smp", self.smp),
+                QEMU,
+                *("-machine", f"{MACHINE},dumpdtb={output}"),
+                *("-cpu", emulator.cpu, "-m", emulator.memory, "-smp", str(cores)),
                 *("-bios", str(firmware)),
                 "-nographic",
             ],
             check=True,
             capture_output=True,
         )
+
+    def description(self, directory: Path) -> dict[str, Any]:
+        """Return the labgrid target description of the machine booting ``directory``'s files.
+
+        The boot disk is the board's kind on an SD host controller; each of the
+        board's ports is a virtio NIC in the board's order, on its segment's tap.
+        The xHCI controller takes the USB data disks the tests plug in and out
+        (r4s-services D10).
+        """
+        emulator = self.board.emulator
+        nics = [
+            argument
+            for index, (segment, tap) in enumerate(
+                zip(segments(self.board), taps(self.board), strict=True)
+            )
+            for argument in (
+                f"-netdev tap,id={segment},ifname={tap},script=no,downscript=no",
+                f"-device virtio-net-pci,netdev={segment},mac=52:54:00:0a:00:{0x10 + index:02x}",
+            )
+        ]
+        arguments = (
+            f"-smp {len(self.board.soc.cores)}",
+            f"-drive if=none,id=disk,format=qcow2,file={directory / OVERLAY_FILE}",
+            "-device sdhci-pci",
+            f"-device {BOOT_DISKS[self.board.boot_disk].device},id={BOOT_DISK_ID},drive=disk",
+            *nics,
+            "-device i6300esb",
+            "-device qemu-xhci,id=xhci",
+            "-action watchdog=reset",
+        )
+        return {
+            "targets": {
+                "main": {
+                    "resources": {
+                        "NetworkService": {"address": ROUTER_ADDRESS, "username": "root"},
+                    },
+                    "drivers": {
+                        "QEMUDriver": {
+                            "qemu_bin": "qemu",
+                            "machine": MACHINE,
+                            "cpu": emulator.cpu,
+                            "memory": emulator.memory,
+                            "bios": "bios",
+                            "dtb": "dtb",
+                            "extra_args": " ".join(arguments),
+                        },
+                        # The first boot of a slot creates dropbear's host keys,
+                        # which takes a while under TCG, before the first
+                        # connection is accepted.
+                        "SSHDriver": {"connection_timeout": 120.0},
+                    },
+                },
+            },
+            "images": {
+                "bios": str(directory / FIRMWARE_FILE),
+                "dtb": str(directory / DTB_FILE),
+            },
+            "tools": {"qemu": QEMU},
+        }
 
 
 def sha256(path: Path) -> str:
@@ -145,60 +205,91 @@ class Build:
     """The outputs of one build that the emulator boots, as its manifest lists them."""
 
     directory: Path
+    board: Board
     image: Path
     firmware: Path
 
     @classmethod
     def read(cls, directory: Path) -> Self:
-        """Find the factory image and the firmware, and check both against the manifest."""
+        """Find the board, the factory image and the firmware; check both against the manifest."""
         images = sorted(directory.glob(FACTORY_IMAGE))
         if len(images) != 1:
             msg = f"expected one {FACTORY_IMAGE} in {directory}, found {len(images)}"
             raise SystemExit(msg)
-        build = cls(directory, images[0], directory / FIRMWARE)
-        files = json.loads((directory / MANIFEST_FILE).read_text())["files"]
+        manifest = json.loads((directory / MANIFEST_FILE).read_text())
+        build = cls(directory, load(manifest["board"]), images[0], directory / FIRMWARE)
         for path in (build.image, build.firmware):
             name = path.relative_to(directory).as_posix()
-            if sha256(path) != files.get(name):
+            if sha256(path) != manifest["files"].get(name):
                 msg = f"{name} does not match {directory / MANIFEST_FILE}"
                 raise SystemExit(msg)
         return build
 
 
-def prepare(build: Build, root: Path, machine: Machine) -> Path:
+def prepare(build: Build, root: Path) -> Path:
     """Build (or reuse) the emulator directory for a build and return it."""
+    machine = Machine(build.board)
     image_sha256, firmware_sha256 = sha256(build.image), sha256(build.firmware)
-    key = hashlib.sha256(f"{image_sha256} {firmware_sha256}".encode()).hexdigest()
-    directory = root / key[:16]
-    if (directory / SOURCE_FILE).is_file():
-        return directory
+    identity = f"{image_sha256} {firmware_sha256} {build.board.model_dump_json()}"
+    directory = root / hashlib.sha256(identity.encode()).hexdigest()[:16]
+    if not (directory / SOURCE_FILE).is_file():
+        root.mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix=f"{directory.name}.", dir=root))
+        disk_file, disk = work / DISK_FILE, BOOT_DISKS[build.board.boot_disk]
+        with build.image.open("rb") as source, disk_file.open("wb") as target:
+            gunzip_first_member(source, target)
+        if disk_file.stat().st_size > disk.size:
+            msg = f"{build.image.name} is larger than a {disk.size >> 30} GiB {disk.device}"
+            raise SystemExit(msg)
+        os.truncate(disk_file, disk.size)
+        shutil.copyfile(build.firmware, work / FIRMWARE_FILE)
 
-    root.mkdir(parents=True, exist_ok=True)
-    work = Path(tempfile.mkdtemp(prefix=f"{directory.name}.", dir=root))
-    disk_file = work / "disk.raw"
-    with build.image.open("rb") as source, disk_file.open("wb") as target:
-        gunzip_first_member(source, target)
-    if disk_file.stat().st_size > SD_CARD_SIZE:
-        msg = f"{build.image.name} is larger than a {SD_CARD_SIZE >> 30} GiB card"
-        raise SystemExit(msg)
-    os.truncate(disk_file, SD_CARD_SIZE)
-    shutil.copyfile(build.firmware, work / "u-boot.bin")
+        dtb = work / DTB_FILE
+        machine.dump_dtb(dtb, work / FIRMWARE_FILE)
+        run("fdtput", "-t", "s", str(dtb), "/", "compatible", build.board.board_name)
+        run("fdtput", "-t", "s", str(dtb), "/", "model", build.board.model)
+        # Each core's capacity as on the SoC, so that the kernel knows the big cores.
+        cpus = sorted(
+            (node for node in run("fdtget", "-l", str(dtb), "/cpus").split() if "@" in node),
+            key=lambda node: int(node.partition("@")[2], 16),
+        )
+        for node, capacity in zip(cpus, build.board.soc.cores, strict=True):
+            run("fdtput", "-t", "u", str(dtb), f"/cpus/{node}", "capacity-dmips-mhz", str(capacity))
 
-    machine.dump_dtb(work / "r4s.dtb", work / "u-boot.bin")
-    run("fdtput", "-t", "s", str(work / "r4s.dtb"), "/", "compatible", BOARD_COMPATIBLE)
-    run("fdtput", "-t", "s", str(work / "r4s.dtb"), "/", "model", BOARD_MODEL)
-
-    source = {
-        "build": str(build.directory),
-        "image": str(build.image),
-        "image_sha256": image_sha256,
-        "firmware": str(build.firmware),
-        "firmware_sha256": firmware_sha256,
-    }
-    (work / SOURCE_FILE).write_text(json.dumps(source, indent=2) + "\n")
-    shutil.rmtree(directory, ignore_errors=True)
-    work.rename(directory)
+        source = {
+            "build": str(build.directory),
+            "board": build.board.id,
+            "image": str(build.image),
+            "image_sha256": image_sha256,
+            "firmware": str(build.firmware),
+            "firmware_sha256": firmware_sha256,
+        }
+        (work / SOURCE_FILE).write_text(json.dumps(source, indent=2) + "\n")
+        shutil.rmtree(directory, ignore_errors=True)
+        work.rename(directory)
+    description = machine.description(directory)
+    (directory / TARGET_FILE).write_text(yaml.safe_dump(description, sort_keys=False))
     return directory
+
+
+def _current(source: dict[str, str]) -> bool:
+    """Return whether the build an emulator directory was made from still has those files."""
+    build = Path(source["build"])
+    try:
+        files = json.loads((build / MANIFEST_FILE).read_text())["files"]
+    except FileNotFoundError:
+        return False
+    return all(
+        files.get(Path(source[kind]).relative_to(build).as_posix()) == source[f"{kind}_sha256"]
+        for kind in ("image", "firmware")
+    )
+
+
+def prune(root: Path) -> None:
+    """Remove the emulator directories of builds that have changed or gone since."""
+    for source in root.glob(f"*/{SOURCE_FILE}"):
+        if not _current(json.loads(source.read_text())):
+            shutil.rmtree(source.parent)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -206,15 +297,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="emu-prepare", description=main.__doc__)
     parser.add_argument("build", type=Path, help="the output directory of a build")
     parser.add_argument("root", type=Path, help="directory that holds prepared emulators")
-    parser.add_argument(
-        "--target",
-        type=Path,
-        default=TARGETS_DIR / "emulation.yaml",
-        help="labgrid description of the emulation target",
-    )
     args = parser.parse_args(argv)
-    machine = Machine.from_description(args.target)
-    directory = prepare(Build.read(args.build), args.root, machine)
+    prune(args.root)
+    directory = prepare(Build.read(args.build), args.root)
     sys.stdout.write(f"{directory}\n")
     return 0
 
@@ -290,7 +375,7 @@ class Console:
 
 
 class Emulator:
-    """Power, disk snapshots and serial console of the emulated R4S."""
+    """Power, disk snapshots and serial console of the emulated board."""
 
     SNAPSHOT = "booted"
 
@@ -299,8 +384,8 @@ class Emulator:
         self.target = target
         self.qemu: QEMUDriver = target.get_driver("QEMUDriver", activate=False)
         self.console = Console(self.qemu, console_log)
-        self.disk = directory / "disk.raw"
-        self.overlay = directory / "overlay.qcow2"
+        self.disk = directory / DISK_FILE
+        self.overlay = directory / OVERLAY_FILE
 
     def reset_disk(self) -> None:
         """Start from the shipped disk again: a fresh copy-on-write overlay."""
@@ -339,16 +424,18 @@ class Emulator:
         self._monitor(f"loadvm {self.SNAPSHOT}")
 
     def throttle_writes(self, bps: int) -> None:
-        """Limit writes to the SD card to ``bps`` bytes per second until the power is cut."""
+        """Limit writes to the boot disk to ``bps`` bytes per second until the power is cut."""
         limits = dict.fromkeys(("bps", "bps_rd", "iops", "iops_rd", "iops_wr"), 0)
-        self.qemu.monitor_command("block_set_io_throttle", {"id": "card", "bps_wr": bps, **limits})
+        self.qemu.monitor_command(
+            "block_set_io_throttle", {"id": BOOT_DISK_ID, "bps_wr": bps, **limits}
+        )
 
     def send_keys(self, text: str) -> None:
         """Type on the serial console."""
         self.qemu.write(text.encode())
 
     def plug_disk(self, name: str, image: Path, port: int) -> None:
-        """Plug ``image`` in as a USB SSD (UAS, as the R4S's) on xHCI port ``port``.
+        """Plug ``image`` in as a USB SSD (UAS, as the boards' data disks) on xHCI port ``port``.
 
         The disk's SCSI product name is ``name``, which the guest shows as its
         model. The machine's snapshot holds no such disk (a raw image takes no

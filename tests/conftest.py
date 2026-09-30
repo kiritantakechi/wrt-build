@@ -29,13 +29,13 @@ from typing import TYPE_CHECKING, cast, override
 
 import pytest
 
-from wrt_tests import app, pki
+from wrt_tests import app, boards, pki
 from wrt_tests.datapath import Online, dae_start
-from wrt_tests.emu import SOURCE_FILE, Emulator
+from wrt_tests.emu import MANIFEST_FILE, SOURCE_FILE, Emulator
 from wrt_tests.internet import REGISTRY
 from wrt_tests.isp import Isp
 from wrt_tests.keys import Keys, install_trust, sign
-from wrt_tests.net import RUNNER_ADDRESS, TOPOLOGY, Network
+from wrt_tests.net import RUNNER_ADDRESS, Network, topology
 from wrt_tests.oci import IMAGE, TAG, extract_root, image_layout, push
 from wrt_tests.poll import until
 from wrt_tests.router import Router
@@ -57,9 +57,9 @@ def emulation_dir() -> Path:
 
 
 @pytest.fixture(scope="session")
-def network(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Network]:
-    """Build the sandbox topology around the emulator."""
-    with Network(TOPOLOGY, tmp_path_factory.mktemp("net")) as sandbox:
+def network(board: boards.Board, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Network]:
+    """Build the sandbox topology around the emulated board."""
+    with Network(topology(board), tmp_path_factory.mktemp("net")) as sandbox:
         yield sandbox
 
 
@@ -76,7 +76,7 @@ def emulator(
     emulation_dir: Path,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[Emulator]:
-    """Boot the emulated R4S from a fresh overlay of the shipped disk inside ``network``."""
+    """Boot the emulated board from a fresh overlay of the shipped disk inside ``network``."""
     del network  # requested for its taps, which the emulator joins
     console_log = tmp_path_factory.mktemp("emulator") / "console.log"
     machine = Emulator(target, emulation_dir, console_log)
@@ -224,6 +224,13 @@ def build_output(emulation_source: dict[str, str]) -> Path:
 
 
 @pytest.fixture(scope="session")
+def board(build_output: Path) -> boards.Board:
+    """Return the board the build under test was built for, as its manifest names it."""
+    manifest = json.loads((build_output / MANIFEST_FILE).read_text())
+    return boards.load(manifest["board"])
+
+
+@pytest.fixture(scope="session")
 def release_keys(tmp_path_factory: pytest.TempPathFactory) -> Keys | None:
     """Return the session's release keys, or None when $WRT_SIGNED names a signed build."""
     if os.environ.get(SIGNED_ENV):
@@ -239,6 +246,16 @@ def signed_repo(
     if release_keys is None:
         return Path(os.environ[SIGNED_ENV])
     return sign(build_output, tmp_path_factory.mktemp("signed") / "build", release_keys)
+
+
+@pytest.fixture(scope="session")
+def signed_boards(
+    board: boards.Board, signed_repo: Path, tmp_path_factory: pytest.TempPathFactory
+) -> Path:
+    """Return the signed builds as the sign job hands them on: this board's, named after it."""
+    directory = tmp_path_factory.mktemp("boards")
+    (directory / board.id).symlink_to(signed_repo)
+    return directory
 
 
 @pytest.fixture(scope="session")

@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
+from wrt_tests.ab import BOOT_DISK
 
 if TYPE_CHECKING:
+    from wrt_tests.boards import Board
     from wrt_tests.router import Router
 
 CAPABILITY = "firmware/kernel"
@@ -22,13 +24,6 @@ TCX_SOURCE = """\
 __attribute__((section("tcx/ingress"), used)) int wrt_pass(void *ctx) { return -1; }
 char LICENSE[] __attribute__((section("license"), used)) = "GPL";
 """
-VIRTIO_NICS = ("eth0 (WAN)", "eth1 (LAN)")
-SD_CARD = "/dev/mmcblk0"
-# The drivers of the R4S ports register at boot, even where their devices are absent.
-PORT_DRIVERS = (
-    "/sys/bus/platform/drivers/rk_gmac-dwmac",  # the GMAC: WAN, eth0
-    "/sys/bus/pci/drivers/r8169",  # the RTL8111 on PCIe: LAN, eth1
-)
 
 
 @spec(CAPABILITY, "Kernel version follows upstream", "Check running kernel")
@@ -92,25 +87,31 @@ def test_filesystems_are_built_in(router: Router) -> None:
 
 
 @spec(CAPABILITY, "Same kernel boots in the emulator", "Shipped kernel boots in the emulator")
-def test_virt_devices(router: Router) -> None:
+def test_virt_devices(router: Router, board: Board) -> None:
     assert "console=ttyAMA0" in router.run("cat /proc/cmdline").split()
     assert router.returncode("dmesg | grep -q 'printk: console \\[ttyAMA0\\] enabled'") == 0
     assert router.run("awk '$2 == \"/rom\" { print $1 }' /proc/mounts") in {
         "/dev/root",
-        f"{SD_CARD}p2",
+        f"{BOOT_DISK}p2",
     }
-    assert router.returncode(f"[ -b {SD_CARD}p2 ]") == 0
+    # The boot disk, an SD card or an eMMC, on the SD host controller.
+    assert router.returncode(f"[ -b {BOOT_DISK}p2 ]") == 0
     assert router.run("ls /sys/bus/pci/drivers/sdhci-pci/ | grep -c '^0000:'") == "1"
     nics = router.run("ls /sys/bus/virtio/drivers/virtio_net/ | grep '^virtio'").split()
-    assert len(nics) == len(VIRTIO_NICS)
+    assert len(nics) == len(board.ports)
     # OpenWrt builds without WATCHDOG_SYSFS; the driver announces itself instead.
     assert router.returncode("dmesg | grep -q 'i6300ESB timer .*initialized'") == 0
     assert router.returncode("[ -c /dev/watchdog0 ]") == 0
 
 
-@spec(CAPABILITY, "Drivers for the R4S ports", "Port drivers registered")
-def test_port_drivers_registered(router: Router) -> None:
-    for driver in PORT_DRIVERS:
+@spec(CAPABILITY, "Drivers for the board's ports", "Port drivers registered")
+def test_port_drivers_registered(router: Router, board: Board) -> None:
+    # They register at boot, although the emulator has none of their devices.
+    drivers = [
+        *(f"/sys/bus/platform/drivers/{name}" for name in board.drivers.platform),
+        *(f"/sys/bus/pci/drivers/{name}" for name in board.drivers.pci),
+    ]
+    for driver in drivers:
         assert router.returncode(f"[ -d {driver} ]") == 0, driver
 
 

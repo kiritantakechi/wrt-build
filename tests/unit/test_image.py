@@ -71,7 +71,7 @@ def test_default_environment_needs_the_marker() -> None:
         default_environment(BINARY, "wrt_other")
 
 
-# Shortened ``dumpimage -l`` listings of the two FITs in a shipped image.
+# Shortened ``dumpimage -l`` listings of the two FITs in a shipped image, of an example board.
 KERNEL_FIT = """FIT description: ARM64 OpenWrt FIT (Flattened Image Tree)
  Image 0 (kernel-1)
   Description:  ARM64 OpenWrt Linux-6.18.52
@@ -81,7 +81,7 @@ KERNEL_FIT = """FIT description: ARM64 OpenWrt FIT (Flattened Image Tree)
   Type:         Flat Device Tree
  Default Configuration: 'config-1'
  Configuration 0 (config-1)
-  Description:  OpenWrt friendlyarm_nanopi-r4s
+  Description:  OpenWrt example_board
   Kernel:       kernel-1
   FDT:          fdt-1
 """
@@ -95,8 +95,8 @@ UBOOT_FIT = """FIT description: FIT image for U-Boot with bl31 (TF-A)
  Configuration 0 (config-1)
   Kernel:       unavailable
   Firmware:     atf-1
-  Compatible:   friendlyarm,nanopi-r4s
-                rockchip,rk3399
+  Compatible:   example,board
+                example,soc
   Loadables:    u-boot
                 atf-2
 """
@@ -110,10 +110,7 @@ def test_parse_fit_selects_images_by_the_default_configuration() -> None:
 
 def test_parse_fit_reads_list_properties() -> None:
     fit = parse_fit(UBOOT_FIT)
-    assert fit.configuration.properties["Compatible"] == [
-        "friendlyarm,nanopi-r4s",
-        "rockchip,rk3399",
-    ]
+    assert fit.configuration.properties["Compatible"] == ["example,board", "example,soc"]
     assert fit.configuration.properties["Loadables"] == ["u-boot", "atf-2"]
     assert fit.selected("Firmware")["OS"] == "ARM Trusted Firmware"
 

@@ -1,9 +1,9 @@
 """The supported boards (board-model D1): one description per board under ``boards/``.
 
 A description declares every fact that differs between boards: the OpenWrt
-device and board name, the SoC and its loader, the CPU tuning, the U-Boot
-variant, the boot disk, the ports with their roles and drivers, and how the
-emulator stands in for the board. The board's id is the file's name.
+device and board name, the SoC with its loader and its cores, the CPU tuning, the
+U-Boot variant, the boot disk, the ports with their roles and drivers, and how
+the emulator stands in for the board. The board's id is the file's name.
 
 ``Board`` is their schema, strict about unknown fields and types. ``board-check``
 (``just check boards``) checks every description with it.
@@ -32,10 +32,15 @@ class Loader(_Facts):
 
 
 class Soc(_Facts):
-    """The SoC: its device-tree compatible and the loader its boot ROM runs."""
+    """The SoC: its device-tree compatible, the loader its boot ROM runs, and its cores.
+
+    ``cores`` holds each core's capacity, in CPU order, as the SoC's device tree
+    gives it (``capacity-dmips-mhz``): the big cores are those of the highest.
+    """
 
     compatible: str
     loader: Loader
+    cores: Annotated[tuple[Annotated[int, Field(gt=0)], ...], Field(min_length=1)]
 
 
 class UBoot(_Facts):
@@ -60,10 +65,9 @@ class Drivers(_Facts):
 
 
 class Emulator(_Facts):
-    """How the emulator stands in for the board: CPU model, cores and memory."""
+    """How the emulator stands in for the board: CPU model and memory (the SoC's cores)."""
 
     cpu: str
-    cores: Annotated[int, Field(gt=0)]
     memory: Annotated[str, Field(pattern=r"^[0-9]+[MG]$")]
 
 
@@ -109,6 +113,12 @@ class Board(Description):
     def lan(self) -> tuple[Port, ...]:
         """The LAN ports, in the board's order."""
         return tuple(port for port in self.ports if port.role == "lan")
+
+    @property
+    def big_cores(self) -> tuple[int, ...]:
+        """The CPUs of the highest capacity."""
+        highest = max(self.soc.cores)
+        return tuple(cpu for cpu, capacity in enumerate(self.soc.cores) if capacity == highest)
 
 
 def load(board: str, directory: Path = BOARDS_DIR) -> Board:

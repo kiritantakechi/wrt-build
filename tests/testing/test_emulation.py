@@ -1,30 +1,27 @@
-"""testing/emulation: the emulator boots the shipped image as an R4S (design D14)."""
+"""testing/emulation: the emulator boots the shipped image as its board (D14, board-model D7)."""
 
+import ipaddress
 import json
 import lzma
 import re
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 from wrt_tests import spec
-from wrt_tests.emu import (
-    BOARD_COMPATIBLE,
-    MANIFEST_FILE,
-    boot_files,
-    extract_fit_image,
-    read_fit,
-    sha256,
-)
+from wrt_tests.emu import MANIFEST_FILE, boot_files, extract_fit_image, read_fit, sha256
 from wrt_tests.poll import until
 from wrt_tests.storage import PLUG_TIMEOUT, Disk, device
 
 if TYPE_CHECKING:
-    from wrt_tests.net import Network
+    from wrt_tests.boards import Board
+    from wrt_tests.net import Netns, Network
     from wrt_tests.router import Router
 
 CAPABILITY = "testing/emulation"
 DHCP_TIMEOUT = 60.0
+LAN = ipaddress.ip_network("10.0.0.0/24")
 
 
 @spec(CAPABILITY, "Boot the shipped artifacts", "Verify artifact provenance")
@@ -53,15 +50,15 @@ def test_boots_the_shipped_artifacts(
     assert {"wrt.slot=a", "fstools_overlay_compression_type=zstd"} <= set(arguments)
 
 
-@spec(CAPABILITY, "Boot with the R4S board identity", "Read board name")
-def test_board_name(router: Router) -> None:
-    assert router.run("cat /tmp/sysinfo/board_name") == BOARD_COMPATIBLE
+@spec(CAPABILITY, "Boot with the board identity", "Read board name")
+def test_board_name(router: Router, board: Board) -> None:
+    assert router.run("cat /tmp/sysinfo/board_name") == board.board_name
 
 
 @spec(CAPABILITY, "Instruction set matches the device", "Run userspace programs")
 def test_userspace_runs(router: Router) -> None:
-    # Programs built for cortex-a72.cortex-a53+crypto from several packages and
-    # languages; an unsupported instruction would kill them with SIGILL.
+    # Programs built for the board's CPU from several packages and languages;
+    # an unsupported instruction would kill them with SIGILL.
     for program in (
         "busybox true",
         "ubus call system board",
@@ -76,15 +73,46 @@ def test_userspace_runs(router: Router) -> None:
     assert router.returncode("dmesg | grep -qi 'illegal instruction\\|undefined instruction'") != 0
 
 
+@spec(CAPABILITY, "The board's cores", "Read core capacities")
+def test_the_cores_are_the_board_s(router: Router, board: Board) -> None:
+    # The kernel scales the device tree's capacities so that the highest is 1024.
+    listing = router.run("grep -H . /sys/devices/system/cpu/cpu[0-9]*/cpu_capacity")
+    reported = {
+        int(cpu): int(capacity)
+        for cpu, capacity in re.findall(r"/cpu(\d+)/cpu_capacity:(\d+)", listing)
+    }
+    highest = max(board.soc.cores)
+    scaled = {cpu: capacity * 1024 // highest for cpu, capacity in enumerate(board.soc.cores)}
+    assert reported == scaled
+
+
+def _lease(client: Netns) -> str:
+    """Wait for the client's DHCP lease; return its address, which must be in the LAN."""
+    shown = until(
+        lambda: client.run("ip", "-4", "-o", "addr", "show", "dev", "eth0") or None,
+        timeout=DHCP_TIMEOUT,
+        what=f"DHCP lease of {client.name}",
+    )
+    lease = ipaddress.ip_interface(shown.split()[3])
+    assert lease.network == LAN, shown
+    return str(lease.ip)
+
+
 @spec(CAPABILITY, "Repeatable network topology", "LAN client gets an address")
 def test_lan_client_gets_an_address(router: Router, network: Network) -> None:
-    client = network["client-a"]
-    deadline = time.monotonic() + DHCP_TIMEOUT
-    while not (address := client.run("ip", "-4", "-o", "addr", "show", "dev", "eth0").split()):
-        assert time.monotonic() < deadline, "client-a got no DHCP lease"
-        time.sleep(1)
-    assert re.search(r"inet 10\.0\.0\.\d+/24", " ".join(address))
-    client.run("ping", "-c", "1", "-W", "2", router.address)
+    _lease(network["client-a"])
+    network["client-a"].run("ping", "-c", "1", "-W", "2", router.address)
+
+
+@spec(CAPABILITY, "Repeatable network topology", "Clients on both LAN ports share one LAN")
+def test_lan_ports_share_one_lan(router: Router, board: Board, network: Network) -> None:
+    del router  # requested for the booted router, whose LAN bridges the ports
+    if len(board.lan) < 2:  # noqa: PLR2004
+        pytest.skip(f"the {board.model} has one LAN port")
+    # client-a is on the first LAN port's segment, client-c on the second's.
+    address = _lease(network["client-a"])
+    _lease(network["client-c"])
+    network["client-c"].run("ping", "-c", "1", "-W", "2", address)
 
 
 @spec(CAPABILITY, "Repeatable network topology", "No root privileges needed")
@@ -125,7 +153,7 @@ def test_usb_disk_hot_plug(router: Router, tmp_path: Path) -> None:
     try:
         path = device(router, disk)
         name = path.removeprefix("/dev/")
-        # Bound to uas, as the R4S's disk, at SuperSpeed: the SCSI device's USB
+        # Bound to uas, as the boards' data disks, at SuperSpeed: the SCSI device's USB
         # interface is three levels up, the USB device four.
         usb = f"/sys/block/{name}/device/../../.."
         assert router.run(f"readlink -f {usb}/driver").endswith("/uas")

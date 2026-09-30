@@ -12,7 +12,6 @@ upgrade to the other slot comes last.
 import hashlib
 import subprocess
 from dataclasses import dataclass
-from secrets import token_urlsafe
 from typing import TYPE_CHECKING
 
 import pytest
@@ -40,6 +39,9 @@ SERVICES = ("dae", "network", "smb", "tailscale")
 # server's and tailscaled.
 RESTARTED = ("dae", "pppd", "ksmbd.mountd", "tailscaled")
 ROOT_PASSWORD = "not-for-config-push"  # noqa: S105 (the test router's, for a password to refuse)
+# A password gitleaks' generic rule surely catches in plain text. A random one now
+# and then falls short of its entropy threshold, or holds one of its stop words.
+PLAIN_SECRET = "vZ8qK3wT9mX2pL7nR4cB"  # noqa: S105  # gitleaks:allow (only scanned for)
 UPGRADE_IMAGE = "/tmp/sysupgrade.tar.gz"  # noqa: S108 (a path on the router)
 TAILSCALE_TIMEOUT = 180
 
@@ -124,7 +126,7 @@ def test_no_secret_in_the_history(pushed: Pushed, tmp_path: Path) -> None:
     # The scanner does find a secret that went in plain.
     plain = ConfigRepository(tmp_path / "plain", repository.age_key)
     subprocess.run(["git", "clone", "-q", repository.directory, plain.directory], check=True)
-    (plain.directory / "secrets" / "pppoe.yaml").write_text(f"password: '{token_urlsafe(16)}'\n")
+    (plain.directory / "secrets" / "pppoe.yaml").write_text(f"password: '{PLAIN_SECRET}'\n")
     plain.commit("a secret in plain text")
     assert leaks(plain.directory) is not None
 

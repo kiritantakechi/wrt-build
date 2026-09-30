@@ -72,6 +72,7 @@ Every build is for one board, named by its description under `boards/`: `r4s` (N
 cd /Users/kiritan/Projects/wrt-build
 export NIX_CONFIG="experimental-features = nix-command flakes"
 export WRT_WORKDIR=/mnt/wrt
+export WRT_TESTDIR=/home/kiritan/wrt-test  # the emulator's and the tests' files, on the VM's own disk
 nix develop -c just build r4s dev  # check the board, fetch, patch, toolchain, config, build
 ```
 
@@ -88,14 +89,15 @@ just env-report
 
 The boards share one source tree and one cross toolchain, built without any board's CPU flags. `just build` brings the toolchain up to date first; a toolchain without the record of the flags it was built with, such as one from before the board model, is built anew. Each board builds in directories of its own (`build_dir/target-*_<board>`, `staging_dir/target-*_<board>` and `bin/<board>`), so building one board leaves another's build as it was. Those directories also hold the host builds that packages bring, Rust's compiler among them, so each board's first build takes much longer than its later ones. The outputs go to `$WRT_WORKDIR/out/<board>/<profile>`, and `just test <board> <profile>` boots them in the emulator.
 
-A board's build directories take about 40 GB with the `dev` profile, 15 GB of which are the stages of Rust's host build; the sources, the toolchain and the compiler cache take about 20 GB more. The 112 GiB volume holds both boards once each built board's Rust stages are gone. They sit in `build_dir/target-*_<board>/host/rustc-*/build/<build triple>`, which nothing reads after the compiler is installed: `build/dist` and the `.built` stamp next to `build` keep later builds from compiling Rust again. When space runs short beyond that, delete a board's `build_dir/target-*_<board>` (the compiler cache keeps its next build short) or old emulator directories under `$WRT_WORKDIR/emu`.
+A board's build directories take about 40 GB with the `dev` profile, 15 GB of which are the stages of Rust's host build; the sources, the toolchain and the compiler cache take about 20 GB more. The 112 GiB volume holds both boards once each built board's Rust stages are gone. They sit in `build_dir/target-*_<board>/host/rustc-*/build/<build triple>`, which nothing reads after the compiler is installed: `build/dist` and the `.built` stamp next to `build` keep later builds from compiling Rust again. When space runs short beyond that, delete a board's `build_dir/target-*_<board>` (the compiler cache keeps its next build short) or old emulator directories under `$WRT_TESTDIR/emu`.
 
 Notes:
 
 - Commands that need an FHS environment enter it themselves; you do not need to enter it manually. Build-related commands enter `wrt-build-fhs`; tests and `env-report` enter `wrt-test-fhs` (which contains all the tools of the build environment).
 - Running these commands directly on macOS fails immediately with a hint and creates no directories.
 - `just check` and `just fmt` run on any host; see `docs/conventions.md` for the rules.
-- Run one heavy job on the VM at a time: a build, or one board's tests. The emulator's disks live on the loop-mounted volume, which reaches the disk through the host. When a few gigabytes of writes pile up, the volume stalls every writer for seconds while it catches up, the emulator with them, and the router then misses its network deadlines. A smaller dirty-page limit in the VM (`vm.dirty_bytes`, `vm.dirty_background_bytes`) makes these stalls shorter.
+- Keep the tests off the work volume: set `WRT_TESTDIR` to a directory on the VM's own disk (its default is `$WRT_WORKDIR`). The loop-mounted volume reaches its SSD through the host, and a flush there waits until the host has written everything it holds for the volume, a minute for a gigabyte. ext4 flushes with every journal commit, so a test's burst of writes stalls every writer on the volume for seconds, the emulator with its disks too, and the router then misses its network deadlines. The VM's own disk flushes the same gigabyte in half a second. `scripts/workdir-mount.sh` also has the loop device use direct I/O, so the VM does not cache the volume a second time, and small dirty-page limits in the VM (`vm.dirty_bytes` of 256 MB, `vm.dirty_background_bytes` of 64 MB, in `/etc/nixos/configuration.nix`) keep writes from piling up in it.
+- Run one heavy job on the VM at a time: a build, or one board's tests.
 
 Flakes cannot see new files that are not yet committed to the repository (by default they use only files tracked by git). Until you commit, use `nix develop path:.` instead of `nix develop`.
 

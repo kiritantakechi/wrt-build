@@ -7,7 +7,8 @@
     "loader": {
       "signature": "RKNS",
       "offset": 0
-    }
+    },
+    "cores": [530, 530, 530, 530, 1024, 1024, 1024, 1024]
   },
   "cpu": "cortex-a76.cortex-a55+crypto",
   "uboot": {
@@ -36,7 +37,6 @@
   "dt_enabled": ["/ethernet@fe1c0000", "/pcie@fe180000", "/pcie@fe190000"],
   "emulator": {
     "cpu": "cortex-a76",
-    "cores": 8,
     "memory": "8G"
   }
 }

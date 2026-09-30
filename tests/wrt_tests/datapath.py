@@ -12,7 +12,7 @@ import re
 import shlex
 import time
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self, cast
 
 from wrt_tests.internet import RELEASES
@@ -40,6 +40,19 @@ DAE = {"tcx/ingress": ["tproxy_lan_ingress_l2"], "tcx/egress": ["tproxy_lan_egre
 # instance, "ubus:einat[instance1] nat 0".
 EINAT_RULE = re.compile(r"ubus:einat\[\w+\] (nat|rule) \d+")
 LAN_CLIENTS = ("client-a", "client-b")
+# What a wait for the datapath on pppoe-wan reports when it times out: which device
+# qosify took for each of its interfaces and whether it set it up, the device as
+# it is now, what tc holds on it, and the end of the log. tailscaled logs every
+# route change, and the emulated ISP advertises its prefixes every few seconds.
+WAN_STATE = (
+    "{ ubus call qosify status; ip -o link show dev pppoe-wan; tc qdisc show dev pppoe-wan;"
+    " tc filter show dev pppoe-wan ingress; tc filter show dev pppoe-wan egress;"
+    " logread | grep -v tailscaled | tail -n 40; } 2>&1"
+)
+# How long a LAN client that is not set up is left before it asks for its lease
+# again: every request starts its DHCP client over, and a router that is slow to
+# answer would never see one through if asked more often.
+RENEW_INTERVAL = 30.0
 
 # dae in the tests: the socks5 exit on the emulated internet is the only node;
 # PROXIED_TARGET goes through it, and so does the Releases stand-in, as GitHub
@@ -119,6 +132,18 @@ def lan_addresses(client: Netns) -> tuple[str, str] | None:
     return (ipv4[0], ipv6[0]) if ipv4 and ipv6 else None
 
 
+def dhcp_leases(router: Router) -> dict[str, int]:
+    """Return the router's DHCP leases: each client's hostname and when its lease ends."""
+    leases = {}
+    for line in router.run("cat /tmp/dhcp.leases").splitlines():
+        match line.split():
+            case [expiry, _, _, hostname, *_]:
+                leases[hostname] = int(expiry)
+            case _:
+                pass
+    return leases
+
+
 def _session(router: Router, isp: Isp, other_than: Session | None) -> Session | None:
     status = interface(router, "wan")
     addresses = status.get("ipv4-address") or []
@@ -139,6 +164,10 @@ class Online:
     network: Network
     session: Session
     recovery: float = 0.0
+    # The leases the LAN clients held when the router came back, which they
+    # renew, and when each client last asked for its lease.
+    stale_leases: dict[str, int] = field(default_factory=dict, repr=False)
+    asked: dict[str, float] = field(default_factory=dict, repr=False)
 
     @classmethod
     def dial(cls, router: Router, isp: Isp, network: Network) -> Self:
@@ -146,16 +175,26 @@ class Online:
 
         The router has just jumped back to its snapshot, so the LAN clients
         announce themselves again, as they would to a router that has come back:
-        a lease renewal (with their hostname) and a router solicitation.
+        a lease renewal (with their hostname) and a router solicitation. The
+        snapshot still holds their leases from the boot; they count once renewed.
         """
         user, password = map(shlex.quote, LOGIN)
         router.run(
             f"uci set network.wan.username={user} && uci set network.wan.password={password}"
             " && uci commit network && ifup wan"
         )
+        stale = dhcp_leases(router)
+        asked = time.monotonic()
         for name in LAN_CLIENTS:
             network.renew(name)
-        online = cls(router, isp, network, _wait_session(router, isp, None))
+        online = cls(
+            router,
+            isp,
+            network,
+            _wait_session(router, isp, None),
+            stale_leases=stale,
+            asked=dict.fromkeys(LAN_CLIENTS, asked),
+        )
         online.wait_datapath()
         return online
 
@@ -209,7 +248,7 @@ class Online:
             )
         except TimeoutError as error:
             error.add_note(f"pppoe-wan holds {hooks(self.router, 'pppoe-wan')}")
-            error.add_note(self.router.run("logread -e einat -e qosify | tail -n 20"))
+            error.add_note(self.router.run(WAN_STATE))
             raise
         self.recovery = time.monotonic() - start
         until(
@@ -233,19 +272,24 @@ class Online:
     def _lan_ready(self, name: str) -> bool:
         """Return whether a LAN client is set up and the router knows it.
 
-        That is: its addresses, an IPv6 default route, and its lease (with its
-        hostname) at the router. A client that is not there yet asks again, as a
-        host does when it (re)attaches: a router solicitation and a lease renewal.
+        That is: its addresses, an IPv6 default route, and a lease at the router,
+        with its hostname, newer than the one it had to renew. A client that is
+        not there yet asks again, as a host does when it (re)attaches: a router
+        solicitation, and a lease renewal once its last request had time.
         """
         client = self.client(name)
+        lease = dhcp_leases(self.router).get(name)
         if (
             lan_addresses(client)
             and client.run("ip", "-6", "route", "show", "default")
-            and self.router.returncode(f"grep -qw {name} /tmp/dhcp.leases") == 0
+            and lease is not None
+            and lease > self.stale_leases.get(name, 0)
         ):
             return True
         client.probe("solicit-router", "eth0")
-        self.network.renew(name)
+        if time.monotonic() - self.asked.get(name, 0.0) > RENEW_INTERVAL:
+            self.network.renew(name)
+            self.asked[name] = time.monotonic()
         return False
 
 

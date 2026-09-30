@@ -12,9 +12,9 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from labgrid.driver.exception import ExecutionError
+from labgrid.driver import ExecutionError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -33,6 +33,13 @@ READY_MARK = "- init complete -"
 # The kernel's last words before the machine restarts.
 RESTART_MARK = "reboot: Restarting system"
 BOOT_ID = "cat /proc/sys/kernel/random/boot_id"
+# A connection the router stopped answering: labgrid says so before it runs a
+# command, and ssh exits with this status.
+DEAD_CONNECTION = "Keepalive no longer running"
+SSH_FAILED = 255
+# How long a new connection is tried: the emulator stops answering while the
+# disk it runs from catches up with a burst of writes.
+RECONNECT_TIMEOUT = 60.0
 
 
 class Router:
@@ -59,9 +66,24 @@ class Router:
         """Close the SSH connection, e.g. before the router's state jumps."""
         self.target.deactivate(self.ssh)
 
+    def _run(self, command: str, timeout: float) -> tuple[list[str], list[str], int]:
+        """Run ``command`` over the SSH connection, a new one if the old one has died.
+
+        labgrid refuses a command on a dead connection before running it, so
+        running it on a new one runs it once.
+        """
+        try:
+            result = self._connected().run(command, timeout=timeout)
+        except ExecutionError as error:
+            if DEAD_CONNECTION not in str(error):
+                raise
+            self.disconnect()
+            result = self._connected().run(command, timeout=timeout)
+        return cast("tuple[list[str], list[str], int]", result)
+
     def run(self, command: str, *, timeout: float = 60) -> str:
         """Run a shell command on the router, fail on a non-zero exit, return stdout."""
-        stdout, stderr, code = self._connected().run(command, timeout=timeout)
+        stdout, stderr, code = self._run(command, timeout)
         if code != 0:
             msg = f"{command!r} exited {code}: {'\n'.join(stderr)}"
             raise AssertionError(msg)
@@ -86,7 +108,7 @@ class Router:
 
     def returncode(self, command: str, *, timeout: float = 60) -> int:
         """Run a shell command on the router and return only its exit status."""
-        _, _, code = self._connected().run(command, timeout=timeout)
+        _, _, code = self._run(command, timeout)
         return int(code)
 
     def _ssh(self, *options: str) -> list[str]:
@@ -118,14 +140,27 @@ class Router:
         return _TERMINAL_CONTROL.sub("", output)
 
     def put(self, local: Path, remote: str) -> None:
-        """Copy a local file to the router (over ssh; dropbear has no sftp server)."""
-        with local.open("rb") as source:
-            subprocess.run(
-                [*self._ssh(), f"cat > {shlex.quote(remote)}"],
-                stdin=source,
-                check=True,
-                timeout=600,
-            )
+        """Copy a local file to the router (over ssh; dropbear has no sftp server).
+
+        A connection the router does not take is tried again for a while.
+        """
+        deadline = time.monotonic() + RECONNECT_TIMEOUT
+        while True:
+            with local.open("rb") as source:
+                copy = subprocess.run(
+                    [*self._ssh(), f"cat > {shlex.quote(remote)}"],
+                    stdin=source,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                    timeout=600,
+                )
+            if copy.returncode == 0:
+                return
+            if copy.returncode != SSH_FAILED or time.monotonic() > deadline:
+                failure = subprocess.CalledProcessError(copy.returncode, copy.args)
+                failure.add_note(copy.stderr.decode(errors="replace").strip())
+                raise failure
+            time.sleep(2)
 
     def wait_ssh(self, timeout: float = BOOT_TIMEOUT) -> None:
         """Wait until the router answers on SSH (in failsafe mode, too)."""
@@ -188,20 +223,14 @@ class Router:
 
         The old system may still answer while it shuts down, and the reboot may
         cut or hang the connection in the middle of a command; each only means
-        waiting on.
+        waiting on. Only a new boot ID is the new system: waiting for it to be
+        ready, which sets its clock, starts then, never on the old one.
         """
         deadline = time.monotonic() + timeout
-        while True:
-            try:
-                self.wait_ready(deadline - time.monotonic())
-                stdout, _, code = self._connected().run(BOOT_ID)
-                if code == 0 and "\n".join(map(str, stdout)) != previous_boot:
-                    return
-            except ExecutionError, subprocess.TimeoutExpired:
-                pass
-            self.disconnect()
+        while (boot := self.poll(BOOT_ID)) is None or boot == previous_boot:
             _check(deadline, "the router never rebooted")
             time.sleep(2)
+        self.wait_ready(deadline - time.monotonic())
 
     def reboot(
         self, command: str = "reboot", *, while_off: Callable[[], object] | None = None

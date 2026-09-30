@@ -54,5 +54,9 @@ fi
 
 mkdir -p "${mountpoint}"
 mount -o loop,noatime "${image}" "${mountpoint}"
+# Direct I/O: the image already sits in the host's page cache, so the loop
+# device reads and writes it without keeping a second copy in this system's.
+loop=$(findmnt -rno SOURCE --mountpoint "${mountpoint}")
+losetup --direct-io=on "${loop}"
 [ "${created}" -eq 0 ] || chown "${owner}" "${mountpoint}"
 info "mounted ${image} on ${mountpoint}"

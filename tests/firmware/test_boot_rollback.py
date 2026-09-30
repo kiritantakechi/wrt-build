@@ -7,27 +7,26 @@ from typing import TYPE_CHECKING
 
 from wrt_tests import spec
 from wrt_tests.ab import (
+    BOOT_DISK,
     ENV_OFFSET,
     ENV_SIZE,
-    SD_CARD,
     getenv,
     partition,
     region_sha256,
     setenv,
     slot,
 )
-from wrt_tests.emu import BOARD_COMPATIBLE, extract_fit_image, read_fit, run
+from wrt_tests.emu import extract_fit_image, read_fit, run
 from wrt_tests.image import SECTOR, default_environment, read_mbr
 
 if TYPE_CHECKING:
+    from wrt_tests.boards import Board
     from wrt_tests.router import Router
 
 CAPABILITY = "firmware/boot-rollback"
 UBOOT_DIR = Path(__file__).resolve().parents[2] / "uboot"
 UBOOT_SECTOR = 16384
 UBOOT_BANNER = r"U-Boot 20\d\d\.\d\d"
-# The R4S's SD card controller, which its constants boot from as mmc1.
-R4S_SD_CARD = "/mmc@fe320000"
 # Variables U-Boot itself defines for the slot logic, besides those of wrt-ab.env.
 LOGIC = ("bootcmd", "altbootcmd", "bootlimit")
 UPGRADE_IMAGE = "/tmp/sysupgrade.tar.gz"  # noqa: S108 (a path on the router)
@@ -47,10 +46,17 @@ def _trial(router: Router) -> None:
 
 
 def _env_sha256(router: Router) -> str:
-    return region_sha256(router, SD_CARD, ENV_OFFSET, ENV_OFFSET + ENV_SIZE)
+    return region_sha256(router, BOOT_DISK, ENV_OFFSET, ENV_OFFSET + ENV_SIZE)
 
 
-def _r4s_uboot(emulation_dir: Path, tmp_path: Path) -> tuple[Path, Path]:
+def _config(path: Path) -> dict[str, str]:
+    """Return the options a Kconfig configuration sets."""
+    return dict(
+        line.split("=", 1) for line in path.read_text().splitlines() if line.startswith("CONFIG_")
+    )
+
+
+def _board_uboot(emulation_dir: Path, tmp_path: Path) -> tuple[Path, Path]:
     """Extract the shipped U-Boot of the factory image: its binary and control device tree."""
     disk = emulation_dir / "disk.raw"
     with disk.open("rb") as raw:
@@ -86,7 +92,9 @@ def test_boot_slot_b(router: Router) -> None:
 def test_corrupted_environment_boots_slot_a(router: Router) -> None:
     setenv(router, boot_slot="b")
     # Overwrite the CRC and the first variables: U-Boot falls back to its defaults.
-    router.run(f"dd if=/dev/urandom of={SD_CARD} bs=64 seek={ENV_OFFSET // 64} count=1 conv=fsync")
+    router.run(
+        f"dd if=/dev/urandom of={BOOT_DISK} bs=64 seek={ENV_OFFSET // 64} count=1 conv=fsync"
+    )
     router.reboot()
     assert slot(router) == "a"
 
@@ -187,7 +195,7 @@ def test_watchdog_resets_a_hung_userspace(router: Router) -> None:
 def test_watchdog_chain_configuration(
     build_output: Path, emulation_dir: Path, tmp_path: Path
 ) -> None:
-    uboot = (build_output / "u-boot-r4s.config").read_text().splitlines()
+    uboot = (build_output / "u-boot.config").read_text().splitlines()
     for line in (
         "CONFIG_WDT=y",
         "CONFIG_WATCHDOG_AUTOSTART=y",
@@ -198,7 +206,7 @@ def test_watchdog_chain_configuration(
     kernel = (build_output / "kernel.config").read_text().splitlines()
     for line in ("CONFIG_DW_WATCHDOG=y", "CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y"):
         assert line in kernel, line
-    binary, _ = _r4s_uboot(emulation_dir, tmp_path)
+    binary, _ = _board_uboot(emulation_dir, tmp_path)
     assert (
         "watchdog.open_timeout=90"
         in default_environment(binary.read_bytes(), "wrt_boot")["wrt_boot"]
@@ -209,16 +217,27 @@ def test_watchdog_chain_configuration(
     CAPABILITY, "Same slot logic on the device and in the emulator", "Compare the two bootloaders"
 )
 def test_same_logic_in_both_bootloaders(
-    build_output: Path, emulation_dir: Path, tmp_path: Path
+    board: Board, build_output: Path, emulation_dir: Path, tmp_path: Path
 ) -> None:
-    binary, dtb = _r4s_uboot(emulation_dir, tmp_path)
-    r4s = default_environment(binary.read_bytes(), "wrt_boot")
+    binary, dtb = _board_uboot(emulation_dir, tmp_path)
+    shipped = default_environment(binary.read_bytes(), "wrt_boot")
     qemu = default_environment((build_output / "u-boot-qemu.bin").read_bytes(), "wrt_boot")
     shared = _names(UBOOT_DIR / "wrt-ab.env") | set(LOGIC)
-    constants = _names(UBOOT_DIR / "board-r4s.env")
+    constants = _names(UBOOT_DIR / f"board-{board.id}.env")
     assert constants == _names(UBOOT_DIR / "board-qemu.env")
-    assert {name: r4s[name] for name in shared} == {name: qemu[name] for name in shared}
-    assert constants <= r4s.keys() & qemu.keys()
-    # The R4S constants boot from mmc1, which its device tree makes the SD card.
-    assert run("fdtget", str(dtb), "/", "compatible").split()[0] == BOARD_COMPATIBLE
-    assert run("fdtget", str(dtb), "/aliases", f"mmc{r4s['wrt_mmc']}").strip() == R4S_SD_CARD
+    assert {name: shipped[name] for name in shared} == {name: qemu[name] for name in shared}
+    assert constants <= shipped.keys() & qemu.keys()
+    # Each keeps its environment at the shared offset of the MMC device its
+    # constants boot from...
+    for name, environment in (("u-boot.config", shipped), ("u-boot-qemu.config", qemu)):
+        config = _config(build_output / name)
+        assert config.get("CONFIG_ENV_IS_IN_MMC") == "y", name
+        assert int(config["CONFIG_ENV_MMC_DEVICE_INDEX"]) == int(environment["wrt_mmc"]), name
+        assert int(config["CONFIG_ENV_OFFSET"], 16) == ENV_OFFSET, name
+        assert int(config["CONFIG_ENV_SIZE"], 16) == ENV_SIZE, name
+    # ...which the board's device tree makes its boot disk's controller: an eMMC
+    # is soldered on, an SD card is not.
+    assert run("fdtget", str(dtb), "/", "compatible").split()[0] == board.board_name
+    controller = run("fdtget", str(dtb), "/aliases", f"mmc{shipped['wrt_mmc']}").strip()
+    properties = run("fdtget", "-p", str(dtb), controller).split()
+    assert ("non-removable" in properties) == (board.boot_disk == "emmc"), controller

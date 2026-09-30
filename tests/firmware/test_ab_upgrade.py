@@ -4,10 +4,12 @@ from typing import TYPE_CHECKING
 
 from wrt_tests import spec
 from wrt_tests.ab import boot_area_sha256, setenv, slot, slot_sha256
+from wrt_tests.boards import load_all
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from wrt_tests.boards import Board
     from wrt_tests.router import Router
 
 CAPABILITY = "firmware/ab-upgrade"
@@ -92,12 +94,15 @@ def test_upgrade_boots_the_new_slot_on_trial(router: Router, upgrade_image: Path
 
 
 @spec(CAPABILITY, "Reject mismatched images", "Image for another device")
-def test_image_for_another_board_is_rejected(router: Router, upgrade_image: Path) -> None:
+def test_image_for_another_board_is_rejected(
+    router: Router, board: Board, upgrade_image: Path
+) -> None:
     router.put(upgrade_image, UPGRADE_IMAGE)
-    # Rewrite the metadata so that the image names another board only.
+    # Rewrite the metadata so that the image names another supported board only.
+    other = next(other for other in load_all() if other.id != board.id)
     router.run(
         f"fwtool -q -t -i /tmp/meta.json {UPGRADE_IMAGE}"
-        " && sed -i 's/friendlyarm,nanopi-r4s/friendlyarm,nanopi-r2s/' /tmp/meta.json"
+        f" && sed -i 's/{board.board_name}/{other.board_name}/' /tmp/meta.json"
         f" && fwtool -I /tmp/meta.json {UPGRADE_IMAGE}"
     )
     before = (slot_sha256(router, "a"), slot_sha256(router, "b"))

@@ -5,12 +5,14 @@
 nothing on the host. The topology is data: bridges (with the emulator's taps and
 the test runner's address), and network namespaces whose ports are veth pairs to
 the bridges, each port with static addresses or a DHCP client, plus routes and
-daemons. Later changes add namespaces by extending ``TOPOLOGY``.
+daemons. ``topology`` makes it for a board: a segment per port of the board
+(board-model D7), and the ISP and internet of ``UPSTREAM``.
 
 ```
-client-a ─┐                                                 ┌─ inet   netprobe, dns, iperf3
-client-b ─┼─ br-lan ─ eth1 │ router │ eth0 ─ br-wan ─ isp ─ br-inet ─┤
+client-a ─┐                                                   ┌─ inet   netprobe, dns, iperf3
+client-b ─┼─ br-lan ── LAN │ router │ WAN ─ br-wan ─ isp ─ br-inet ─┤
 runner   ─┘ 10.0.0.0/24    │ (QEMU) │  PPPoE        (BRAS)          └─ proxy  socks5 exit
+client-c ─── br-lan2 ─ LAN │        │   (a second LAN port)
 ```
 
 A namespace is held by a ``sleep`` process started with ``unshare --net``;
@@ -18,8 +20,10 @@ commands enter it with ``nsenter``. No named namespaces, so no /run/netns and no
 real root are needed.
 """
 
+import itertools
 import json
 import signal
+import string
 import subprocess
 import sys
 import time
@@ -33,6 +37,8 @@ from wrt_tests import internet, isp, netprobe
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from types import TracebackType
+
+    from wrt_tests.boards import Board
 
 UDHCPC_SCRIPT = Path(__file__).with_name("udhcpc.sh")
 RUNNER_ADDRESS = "10.0.0.2"
@@ -91,164 +97,199 @@ class Topology:
     namespaces: tuple[Namespace, ...]
 
 
-TOPOLOGY = Topology(
-    bridges=(
-        Bridge("br-lan", tap="emu-lan", address=f"{RUNNER_ADDRESS}/24"),
-        Bridge("br-wan", tap="emu-wan"),
-        Bridge("br-inet"),
+# The ISP and the internet behind the router's WAN port, the same for every board.
+UPSTREAM = (
+    Namespace(
+        "isp",
+        ports=(
+            Port("br-wan"),
+            Port(
+                "br-inet",
+                addresses=tuple(
+                    f"{gateway}/{length}"
+                    for gateways in (INET_GATEWAY, PROXY_GATEWAY)
+                    for gateway, length in zip(gateways, (24, 64), strict=True)
+                ),
+            ),
+        ),
+        sysctls=(
+            "net.ipv4.ip_forward=1",
+            "net.ipv6.conf.all.forwarding=1",
+            # A session's link-local address is its own: kea binds to it as
+            # soon as IPv6CP is up, before duplicate detection would end.
+            "net.ipv6.conf.default.accept_dad=0",
+        ),
+        daemons=(
+            (
+                "pppoe-server",
+                "-F",
+                "-I",
+                "eth0",
+                "-L",
+                isp.BRAS_ADDRESS,
+                "-R",
+                isp.POOL_START,
+                "-N",
+                str(isp.POOL_SIZE),
+                "-O",
+                "/etc/ppp/pppoe-server-options",
+            ),
+        ),
     ),
-    namespaces=(
-        Namespace("client-a", ports=(Port("br-lan", dhcp=True),)),
-        Namespace("client-b", ports=(Port("br-lan", dhcp=True),)),
-        Namespace(
-            "isp",
-            ports=(
-                Port("br-wan"),
-                Port(
-                    "br-inet",
-                    addresses=tuple(
-                        f"{gateway}/{length}"
-                        for gateways in (INET_GATEWAY, PROXY_GATEWAY)
-                        for gateway, length in zip(gateways, (24, 64), strict=True)
-                    ),
-                ),
-            ),
-            sysctls=(
-                "net.ipv4.ip_forward=1",
-                "net.ipv6.conf.all.forwarding=1",
-                # A session's link-local address is its own: kea binds to it as
-                # soon as IPv6CP is up, before duplicate detection would end.
-                "net.ipv6.conf.default.accept_dad=0",
-            ),
-            daemons=(
-                (
-                    "pppoe-server",
-                    "-F",
-                    "-I",
-                    "eth0",
-                    "-L",
-                    isp.BRAS_ADDRESS,
-                    "-R",
-                    isp.POOL_START,
-                    "-N",
-                    str(isp.POOL_SIZE),
-                    "-O",
-                    "/etc/ppp/pppoe-server-options",
-                ),
-            ),
-        ),
-        Namespace(
-            "inet",
-            ports=(
-                Port(
-                    "br-inet",
-                    addresses=(
-                        *(
-                            f"{address}/{length}"
-                            for addresses in (isp.DNS, DIRECT_TARGET, PROXIED_TARGET)
-                            for address, length in zip(addresses, (24, 64), strict=True)
-                        ),
-                        *(f"{address}/24" for _, address in internet.SERVERS),
-                    ),
-                ),
-            ),
-            routes=tuple(f"default via {gateway}" for gateway in INET_GATEWAY),
-            daemons=(
-                (sys.executable, "-m", "wrt_tests.netprobe", "serve", "--port", str(netprobe.PORT)),
-                (
-                    "dnsmasq",
-                    "--keep-in-foreground",
-                    "--conf-file=/dev/null",
-                    # Empty user and group: keep the sandbox's identity; setgroups
-                    # is not allowed in a user namespace.
-                    "--user=",
-                    "--group=",
-                    "--log-facility=-",
-                    "--log-queries",
-                    "--pid-file=",
-                    "--bind-interfaces",
-                    *(f"--listen-address={address}" for address in isp.DNS),
-                    "--no-resolv",
-                    "--no-hosts",
-                    # The one zone the internet serves, anything else is
-                    # NXDOMAIN (host records win over address rules). Every name
-                    # under any.example.net resolves, so each test query can be
-                    # one no cache has seen. Not a .test zone: the router's
-                    # dnsmasq keeps RFC 6761 names local and never forwards them.
-                    "--address=/#/",
-                    f"--address=/any.example.net/{DIRECT_TARGET[0]}",
-                    "--host-record=direct.example.net,{},{}".format(*DIRECT_TARGET),
-                    "--host-record=proxied.example.net,{},{}".format(*PROXIED_TARGET),
-                    *(f"--host-record={name},{address}" for name, address in internet.SERVERS),
-                ),
-                *(("iperf3", "--server", "--port", str(port)) for port in IPERF_PORTS),
-                ("registry", "serve", "{workdir}/registry.yml"),
-                ("headscale", "serve", "--config", "{workdir}/headscale.yaml"),
-                (
-                    *(sys.executable, "-m", "wrt_tests.releases", "{workdir}/releases"),
-                    *("--address", internet.RELEASES[1], "--name", internet.RELEASES[0]),
-                    "--certificate={workdir}/../pki/server.crt",
-                    "--key={workdir}/../pki/server.key",
-                ),
-            ),
-        ),
-        Namespace(
-            "proxy",
-            ports=(
-                Port(
-                    "br-inet",
-                    addresses=tuple(
+    Namespace(
+        "inet",
+        ports=(
+            Port(
+                "br-inet",
+                addresses=(
+                    *(
                         f"{address}/{length}"
-                        for address, length in zip(PROXY, (24, 64), strict=True)
+                        for addresses in (isp.DNS, DIRECT_TARGET, PROXIED_TARGET)
+                        for address, length in zip(addresses, (24, 64), strict=True)
                     ),
+                    *(f"{address}/24" for _, address in internet.SERVERS),
                 ),
             ),
-            routes=tuple(f"default via {gateway}" for gateway in PROXY_GATEWAY),
-            daemons=(("microsocks", "-i", "::", "-p", str(PROXY_PORT)),),
         ),
-        # A remote WireGuard device; the tests make its tunnel, a wireguard link
-        # of the host kernel, with the keys they push to the router.
-        Namespace(
-            "wg-peer",
-            ports=(
-                Port(
-                    "br-inet",
-                    addresses=tuple(
-                        f"{address}/{length}"
-                        for address, length in zip(internet.WG_PEER, (24, 64), strict=True)
-                    ),
-                ),
+        routes=tuple(f"default via {gateway}" for gateway in INET_GATEWAY),
+        daemons=(
+            (sys.executable, "-m", "wrt_tests.netprobe", "serve", "--port", str(netprobe.PORT)),
+            (
+                "dnsmasq",
+                "--keep-in-foreground",
+                "--conf-file=/dev/null",
+                # Empty user and group: keep the sandbox's identity; setgroups
+                # is not allowed in a user namespace.
+                "--user=",
+                "--group=",
+                "--log-facility=-",
+                "--log-queries",
+                "--pid-file=",
+                "--bind-interfaces",
+                *(f"--listen-address={address}" for address in isp.DNS),
+                "--no-resolv",
+                "--no-hosts",
+                # The one zone the internet serves, anything else is
+                # NXDOMAIN (host records win over address rules). Every name
+                # under any.example.net resolves, so each test query can be
+                # one no cache has seen. Not a .test zone: the router's
+                # dnsmasq keeps RFC 6761 names local and never forwards them.
+                "--address=/#/",
+                f"--address=/any.example.net/{DIRECT_TARGET[0]}",
+                "--host-record=direct.example.net,{},{}".format(*DIRECT_TARGET),
+                "--host-record=proxied.example.net,{},{}".format(*PROXIED_TARGET),
+                *(f"--host-record={name},{address}" for name, address in internet.SERVERS),
             ),
-            routes=tuple(f"default via {gateway}" for gateway in INET_GATEWAY),
+            *(("iperf3", "--server", "--port", str(port)) for port in IPERF_PORTS),
+            ("registry", "serve", "{workdir}/registry.yml"),
+            ("headscale", "serve", "--config", "{workdir}/headscale.yaml"),
+            (
+                *(sys.executable, "-m", "wrt_tests.releases", "{workdir}/releases"),
+                *("--address", internet.RELEASES[1], "--name", internet.RELEASES[0]),
+                "--certificate={workdir}/../pki/server.crt",
+                "--key={workdir}/../pki/server.key",
+            ),
         ),
-        # A tailnet device: tailscaled on a TUN of its own, trusting the test CA.
-        Namespace(
-            "ts-peer",
-            ports=(
-                Port(
-                    "br-inet",
-                    addresses=tuple(
-                        f"{address}/{length}"
-                        for address, length in zip(internet.TS_PEER, (24, 64), strict=True)
-                    ),
+    ),
+    Namespace(
+        "proxy",
+        ports=(
+            Port(
+                "br-inet",
+                addresses=tuple(
+                    f"{address}/{length}" for address, length in zip(PROXY, (24, 64), strict=True)
                 ),
             ),
-            routes=tuple(f"default via {gateway}" for gateway in INET_GATEWAY),
-            daemons=(
-                (
-                    "env",
-                    "SSL_CERT_FILE={workdir}/../pki/ca.crt",
-                    "tailscaled",
-                    "--no-logs-no-support",
-                    "--statedir={workdir}",
-                    "--socket={workdir}/tailscaled.sock",
-                    "--tun=tailscale0",
-                    "--port=41641",
+        ),
+        routes=tuple(f"default via {gateway}" for gateway in PROXY_GATEWAY),
+        daemons=(("microsocks", "-i", "::", "-p", str(PROXY_PORT)),),
+    ),
+    # A remote WireGuard device; the tests make its tunnel, a wireguard link
+    # of the host kernel, with the keys they push to the router.
+    Namespace(
+        "wg-peer",
+        ports=(
+            Port(
+                "br-inet",
+                addresses=tuple(
+                    f"{address}/{length}"
+                    for address, length in zip(internet.WG_PEER, (24, 64), strict=True)
                 ),
+            ),
+        ),
+        routes=tuple(f"default via {gateway}" for gateway in INET_GATEWAY),
+    ),
+    # A tailnet device: tailscaled on a TUN of its own, trusting the test CA.
+    Namespace(
+        "ts-peer",
+        ports=(
+            Port(
+                "br-inet",
+                addresses=tuple(
+                    f"{address}/{length}"
+                    for address, length in zip(internet.TS_PEER, (24, 64), strict=True)
+                ),
+            ),
+        ),
+        routes=tuple(f"default via {gateway}" for gateway in INET_GATEWAY),
+        daemons=(
+            (
+                "env",
+                "SSL_CERT_FILE={workdir}/../pki/ca.crt",
+                "tailscaled",
+                "--no-logs-no-support",
+                "--statedir={workdir}",
+                "--socket={workdir}/tailscaled.sock",
+                "--tun=tailscale0",
+                "--port=41641",
             ),
         ),
     ),
 )
+
+
+def segments(board: Board) -> tuple[str, ...]:
+    """Return the segment each of the board's ports joins, in the board's order (board-model D7).
+
+    The WAN port's segment is ``wan``, the LAN ports' are ``lan``, ``lan2``, ...
+    """
+    lans = itertools.chain(("lan",), (f"lan{number}" for number in itertools.count(2)))
+    return tuple("wan" if port.role == "wan" else next(lans) for port in board.ports)
+
+
+def taps(board: Board) -> tuple[str, ...]:
+    """Return the emulator's tap of each of the board's ports, in the board's order."""
+    return tuple(f"emu-{segment}" for segment in segments(board))
+
+
+def topology(board: Board) -> Topology:
+    """Return the sandbox around the emulated board: a segment per port, the LAN clients, upstream.
+
+    The runner, ``client-a`` and ``client-b`` share the first LAN port's segment;
+    every further LAN port's segment has a client of its own, ``client-c`` on.
+    """
+    lans = [segment for segment in segments(board) if segment != "wan"]
+    clients = zip(string.ascii_lowercase, (lans[0], *lans), strict=False)
+    return Topology(
+        bridges=(
+            *(
+                Bridge(
+                    f"br-{segment}",
+                    tap=tap,
+                    address=f"{RUNNER_ADDRESS}/24" if segment == lans[0] else None,
+                )
+                for segment, tap in zip(segments(board), taps(board), strict=True)
+            ),
+            Bridge("br-inet"),
+        ),
+        namespaces=(
+            *(
+                Namespace(f"client-{letter}", ports=(Port(f"br-{segment}", dhcp=True),))
+                for letter, segment in clients
+            ),
+            *UPSTREAM,
+        ),
+    )
 
 
 def ip(*args: str) -> str:

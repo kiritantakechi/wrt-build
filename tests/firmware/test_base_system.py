@@ -5,6 +5,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
+from wrt_tests.oci import extract_root
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -24,7 +25,9 @@ EXCLUDED_PACKAGES = (
     "nginx",
     "uwsgi",
 )
-EXECUTABLE_DIRS = "/rom/bin /rom/sbin /rom/usr/bin /rom/usr/sbin /rom/lib /rom/usr/lib"
+# Where the image keeps executables and libraries, and the mark of one UPX packed.
+EXECUTABLE_DIRS = ("bin", "sbin", "usr/bin", "usr/sbin", "lib", "usr/lib")
+UPX_MAGIC = b"UPX!"
 FAILSAFE_PROMPT = r"Press the \[f\] key and hit \[enter\] to enter failsafe mode"
 BOOT_TIMEOUT = 600.0
 UPGRADE_IMAGE = "/tmp/sysupgrade.tar.gz"  # noqa: S108 (a path on the router)
@@ -143,13 +146,19 @@ def test_no_preset_root_password(router: Router) -> None:
 
 
 @spec(CAPABILITY, "Excluded components", "Check installed packages and executables")
-def test_excluded_components(router: Router) -> None:
+def test_excluded_components(router: Router, emulation_dir: Path, tmp_path: Path) -> None:
     assert _installed(router, *EXCLUDED_PACKAGES) == set()
     assert router.returncode("ls /proc/lrng_type /proc/sys/kernel/random/lrng_type") != 0
-    # Executables and libraries only: grepping every file is too slow under TCG.
-    upx = router.run(
-        f"find {EXECUTABLE_DIRS} -type f -perm -100 -exec grep -l 'UPX!' {{}} + 2>/dev/null"
-        " || true",
-        timeout=600,
-    )
-    assert upx == ""
+    # The image's executables and libraries, read from its root filesystem here:
+    # grepping them on the emulated router outlasts any timeout under TCG.
+    root = extract_root(emulation_dir / "disk.raw", tmp_path / "root")
+    packed = [
+        str(path.relative_to(root))
+        for directory in EXECUTABLE_DIRS
+        for path in (root / directory).rglob("*")
+        if path.is_file()
+        and not path.is_symlink()
+        and path.stat().st_mode & 0o100
+        and UPX_MAGIC in path.read_bytes()
+    ]
+    assert packed == []

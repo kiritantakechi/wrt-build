@@ -39,7 +39,7 @@ def _no_cpu(description: dict[str, Any]) -> None:
 
 
 def _cores_in_words(description: dict[str, Any]) -> None:
-    description["emulator"]["cores"] = "eight"
+    description["soc"]["cores"][0] = "little"
 
 
 def _an_id(description: dict[str, Any]) -> None:
@@ -54,7 +54,7 @@ def _two_wan_ports(description: dict[str, Any]) -> None:
     ("breakage", "field"),
     [
         (_no_cpu, "cpu"),
-        (_cores_in_words, "emulator.cores"),
+        (_cores_in_words, "soc.cores.0"),
         (_an_id, "id"),
         (_two_wan_ports, "ports"),
     ],

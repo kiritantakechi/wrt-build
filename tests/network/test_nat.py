@@ -4,6 +4,7 @@ dae stays off in this module: every flow goes direct, so what the internet sees
 is einat's work (or masquerade's) alone.
 """
 
+import contextlib
 import json
 import re
 import subprocess
@@ -19,7 +20,7 @@ from wrt_tests.netprobe import HTTP_PORT
 from wrt_tests.poll import until
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from wrt_tests.datapath import Online
     from wrt_tests.net import Netns
@@ -46,9 +47,18 @@ class Listener:
         )
         until(lambda: client.run("ss", "-Hlun", f"sport = :{port}"), timeout=10, what="listener")
 
-    def received(self) -> bool:
-        """Return whether the datagram arrived before the listener gave up."""
-        self.process.communicate(timeout=60)
+    def receives(self, send: Callable[[], object]) -> bool:
+        """Return whether what ``send`` sends arrives before the listener gives up.
+
+        ``send`` sends again each second: the emulated path can lose a datagram
+        now and then, and what lets one in lets every one in, as what keeps one
+        out keeps every one out.
+        """
+        while self.process.poll() is None:
+            send()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                self.process.wait(timeout=1)
+        self.process.communicate()
         return self.process.wait() == 0
 
 
@@ -58,6 +68,13 @@ def _map(online: Online, port: int, target: str = DIRECT_TARGET[0]) -> int:
     assert seen["address"] == online.wan_address
     assert isinstance(seen["port"], int)
     return seen["port"]
+
+
+def _unasked(online: Online, port: int) -> Callable[[], object]:
+    """Return what sends a datagram to the WAN address's ``port`` from a host no client asked."""
+    return lambda: online.network["inet"].probe(
+        "send", online.wan_address, "--port", str(port), "--bind", NEVER_CONTACTED
+    )
 
 
 def _inbound_accepted(online: Online) -> int:
@@ -104,11 +121,7 @@ def test_mapping_is_endpoint_independent(online: Online) -> None:
 @spec(CAPABILITY, "Full-cone NAT44", "Endpoint-independent filtering")
 def test_filtering_is_endpoint_independent(online: Online) -> None:
     public = _map(online, 41001)
-    listener = Listener(online.client(), 41001)
-    online.network["inet"].probe(
-        "send", online.wan_address, "--port", str(public), "--bind", NEVER_CONTACTED
-    )
-    assert listener.received()
+    assert Listener(online.client(), 41001).receives(_unasked(online, public))
 
 
 @spec(
@@ -133,25 +146,25 @@ def test_spoofed_inbound_is_dropped(online: Online) -> None:
     isp.run("ip", "route", "replace", "10.0.0.0/24", "dev", online.session.interface)
     try:
         listener = Listener(online.client(), 41002)
-        isp.probe("send", ipv4, "--port", "41002")
-        assert not listener.received()
+        assert not listener.receives(lambda: isp.probe("send", ipv4, "--port", "41002"))
     finally:
         isp.run("ip", "route", "del", "10.0.0.0/24")
     # ...and as a bare frame on the Ethernet segment under PPPoE.
     listener = Listener(online.client(), 41003)
-    isp.probe(
-        "inject",
-        "eth0",
-        "--mac",
-        mac,
-        "--source",
-        NEVER_CONTACTED,
-        "--destination",
-        ipv4,
-        "--port",
-        "41003",
+    assert not listener.receives(
+        lambda: isp.probe(
+            "inject",
+            "eth0",
+            "--mac",
+            mac,
+            "--source",
+            NEVER_CONTACTED,
+            "--destination",
+            ipv4,
+            "--port",
+            "41003",
+        )
     )
-    assert not listener.received()
 
 
 @spec(
@@ -166,11 +179,7 @@ def test_inbound_to_a_mapped_port_is_accepted(online: Online, einat_restored: On
     assert online.router.run("einat --version").split()[:2] == ["version:", "0.1.11"]
     before = _inbound_accepted(online)
     public = _map(online, 41004)
-    listener = Listener(online.client(), 41004)
-    online.network["inet"].probe(
-        "send", online.wan_address, "--port", str(public), "--bind", NEVER_CONTACTED
-    )
-    assert listener.received()
+    assert Listener(online.client(), 41004).receives(_unasked(online, public))
     # The patch's mark is what let it in (design D2, D3): without --inbound-mark
     # einat marks nothing, and the same packet stays out (task 1.5).
     assert _inbound_accepted(online) > before >= 0
@@ -180,10 +189,7 @@ def test_inbound_to_a_mapped_port_is_accepted(online: Online, einat_restored: On
         until(lambda: _inbound_accepted(online) == -1, timeout=RECOVERY, what="no mark rule")
         public = _map(online, 41005)
         listener = Listener(online.client(), 41005, timeout=5)
-        online.network["inet"].probe(
-            "send", online.wan_address, "--port", str(public), "--bind", NEVER_CONTACTED
-        )
-        assert not listener.received()
+        assert not listener.receives(_unasked(online, public))
     finally:
         online.router.run("uci revert einat")
 
@@ -207,10 +213,7 @@ def test_stopping_einat_falls_back_to_masquerade(online: Online, einat_restored:
     # The accept-by-mark rule went with einat: nothing unasked comes in.
     assert _inbound_accepted(online) == -1
     listener = Listener(online.client(), 41006, timeout=5)
-    online.network["inet"].probe(
-        "send", online.wan_address, "--port", str(seen["port"]), "--bind", NEVER_CONTACTED
-    )
-    assert not listener.received()
+    assert not listener.receives(_unasked(online, 41006))
 
 
 @spec(CAPABILITY, "Port range isolated from local ports", "Local connections not rewritten")
@@ -243,10 +246,7 @@ def test_full_cone_after_redial(online: Online) -> None:
     first, second = _map(online, 41007), _map(online, 41007, PROXIED_TARGET[0])
     assert first == second
     listener = Listener(online.client(), 41007)
-    online.network["inet"].probe(
-        "send", online.wan_address, "--port", str(first), "--bind", NEVER_CONTACTED
-    )
-    assert listener.received(), online.router.run(
+    assert listener.receives(_unasked(online, first)), online.router.run(
         "nft list chain inet fw4 forward_wan; logread -e einat | tail -n 10"
     )
 
