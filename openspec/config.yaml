@@ -2,8 +2,10 @@ schema: spec-driven
 
 # Project context, shown when creating artifacts.
 context: |
-  Custom OpenWrt build for the NanoPi R4S 4GB: the specs in openspec/specs, the
-  changes that built it in openspec/changes/archive.
+  Custom OpenWrt build for the rockchip/armv8 boards described in boards/ (the
+  NanoPi R4S and R6S): the specs in openspec/specs, the changes that built it in
+  openspec/changes/archive. Board facts live only in the board descriptions and
+  the per-board U-Boot fragments.
   Every artifact, document, comment and identifier is written in English:
   concise, modern technical prose with consistent terminology across changes.
   Requirement and scenario names are referenced by @spec markers in tests/, so

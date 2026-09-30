@@ -1,7 +1,7 @@
 # firmware/ab-layout Specification
 
 ## Purpose
-Defines the dual-system partition layout on the SD card and the formats of the two artifacts, the factory image and the single-slot upgrade image, as the foundation for upgrades without downtime and automatic rollback.
+Defines the dual-system partition layout on each board's boot disk (its SD card or its eMMC) and the formats of the two artifacts, the factory image and the single-slot upgrade image, as the foundation for upgrades without downtime and automatic rollback.
 
 ## Requirements
 

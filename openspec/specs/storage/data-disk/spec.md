@@ -1,7 +1,7 @@
 # storage/data-disk Specification
 
 ## Purpose
-Defines the USB SSD data disk's filesystem, subvolume layout, and mounting; how services that depend on the data disk wait for it to be ready before starting; where persistent logs live; and how the system degrades when the data disk is missing, so that write-heavy workloads stay off the SD card.
+Defines the USB SSD data disk's filesystem, subvolume layout, and mounting; how services that depend on the data disk wait for it to be ready before starting; where persistent logs live; and how the system degrades when the data disk is missing, so that write-heavy workloads stay off the boot disk.
 
 ## Requirements
 

@@ -1,7 +1,7 @@
 # testing/harness Specification
 
 ## Purpose
-Turn spec scenarios into repeatable checks with one automated system test suite that runs against the emulator, so that no verification step needs an R4S.
+Turn spec scenarios into repeatable checks with one automated system test suite that runs against the emulator, so that no verification step needs a real board.
 
 ## Requirements
 

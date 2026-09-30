@@ -1,7 +1,7 @@
 # firmware/toolchain Specification
 
 ## Purpose
-Define the compiler version, linker, and optimization flags for target packages, so the whole system is optimized for the RK3399's A72 + A53 big.LITTLE combination.
+Define the compiler version, linker, and optimization flags for target packages, so that each board's system is optimized for its big.LITTLE CPU cores, built with one toolchain that every board shares.
 
 ## Requirements
 
