@@ -16,6 +16,7 @@ channel=$3
 device=$4
 releases=$5
 incoming=$6
+MANIFEST=/usr/libexec/wrt-sync/manifest
 TRIES=5
 
 # get <url> <file>: fetch with retries.
@@ -65,14 +66,7 @@ if [ ! -d "${releases}/${tag}" ]; then
 	for file in manifest.json manifest.json.sig repo.tar; do
 		asset "${device}-${file}" "${file}"
 	done
-	image=$(ucode -e 'for (let file in json(readfile(ARGV[0])).files) {
-		let image = match(file, /^targets\/(.+-sysupgrade\.tar\.gz)$/);
-		if (image) print(image[1], "\n");
-	}' -- "${incoming}/${tag}/manifest.json")
-	[ -n "${image}" ] || {
-		echo "fetch: ${tag}'s manifest names no upgrade image" >&2
-		exit 1
-	}
+	image=$("${MANIFEST}" image "${incoming}/${tag}/manifest.json" "${device}")
 	asset "${image}" "${image}"
 fi
 echo "${tag}"

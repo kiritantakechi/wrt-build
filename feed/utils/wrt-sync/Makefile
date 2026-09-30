@@ -13,7 +13,7 @@ define Package/wrt-sync
   SECTION:=utils
   CATEGORY:=Utilities
   TITLE:=Local repository of releases, and upgrades from it
-  DEPENDS:=+wrt-data +podman +usign +ucert +uclient-fetch +jsonfilter +ucode
+  DEPENDS:=+wrt-data +podman +usign +ucert +uclient-fetch +jsonfilter +ucode +ucode-mod-fs
   PKGARCH:=all
 endef
 

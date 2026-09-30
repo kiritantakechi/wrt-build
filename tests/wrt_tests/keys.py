@@ -60,6 +60,16 @@ class Keys:
         """The firmware key's usign fingerprint, the name devices know it by."""
         return _run("usign", "-F", "-s", self.firmware)
 
+    def sign_file(self, path: Path) -> Path:
+        """Sign ``path`` with the firmware key, as a release's manifest is; return the signature.
+
+        The signature is a file of its own, never written through a link.
+        """
+        signature = path.with_name(f"{path.name}.sig")
+        signature.unlink(missing_ok=True)
+        _run("usign", "-S", "-m", path, "-s", self.firmware, "-x", signature)
+        return signature
+
     def trust_also(self, other: Keys) -> None:
         """Add ``other``'s public keys to this keyring, as during a key rotation."""
         for anchors in (APK_KEYS, FIRMWARE_KEYS):

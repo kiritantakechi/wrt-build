@@ -25,6 +25,7 @@ from wrt_tests.boards import load_all
 from wrt_tests.internet import RELEASES
 from wrt_tests.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
 from wrt_tests.storage import MOUNT
+from wrt_tests.trees import linked_copy, replace
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
     from wrt_tests.boards import Board
     from wrt_tests.datapath import Online
     from wrt_tests.isp import Isp
+    from wrt_tests.keys import Keys
     from wrt_tests.router import Router
     from wrt_tests.storage import Disk
 
@@ -104,13 +106,19 @@ class Releases:
 
 @pytest.fixture(scope="module")
 def stand_in(
-    dae: Online, trusted_ca: Online, signed_boards: Path, tmp_path_factory: pytest.TempPathFactory
+    dae: Online,
+    trusted_ca: Online,
+    board: Board,
+    signed_boards: Path,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[Releases]:
     """Assemble the signed build as a release; point the router's wrt-sync at the stand-in."""
     del trusted_ca  # requested for the router's trust in the stand-in
     assembled = tmp_path_factory.mktemp("sync") / "release"
     subprocess.run(
-        [PUBLISH, signed_boards, assembled, "--run", "1"], check=True, capture_output=True
+        [PUBLISH, signed_boards, assembled, "--boards", board.id, "--run", "1"],
+        check=True,
+        capture_output=True,
     )
     dae.router.run(
         f"uci set wrt-sync.main.api=https://{RELEASES[0]}"
@@ -175,6 +183,29 @@ def test_an_interrupted_sync_changes_nothing(stand_in: Releases, data_disk: Disk
     ok, said = stand_in.sync()
     assert ok, said
     assert stand_in.current() == tag
+
+
+@spec(
+    CAPABILITY, "Activate only when complete and verified", "File that does not match the manifest"
+)
+def test_a_file_that_does_not_match_is_refused(
+    stand_in: Releases, data_disk: Disk, tmp_path: Path
+) -> None:
+    del data_disk  # the local repository's place
+    previous = stand_in.synced()
+    # The release is complete and its manifest is signed, but its upgrade image
+    # is not the one the manifest lists.
+    release = linked_copy(stand_in.assembled, tmp_path / "release")
+    (image,) = release.glob("*-sysupgrade.tar.gz")
+    changed = bytearray(image.read_bytes())
+    changed[TAMPERED] ^= 1
+    replace(image, bytes(changed))
+    tag = stand_in.publish(release)
+    ok, said = stand_in.sync()
+    assert not ok
+    assert f"{tag}: targets/{image.name} does not match the manifest" in said, said
+    assert stand_in.current() == previous
+    assert tag not in stand_in.kept()
 
 
 @spec(CAPABILITY, "apk uses the local repository", "Install a kmod with WAN down")
@@ -271,14 +302,13 @@ def test_a_release_of_several_boards(
     # The release carries this board's set and, under another board's device
     # name, a set that is no build at all: the router must not even fetch it.
     other = next(other for other in load_all() if other.id != board.id)
-    release = tmp_path / "release"
-    shutil.copytree(stand_in.assembled, release)
+    release = linked_copy(stand_in.assembled, tmp_path / "release")
     for asset in [path for path in release.iterdir() if board.device in path.name]:
         foreign = release / asset.name.replace(board.device, other.device)
         foreign.write_bytes(b"another board's asset\n")
     info = json.loads((release / "release.json").read_text())
     info["assets"] = sorted(path.name for path in release.iterdir() if path.name != "release.json")
-    (release / "release.json").write_text(json.dumps(info))
+    replace(release / "release.json", json.dumps(info))
     tag = stand_in.publish(release)
     ok, said = stand_in.sync()
     assert ok, said
@@ -291,3 +321,26 @@ def test_a_release_of_several_boards(
     (image,) = router.run(f"ls {LOCAL}/current/{UPGRADE}").split()
     assert f"-{board.device}-" in image
     router.run("wrt-update -T", timeout=300)
+
+
+@spec(CAPABILITY, "Sync the device's own board", "Another board's manifest")
+def test_another_board_s_build_is_refused(
+    stand_in: Releases, data_disk: Disk, board: Board, release_keys: Keys | None, tmp_path: Path
+) -> None:
+    del data_disk  # the local repository's place
+    if release_keys is None:
+        pytest.skip("naming another board in a signed manifest needs the session's release keys")
+    previous = stand_in.synced()
+    # Under the device's name, a validly signed manifest of another board's build.
+    other = next(other for other in load_all() if other.id != board.id)
+    release = linked_copy(stand_in.assembled, tmp_path / "release")
+    manifest = release / f"{board.device}-manifest.json"
+    content = json.loads(manifest.read_text())
+    replace(manifest, json.dumps({**content, "board": other.id, "device": other.device}) + "\n")
+    release_keys.sign_file(manifest)
+    tag = stand_in.publish(release)
+    ok, said = stand_in.sync()
+    assert not ok
+    assert f"of a build for {other.device}, not for {board.device}" in said, said
+    assert stand_in.current() == previous
+    assert tag not in stand_in.kept()

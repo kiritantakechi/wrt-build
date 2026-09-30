@@ -5,19 +5,20 @@
 # LAN's, fetches the newest release of the channel (wrt-sync.main.channel, or
 # --candidate for pre-releases too) into /mnt/data/repo/.incoming/<tag>: the
 # asset set of the router's device, which upstream names after the board name
-# (board-model D10). The
-# container gets the router's own programs read-only and only that directory to
-# write, and nothing it fetches is trusted: the release becomes current only
-# once its manifest's signature verifies with /etc/opkg/keys, its upgrade image
-# and every index match the manifest and every index verifies with
-# /etc/apk/keys. The newest releases (wrt-sync.main.keep) stay; apk installs
-# from current and wrt-update upgrades to its image.
+# (board-model D10). The container gets the router's own programs read-only and
+# only that directory to write, and nothing it fetches is trusted: the release
+# becomes current only once its manifest's signature verifies with
+# /etc/opkg/keys, the manifest is of a build for the router's device and lists
+# its upgrade image and its indexes, these match it, and every index verifies
+# with /etc/apk/keys. The newest releases (wrt-sync.main.keep) stay; apk
+# installs from current and wrt-update upgrades to its image.
 set -eu
 # shellcheck source=../../../../wrt-data/files/lib/functions/wrt-data.sh
 . /lib/functions/wrt-data.sh
 
 REPO="${WRT_DATA}/repo"
 FETCH=/usr/libexec/wrt-sync/fetch
+MANIFEST=/usr/libexec/wrt-sync/manifest
 LOCK=/var/lock/wrt-sync.lock
 # The container's root: mount points only, for the router's programs.
 MOUNTS="bin lib usr/bin usr/lib usr/libexec/wrt-sync etc/ssl"
@@ -69,24 +70,24 @@ if [ ! -d "${release}" ]; then
 	for image in "${incoming}"/*-sysupgrade.tar.gz; do
 		[ -e "${image}" ] && mv "${image}" "${incoming}/targets/"
 	done
-	# The upgrade image and the indexes the manifest lists, each as signed.
-	ucode -e 'let m = json(readfile(ARGV[0])); for (let f, h in m.files) print(f, " ", h, "\n");' \
-		-- "${incoming}/manifest.json" |
-		while read -r file sum; do
-			case "${file}" in
-				targets/*-sysupgrade.tar.gz | */packages.adb) ;;
-				*) continue ;;
-			esac
-			actual=$(sha256sum "${incoming}/${file}" 2>/dev/null) || actual=
-			[ "${actual%% *}" = "${sum}" ] || die "${tag}: ${file} does not match the manifest"
-			case "${file}" in
-				*/packages.adb)
-					apk verify "${incoming}/${file}" >/dev/null ||
-						die "${tag}: ${file} is not signed by a trusted key"
-					;;
-				*) ;;
-			esac
-		done
+	# The upgrade image and every package index as the manifest lists them, and
+	# every index as signed. The loop reads a here-document, not a pipe, so that
+	# it runs in this shell: nothing it checks can fail unnoticed.
+	sums=$("${MANIFEST}" checksums "${incoming}/manifest.json" "${device}") ||
+		die "${tag}: manifest.json does not describe a release for ${device}"
+	while read -r sum file; do
+		actual=$(sha256sum "${incoming}/${file}" 2>/dev/null) || actual=
+		[ "${actual%% *}" = "${sum}" ] || die "${tag}: ${file} does not match the manifest"
+		case "${file}" in
+			*/packages.adb)
+				apk verify "${incoming}/${file}" >/dev/null ||
+					die "${tag}: ${file} is not signed by a trusted key"
+				;;
+			*) ;;
+		esac
+	done <<-EOF
+		${sums}
+	EOF
 	mv "${incoming}" "${release}"
 fi
 

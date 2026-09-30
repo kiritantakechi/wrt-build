@@ -1,0 +1,37 @@
+#!/usr/bin/ucode -S
+// manifest: what a release's signed manifest lists for the router
+// (r4s-release-pipeline D4, board-model D10).
+// Usage: manifest image|checksums <manifest.json> <device>
+// image prints the name of the upgrade image; checksums prints the checksums of
+// the upgrade image and of every package index, as sha256sum -c reads them.
+// Either fails unless the manifest is of a build for <device> and lists one
+// upgrade image and an index: neither another board's build nor a manifest that
+// lists nothing ever verifies.
+import { readfile } from 'fs';
+
+const IMAGE = /^targets\/([^\/]+-sysupgrade\.tar\.gz)$/;
+const INDEX = /\/packages\.adb$/;
+
+function fail(message) {
+	warn(`manifest: ${message}\n`);
+	exit(1);
+}
+
+let command = ARGV[0], path = ARGV[1], device = ARGV[2];
+if (!(command in [ 'image', 'checksums' ]) || length(ARGV) != 3)
+	fail('usage: manifest image|checksums <manifest.json> <device>');
+let text = readfile(path) ?? fail(`cannot read ${path}`);
+let manifest = json(text);
+if (manifest?.device != device)
+	fail(`${path} is of a build for ${manifest?.device ?? 'no device'}, not for ${device}`);
+let files = manifest.files ?? {};
+let images = filter(keys(files), (file) => match(file, IMAGE));
+let indexes = sort(filter(keys(files), (file) => match(file, INDEX)));
+if (length(images) != 1 || !length(indexes))
+	fail(`${path} does not list one upgrade image and a package index`);
+
+if (command == 'image')
+	print(match(images[0], IMAGE)[1], '\n');
+else
+	for (let file in [ ...images, ...indexes ])
+		print(`${files[file]}  ${file}\n`);
