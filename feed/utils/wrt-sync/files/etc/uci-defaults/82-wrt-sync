@@ -1,0 +1,13 @@
+#!/bin/sh
+# apk installs from the local repository of releases (r4s-release-pipeline D4):
+# the feeds the build listed now point into /mnt/data/repo/current. The list is
+# the image's own, so every new slot rewrites its list at its first boot. cron
+# syncs the repository once a day.
+sed -i -E \
+	-e 's#^[a-z]+://.*/targets/[^/]+/[^/]+/packages/packages\.adb$#/mnt/data/repo/current/targets/packages/packages.adb#' \
+	-e 's#^[a-z]+://.*/packages/([^/]+)/([^/]+)/packages\.adb$#/mnt/data/repo/current/packages/\1/\2/packages.adb#' \
+	/etc/apk/repositories.d/distfeeds.list
+touch /etc/crontabs/root
+grep -q wrt-sync /etc/crontabs/root || echo '43 4 * * * /usr/sbin/wrt-sync' >>/etc/crontabs/root
+/etc/init.d/cron enable
+exit 0

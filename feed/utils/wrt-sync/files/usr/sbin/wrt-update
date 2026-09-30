@@ -1,0 +1,20 @@
+#!/bin/sh
+# wrt-update: upgrade to the current release of the local repository
+# (r4s-release-pipeline D4).
+# Usage: wrt-update [sysupgrade option...]
+# sysupgrade writes the release's upgrade image to the inactive slot and boots it
+# on trial (r4s-ab-rollback); it refuses the image unless a trusted firmware key
+# signed it, and wrt-update never forces it.
+set -eu
+# shellcheck source=../../../../wrt-data/files/lib/functions/wrt-data.sh
+. /lib/functions/wrt-data.sh
+
+image=
+for found in "${WRT_DATA}"/repo/current/targets/*-sysupgrade.tar.gz; do
+	[ ! -f "${found}" ] || image=${found}
+done
+[ -n "${image}" ] || {
+	echo "wrt-update: no local release; run wrt-sync" >&2
+	exit 1
+}
+exec sysupgrade "$@" "${image}"

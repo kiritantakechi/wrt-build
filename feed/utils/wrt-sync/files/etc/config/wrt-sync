@@ -1,0 +1,8 @@
+# The Releases API wrt-sync asks (GitHub's, or a mirror of it), the repository
+# whose releases it keeps, the channel (stable, or candidate for pre-releases too)
+# and how many releases stay on the data disk.
+config wrt-sync 'main'
+	option api 'https://api.github.com'
+	option repository 'kiritantakechi/wrt-build'
+	option channel 'stable'
+	option keep '3'

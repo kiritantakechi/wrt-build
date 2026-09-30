@@ -1,0 +1,5 @@
+# The release pipeline on the device (r4s-release-pipeline D4): ucert checks the
+# signature of every upgrade image; wrt-sync keeps the local repository of
+# releases on the data disk, from which apk installs and wrt-update upgrades.
+CONFIG_PACKAGE_ucert=y
+CONFIG_PACKAGE_wrt-sync=y

@@ -1,0 +1,57 @@
+#!/bin/sh
+# fetch: download the newest release of a channel (runs in wrt-sync's container).
+# Usage: fetch <api> <repository> <stable|candidate> <releases> <incoming>
+# Prints the release's tag. A release already in <releases> is not downloaded
+# again; of a new one, what the router uses goes to <incoming>/<tag>, whose files
+# the host verifies: the signed manifest, the package repository and the upgrade
+# image (not the factory image, which only a first flash needs). Every request
+# is tried a few times: the first may leave before dae holds the bridge.
+set -eu
+
+api=$1
+repository=$2
+channel=$3
+releases=$4
+incoming=$5
+TRIES=5
+
+# get <url> <file>: fetch with retries.
+get() {
+	try=1
+	until uclient-fetch -q -T 30 -O "$2" "$1"; do
+		[ "${try}" -lt "${TRIES}" ] || return 1
+		try=$((try + 1))
+		sleep 3
+	done
+}
+
+case "${channel}" in
+	stable)
+		get "${api}/repos/${repository}/releases/latest" /tmp/release.json
+		release=@
+		;;
+	candidate)
+		get "${api}/repos/${repository}/releases?per_page=1" /tmp/release.json
+		release='@[0]'
+		;;
+	*)
+		echo "fetch: unknown channel ${channel}" >&2
+		exit 1
+		;;
+esac
+tag=$(jsonfilter -i /tmp/release.json -e "${release}.tag_name")
+[ -n "${tag}" ] || {
+	echo "fetch: no ${channel} release" >&2
+	exit 1
+}
+if [ ! -d "${releases}/${tag}" ]; then
+	mkdir -p "${incoming}/${tag}"
+	for url in $(jsonfilter -i /tmp/release.json -e "${release}.assets[*].browser_download_url"); do
+		case "${url##*/}" in
+			manifest.json | manifest.json.sig | repo.tar | *-sysupgrade.tar.gz) ;;
+			*) continue ;;
+		esac
+		get "${url}" "${incoming}/${tag}/${url##*/}"
+	done
+fi
+echo "${tag}"
