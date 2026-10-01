@@ -59,8 +59,12 @@ Only `sign` references secrets, the release keys of the `release-signing` enviro
 | 2026-10-01 | 36793323171 | firmware (r6s) job total | 214 min | Build: 205 min on an AMD EPYC 9V74; the new compiler left the old entries behind: 4,189 of 24,288 cacheable calls hit (17%) |
 | 2026-10-01 | 36793323171 | firmware (r4s) job total | 261 min | Build: 254 min, at the same hit rate |
 | 2026-10-01 | 36793323171 | system-test jobs | 19 to 118 min | R6S: network 19, services 24 and system 97 min passed; release (51 min) failed, as its image trusted the attended sysupgrade CA key (`config/ci.seed`). R4S: system (118 min) passed; network (31 min) failed, qosify lost pppoe-wan after a redial (`patches/openwrt/0010`); services (33 min) was cancelled by a runner shutdown; release (84 min) failed as the R6S's did |
+| 2026-10-01 | 36848242349 | host-toolchain job total | 84 min | The first run of main with patch 0009: the toolchain board-model's branch had built is not visible to main, so a cold rebuild |
+| 2026-10-01 | 36848242349 | firmware (r4s) job total | 214 min | Build: 208 min on an AMD EPYC 9V74. Main's download and compiler caches had been evicted while board-model's branch ran, so both started empty: 2,868 of 24,287 cacheable calls hit (12%), within the build. Rust's host toolchain, LLVM included, took 157 min of it, the last 47 with nothing else left to build |
+| 2026-10-01 | 36848242349 | firmware (r6s) job total | 284 min | Build: 280 min on an AMD EPYC 7763, from empty caches as well (12% hits). Rust's host toolchain took 211 min, the last 66 alone |
+| 2026-10-01 | 36848242349 | system-test jobs | 26 to 97 min | All passed. R4S: system 92 min (173 passed, 2 skipped), release 83, services 32, network 30. R6S: system 97 min (174 passed, 1 skipped), release 48, services 34, network 26. The first green run of both boards |
 
-The first full pipeline on a cold cache took about 3 hours 6 minutes; both build jobs are well within the 6-hour limit.
+From empty caches, run 36848242349 took 7 hours 47 minutes from the host toolchain to the last system test. Every firmware job compiles the Rust host toolchain from source, LLVM included, which the compiler cache does not cover, so a warm cache shortens it little: the firmware jobs took 3.5 to 4.75 hours depending on the runner's CPU, within their 330-minute limit and the 5-hour target.
 
 ### Compiler cache
 
@@ -81,5 +85,6 @@ The total cache quota for a GitHub repository is 10 GB.
 |---|---|---|---|---|---|
 | 2026-09-28 | 776 MiB | 1243 MiB | 1456 MiB | 45 MiB | 3521 MiB |
 | 2026-09-30 | 775 MiB | 1370 MiB per board, two boards | 2685 MiB | 45 MiB | 6245 MiB |
+| 2026-10-01 | 775 MiB | 1363 and 1358 MiB, each one build's worth | 2685 MiB | 45 MiB | 6226 MiB on main, after run 36848242349's `caches` job; the merged board-model branch still held 2756 MiB, the least recently used |
 
 Each run saves a new ccache per board (its key includes the run ID), and a new download cache or toolchain whenever their inputs change (a feed's Makefile, the toolchain's key). One set takes about 6.2 GB of the 10 GB with two boards. Beyond the quota GitHub evicts the least recently used cache, and the firmware jobs used to restore their toolchain first: on 2026-09-30 two download caches and four ccaches pushed out the toolchain the same run's second attempt needed. The firmware jobs now restore the toolchain last, so that a download cache or ccache the run supersedes goes before it, and the `caches` job keeps one set per ref, the current toolchain and the newest download cache and ccache of each board. At that usage the toolchain can stay in the cache, and there is no need to store it as a Release asset instead (the fallback in design D11).

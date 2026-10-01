@@ -107,7 +107,7 @@
 - [x] 5.3 Replace "SD card" with "boot disk" in the comments and docs of wrt-data, containers and monitoring, and make the monitoring test's thermal check board-neutral.
 
   Verify: the services/monitoring, services/containers and storage/data-disk tests pass on both boards.
-- [ ] 5.4 Keep qosify configured and on pppoe-wan however slowly the router comes up or redials: its init script configures the daemon whenever it comes up, waiting for as long as procd runs it (`patches/openwrt/0006`), and the daemon sets an interface up anew on a device replaced under the same name, as pppoe-wan is when a PPP session ends and another starts before the hotplug events are handled (`patches/openwrt/0010`).
+- [x] 5.4 Keep qosify configured and on pppoe-wan however slowly the router comes up or redials: its init script configures the daemon whenever it comes up, waiting for as long as procd runs it (`patches/openwrt/0006`), and the daemon sets an interface up anew on a device replaced under the same name, as pppoe-wan is when a PPP session ends and another starts before the hotplug events are handled (`patches/openwrt/0010`).
 
   Verify: with every CPU of the VM kept busy, restarts and redials leave einat and qosify on pppoe-wan round after round, and the network/tc-hook-order test "After restarting components" passes in CI on both boards.
 
@@ -158,7 +158,7 @@
 - [ ] 6.11 Keep the Actions caches within the 10 GB quota: a `caches` job after the firmware jobs keeps, of its ref's caches, the current toolchain and the newest download cache and compiler cache of each board. Each board's compiler cache holds what its build used (`WRT_CCACHE_TRIM`), and the firmware jobs restore the toolchain last, so that eviction takes a superseded cache before it.
 
   Verify: actionlint passes; after a CI run the ref holds one such set, each board's compiler cache about one build's worth, and a re-run of a firmware job still restores its toolchain.
-- [ ] 6.12 Keep buildbot mode's attended sysupgrade clients (owut, luci-app-attendedsysupgrade) out of the release build: they upgrade from OpenWrt's build servers, and attendedsysupgrade-common puts their CA key among the image's trust anchors (`config/ci.seed`).
+- [x] 6.12 Keep buildbot mode's attended sysupgrade clients (owut, luci-app-attendedsysupgrade) out of the release build: they upgrade from OpenWrt's build servers, and attendedsysupgrade-common puts their CA key among the image's trust anchors (`config/ci.seed`).
 
   Verify: the release/signing test "Check trust anchors in the image" passes in CI on both boards.
 
@@ -179,6 +179,6 @@
 - [x] 8.1 On the local VM, with room for the second board's build directories (`docs/dev-setup.md`): build both boards, and run the full suite in the emulator for each (`just test r4s dev`, `just test r6s dev`).
 
   Verify: all tests pass on both boards, and `spec-coverage --change board-model` reports no uncovered scenario.
-- [ ] 8.2 Get a green CI run: firmware and system tests for both boards, and drills where signing is enabled.
+- [x] 8.2 Get a green CI run: firmware and system tests for both boards, and drills where signing is enabled.
 
   Verify: record the run and its timings per board in `docs/ci.md`.
