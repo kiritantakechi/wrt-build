@@ -152,6 +152,7 @@
   - the router harness reopens an SSH connection the stalled emulator dropped, and retries a refused copy;
   - `Online.dial` waits until the LAN clients renewed their leases, and spaces the renewals;
   - the NAT tests send an unasked datagram again each second while the client listens, so that one lost on the emulated path fails no test (a datagram the NAT lets in or keeps out, it lets in or keeps out every time).
+  - the snapshot test sets the clock half a minute before the daily job, as cron runs a job only when its minute begins and a slow restart would miss it.
 
   Verify: the release suites and `network/test_nat.py` pass on both boards.
 - [ ] 6.11 Keep the Actions caches within the 10 GB quota: a `caches` job after the firmware jobs keeps, of its ref's caches, the current toolchain and the newest download cache and compiler cache of each board. Each board's compiler cache holds what its build used (`WRT_CCACHE_TRIM`), and the firmware jobs restore the toolchain last, so that eviction takes a superseded cache before it.

@@ -189,8 +189,10 @@ def test_expired_snapshots_are_pruned(pod: Online) -> None:
     days = [f"{date:%Y%m%d}" for date in dates]
     try:
         for date, day in zip(dates, days, strict=True):
-            # Just before the daily job (03:17); cron starts afresh at the new time.
-            router.run(f"date -u -s '{date} 03:16:58' >/dev/null && /etc/init.d/cron restart")
+            # Half a minute before the daily job (03:17). cron starts afresh at the
+            # new time and runs a job only when its minute begins, never late: a
+            # restart still running at 03:17:00 on a busy emulator would miss it.
+            router.run(f"date -u -s '{date} 03:16:30' >/dev/null && /etc/init.d/cron restart")
             until(
                 lambda d=day: d in _kept(router).get("shares", []),
                 timeout=CRON_TIMEOUT,
