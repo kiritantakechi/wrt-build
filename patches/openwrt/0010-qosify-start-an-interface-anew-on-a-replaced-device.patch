@@ -1,0 +1,131 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Thu, 1 Oct 2026 15:55:00 +0800
+Subject: [PATCH] qosify: start an interface anew on a replaced device
+
+When pppoe-wan goes away and comes back before qosify checks it, as when
+its PPP session ends and a new one starts while the hotplug events wait
+their turn, qosify takes the new device for the one it set up, and
+leaves it without shaping or classification.
+
+Carry the qosify patch that remembers the device an interface was set
+up on, and starts the interface anew on any other.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+---
+ package/network/config/qosify/Makefile        |  2 +-
+ ...-interface-anew-on-a-replaced-device.patch | 92 +++++++++++++++++++
+ 2 files changed, 93 insertions(+), 1 deletion(-)
+ create mode 100644 package/network/config/qosify/patches/100-interface-start-an-interface-anew-on-a-replaced-device.patch
+
+diff --git a/package/network/config/qosify/Makefile b/package/network/config/qosify/Makefile
+index 68e234a..0fd4095 100644
+--- a/package/network/config/qosify/Makefile
++++ b/package/network/config/qosify/Makefile
+@@ -14,7 +14,7 @@ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_DATE:=2026-06-22
+ PKG_SOURCE_VERSION:=beeb87ec1f16aaf5d99ff8060c2455971d9d400e
+ PKG_MIRROR_HASH:=c9ef0ad68daedb7e18e4959884a40cc0c64849dbd17bf6fdadeed8bdd8d49358
+-PKG_RELEASE:=2
++PKG_RELEASE:=3
+ 
+ PKG_LICENSE:=GPL-2.0
+ PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
+diff --git a/package/network/config/qosify/patches/100-interface-start-an-interface-anew-on-a-replaced-device.patch b/package/network/config/qosify/patches/100-interface-start-an-interface-anew-on-a-replaced-device.patch
+new file mode 100644
+index 0000000..a544b9b
+--- /dev/null
++++ b/package/network/config/qosify/patches/100-interface-start-an-interface-anew-on-a-replaced-device.patch
+@@ -0,0 +1,92 @@
++From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
++From: kiritantakechi <kiritantakechi@gmail.com>
++Date: Thu, 1 Oct 2026 15:50:00 +0800
++Subject: [PATCH] interface: start an interface anew on a replaced device
++
++When the device of an interface goes away and comes back under the same
++name before qosify checks it, as pppoe-wan does when its PPP session
++ends and a new one starts while the hotplug events wait their turn,
++qosify finds the interface up on a device of that name and leaves it
++be. The new device carries none of the setup, and nothing is shaped or
++classified until the interface goes down again.
++
++Remember the index of the device an interface was set up on, and start
++the interface anew when its device has another name or another index.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++ interface.c | 32 +++++++++++++++++++++++++-------
++ 1 file changed, 25 insertions(+), 7 deletions(-)
++
++diff --git a/interface.c b/interface.c
++index 837cb95..033154a 100644
++--- a/interface.c
+++++ b/interface.c
++@@ -59,6 +59,7 @@ struct qosify_iface {
++ 	struct vlist_node node;
++ 
++ 	char ifname[IFNAMSIZ];
+++	unsigned int ifindex;
++ 	bool active;
++ 
++ 	bool device;
++@@ -385,6 +386,9 @@ interface_start(struct qosify_iface *iface)
++ 
++ 	ULOG_INFO("start interface %s\n", iface->ifname);
++ 
+++	/* The device the setup below goes to, as interface_set_device checks. */
+++	iface->ifindex = if_nametoindex(iface->ifname);
+++
++ 	strncpy(ifr.ifr_name, iface->ifname, sizeof(ifr.ifr_name));
++ 	if (ioctl(socket_fd, SIOCGIFHWADDR, &ifr) < 0) {
++ 		ULOG_ERR("ioctl(SIOCGIFHWADDR, %s) failed: %s\n", iface->ifname, strerror(errno));
++@@ -492,19 +496,34 @@ void qosify_iface_config_update(struct blob_attr *ifaces, struct blob_attr *devs
++ 	vlist_flush(&interfaces);
++ }
++ 
+++/*
+++ * Set up iface on device ifname. Start it anew if it is set up on another
+++ * device, or on one that has gone and come back under the same name, as a PPP
+++ * device does when its session ends and starts again: the new device holds
+++ * nothing of the setup, however soon it appeared.
+++ */
+++static void
+++interface_set_device(struct qosify_iface *iface, const char *ifname)
+++{
+++	if (iface->active &&
+++	    (strcmp(iface->ifname, ifname) != 0 ||
+++	     if_nametoindex(ifname) != iface->ifindex))
+++		interface_stop(iface);
+++
+++	snprintf(iface->ifname, sizeof(iface->ifname), "%s", ifname);
+++	interface_start(iface);
+++}
+++
++ static void
++ qosify_iface_check_device(struct qosify_iface *iface)
++ {
++ 	const char *name = qosify_iface_name(iface);
++-	int ifindex;
++ 
++-	ifindex = if_nametoindex(name);
++-	if (!ifindex) {
+++	if (!if_nametoindex(name)) {
++ 		interface_stop(iface);
++ 		iface->ifname[0] = 0;
++ 	} else {
++-		snprintf(iface->ifname, sizeof(iface->ifname), "%s", name);
++-		interface_start(iface);
+++		interface_set_device(iface, name);
++ 	}
++ }
++ 
++@@ -515,8 +534,7 @@ qosify_iface_check_interface(struct qosify_iface *iface)
++ 	char ifname[IFNAMSIZ];
++ 
++ 	if (qosify_ubus_check_interface(name, ifname, sizeof(ifname)) == 0) {
++-		snprintf(iface->ifname, sizeof(iface->ifname), "%s", ifname);
++-		interface_start(iface);
+++		interface_set_device(iface, ifname);
++ 	} else {
++ 		interface_stop(iface);
++ 		iface->ifname[0] = 0;

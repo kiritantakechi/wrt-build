@@ -7,14 +7,16 @@ service_running waited 10 seconds for the daemon's ubus object and, if
 it had not appeared by then, left qosify unconfigured until the next
 reload: no shaping and no classification, with only a "Request timed
 out" in the log. The daemon registers once its BPF programs are loaded,
-which on a busy boot can take longer than that.
+which on a busy boot can take far longer than that.
 
-Wait up to two minutes instead, in the background, so that the boot
-does not wait along.
+Wait in the background instead, so that the boot does not wait along,
+and for as long as procd runs the daemon; then configure it.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 ---
- package/network/config/qosify/Makefile          | 2 +-
- package/network/config/qosify/files/qosify.init | 6 ++++--
- 2 files changed, 5 insertions(+), 3 deletions(-)
+ package/network/config/qosify/Makefile          |  2 +-
+ package/network/config/qosify/files/qosify.init | 11 +++++++++--
+ 2 files changed, 10 insertions(+), 3 deletions(-)
 
 diff --git a/package/network/config/qosify/Makefile b/package/network/config/qosify/Makefile
 index 31a69b3..68e234a 100644
@@ -30,17 +32,22 @@ index 31a69b3..68e234a 100644
  PKG_LICENSE:=GPL-2.0
  PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
 diff --git a/package/network/config/qosify/files/qosify.init b/package/network/config/qosify/files/qosify.init
-index 8c1ca7d..74a8ac4 100644
+index 8c1ca7d..8de8577 100644
 --- a/package/network/config/qosify/files/qosify.init
 +++ b/package/network/config/qosify/files/qosify.init
-@@ -166,6 +166,8 @@ start_service() {
+@@ -166,6 +166,13 @@ start_service() {
  }
  
  service_running() {
 -	ubus -t 10 wait_for qosify
 -	[ $? = 0 ] && reload_service
 +	# The daemon appears on ubus once its BPF programs are loaded, which can
-+	# take longer than a few seconds on a busy boot. Configure it whenever it
-+	# is up, without holding up the boot meanwhile.
-+	( ubus -t 120 wait_for qosify && reload_service ) >/dev/null 2>&1 &
++	# take minutes on a busy boot. Configure it once it is up, without holding
++	# up the boot meanwhile, as long as procd runs it.
++	(
++		until ubus -t 30 wait_for qosify; do
++			procd_running qosify || exit 0
++		done
++		reload_service
++	) >/dev/null 2>&1 &
  }

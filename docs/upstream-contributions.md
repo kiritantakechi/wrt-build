@@ -13,6 +13,7 @@ Any PR, issue or push to a repository the maintainer does not own requires expli
 | 7 | openwrt/packages | `patches/packages/0001-ksmbd-tools-share-only-what-is-mounted-and-start-onc.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
 | 8 | openwrt/openwrt | `patches/openwrt/0008-ubox-log-to-a-file-only-while-its-mount-point-is-mou.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
 | 9 | openwrt/openwrt | `patches/openwrt/0009-toolchain-check-the-version-stamp-without-a-race.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
+| 10 | git.openwrt.org/project/qosify | `patches/openwrt/0010-qosify-start-an-interface-anew-on-a-replaced-device.patch` (adds the package patch `100-interface-start-an-interface-anew-on-a-replaced-device.patch`) | Carried in the patch series; not submitted (awaiting approval) | — |
 
 ## 1. EROFS compression algorithm
 
@@ -56,9 +57,9 @@ Verification log: 2026-09-29, the patch applies to einat-ebpf 0.1.11 (`ba647ce`)
 
 Problem: qosify's init script waits 10 seconds for the daemon's ubus object and, if it has not appeared by then, gives up on configuring it: no shaping and no classification until the next reload, with only "Command failed: Request timed out" in the log. The daemon registers once its BPF programs are loaded, which on a busy boot takes longer; the emulator hit it on every boot.
 
-What the patch does: `service_running` waits up to two minutes, in the background, and configures the daemon when it appears, so the boot does not wait along. `PKG_RELEASE` goes to 2.
+What the patch does: `service_running` waits in the background, so the boot does not wait along, for as long as procd runs the daemon, and configures it once it appears. A first version waited two minutes; with every CPU of the test VM kept busy the daemon took longer, and stayed unconfigured. `PKG_RELEASE` goes to 2.
 
-Verification log: 2026-09-29, in the emulator qosify now attaches cake and its classifiers to pppoe-wan at boot (`tests/network/test_qos.py`, `test_tc_hook_order.py`).
+Verification log: 2026-09-29, in the emulator qosify now attaches cake and its classifiers to pppoe-wan at boot (`tests/network/test_qos.py`, `test_tc_hook_order.py`). 2026-10-01, with every CPU of the VM kept busy, the daemon took up to three minutes to come up after a restart, and was configured every time, over eight rounds of restarts and redials.
 
 ## 6. rockchip: IRQ affinity for every net device
 
@@ -97,3 +98,13 @@ Why it matters here: the release profile builds in buildbot mode, on a toolchain
 What the patch does: the version is kept in a shell variable instead of `tmp/.ver_check`, so concurrent checks share no file. A stamp of another version still deletes the toolchain and the build and staging directories, as before, and a failing git still stops the build.
 
 Verification log: 2026-10-01, eight makes started a millisecond apart delete the toolchain in 38 of 40 rounds with the upstream check and in none with the patch; `tests/build/test_boards.py` ("Check the version from parallel makes") runs the patched check this way.
+
+## 10. qosify: an interface on a replaced device
+
+Problem: qosify sets an interface up on its device once, and takes it as set up for as long as it finds the interface up on a device of that name. pppoe-wan is a new device for every PPP session. When one session ends and the next starts before qosify handles the hotplug events (they run one after another, and a busy router runs them late), qosify finds the interface up on "pppoe-wan" again and leaves it be: the new device has neither the cake qdisc nor the classifiers, and nothing is shaped or classified until the interface goes down again.
+
+Why it matters here: the emulator hit it after a redial, in CI (run 36793323171) and locally with every CPU of the VM kept busy, where `ubus call qosify status` showed `wan` active on pppoe-wan while the device carried only its default qdisc.
+
+What the patch does: a package patch for qosify remembers the index of the device an interface was set up on, and starts the interface anew when its device has another name or another index. Upstream, it belongs to the qosify repository rather than to openwrt.git; the OpenWrt patch carries it until then. `PKG_RELEASE` goes to 3.
+
+Verification log: 2026-10-01, with every CPU of the VM kept busy, the second redial without the patch left pppoe-wan without qosify; with it, eight rounds of restarts and redials left einat and qosify on pppoe-wan every time, 14 to 28 s after the session came up.
