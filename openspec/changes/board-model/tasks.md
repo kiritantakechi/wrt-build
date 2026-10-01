@@ -155,7 +155,7 @@
   - the snapshot test sets the clock half a minute before the daily job, as cron runs a job only when its minute begins and a slow restart would miss it.
 
   Verify: the release suites and `network/test_nat.py` pass on both boards.
-- [ ] 6.11 Keep the Actions caches within the 10 GB quota: a `caches` job after the firmware jobs keeps, of its ref's caches, the current toolchain and the newest download cache and compiler cache of each board. Each board's compiler cache holds what its build used (`WRT_CCACHE_TRIM`), and the firmware jobs restore the toolchain last, so that eviction takes a superseded cache before it.
+- [x] 6.11 Keep the Actions caches within the 10 GB quota: a `caches` job after the firmware jobs keeps, of its ref's caches, the current toolchain and the newest download cache and compiler cache of each board. Each board's compiler cache holds what its build used (`WRT_CCACHE_TRIM`), and the firmware jobs restore the toolchain last, so that eviction takes a superseded cache before it.
 
   Verify: actionlint passes; after a CI run the ref holds one such set, each board's compiler cache about one build's worth, and a re-run of a firmware job still restores its toolchain.
 - [x] 6.12 Keep buildbot mode's attended sysupgrade clients (owut, luci-app-attendedsysupgrade) out of the release build: they upgrade from OpenWrt's build servers, and attendedsysupgrade-common puts their CA key among the image's trust anchors (`config/ci.seed`).
