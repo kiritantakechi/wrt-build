@@ -174,7 +174,7 @@ config/profiles
 **Known actions.**
 - Drop 0002: the A/B images pass the option through `wrt-ab.env`, and `test_overlay_is_compressed_f2fs` guards the result.
 - Re-derive BBRv3 from its primary source: the google/bbr v3 branch, as Oleksandr Natalenko rebases it onto 6.18. The current series is then compared against it, and the differences are explained or removed. Its trailer names the source, `Backport [google/bbr v3, rebased for 6.18]`, and its message the comparison.
-- Review every other carried patch against the current pins: the series from 0003 on (`build-acceleration`'s 0011 included), the packages patches, einat's patch, QEMU's patch, and the two prepared upstream patches.
+- Review every other carried patch against the current pins: the series from 0003 on (`build-acceleration`'s 0011 and 0012 included), the packages patches, einat's patch, QEMU's patch, and the two prepared upstream patches.
 
 **Numbers are identities.** A patch keeps its number for good. A dropped patch leaves its number unused, and no patch is renumbered, so a number in a message, a document or a test always means the same patch. A new patch takes the next free number.
 

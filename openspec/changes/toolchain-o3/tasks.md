@@ -95,7 +95,7 @@
 - [ ] 5.2 Re-derive BBRv3 from its primary source: the google/bbr v3 branch as Oleksandr Natalenko rebases it onto 6.18. Compare it with the current series, and explain or remove every difference. Its trailer names the source (`Backport [...]`), and its message the comparison.
 
   Verify: the kernel builds on both boards, and the firmware/kernel scenario "BBRv3 as default congestion control" passes on both.
-- [ ] 5.3 Review every other patch against the current pins: the series from 0003 on (`build-acceleration`'s 0011 included), the packages patches, einat's patch, QEMU's patch, and the two prepared upstream patches. For each, check:
+- [ ] 5.3 Review every other patch against the current pins: the series from 0003 on (`build-acceleration`'s 0011 and 0012 included), the packages patches, einat's patch, QEMU's patch, and the two prepared upstream patches. For each, check:
   - still needed (not upstream, not dead);
   - minimal and correct;
   - its message accurate and current, with `Signed-off-by`;
