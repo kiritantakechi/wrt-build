@@ -15,7 +15,7 @@ CI SHALL split the build into two stages. The host stage SHALL build, once for e
 
 ### Requirement: Cache keyed on actual inputs
 The host stage's cache key SHALL be determined only by the inputs that affect what it builds:
-- the contents, as patched, of the tools and toolchain directories of the openwrt repository and of the Go and Rust directories of the packages feed;
+- the contents, as patched, of the tools and toolchain directories of the openwrt repository, of its build files that name the host packages' stamps, and of the Go and Rust directories of the packages feed;
 - the board-neutral configuration;
 - the build environment;
 - the scripts that build and pack the stage.
@@ -27,7 +27,7 @@ Every stage SHALL keep a compiler cache for each language it compiles: C and C++
 - **THEN** the host stage's cache still hits
 
 #### Scenario: Toolchain inputs change
-- **WHEN** the tools or toolchain directories of the openwrt repository, or the Go or Rust directories of the packages feed, change
+- **WHEN** the tools or toolchain directories of the openwrt repository, its build files that name the host packages' stamps, or the Go or Rust directories of the packages feed, change
 - **THEN** the host stage's cache is invalidated and rebuilt
 
 #### Scenario: Rebuild from warm compiler caches

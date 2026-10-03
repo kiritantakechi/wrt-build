@@ -46,7 +46,7 @@
 
 ## 3. Every toolchain in the host stage (design D2, D3, D7)
 
-- [ ] 3.1 Add `patches/packages/0002` for the feed's Rust recipe:
+- [x] 3.1 Add `patches/packages/0002` for the feed's Rust recipe:
   - it builds in `build_dir/hostpkg` and installs into `staging_dir/hostpkg`, its uninstall script included;
   - `llvm.targets` holds only the host's and the target's backends, and `llvm.experimental-targets` is empty;
   - with `CONFIG_CCACHE`, `build.ccache` is set (Rust moved it there from `llvm.ccache`);
@@ -54,7 +54,7 @@
 
   If Rust's bootstrap fails, or ignores sccache as `RUSTC_WRAPPER`, the patch drops the wrapper from Rust's own build (design, risks).
 
-  Verify: `staging_dir/hostpkg/bin/rustc -vV` runs, and `staging_dir/hostpkg/lib/rustlib/aarch64-unknown-linux-musl` exists. LLVM's CMake cache in the build directory lists the two backends. The host report shows Rust's stages.
+  Verify: `staging_dir/hostpkg/bin/rustc -vV` runs, and `staging_dir/hostpkg/lib/rustlib/aarch64-unknown-linux-musl` exists. LLVM's CMake cache in the build directory lists the host's and the target's backends (one, AArch64, where both are aarch64). The host report shows Rust's stages.
 - [ ] 3.2 Make `scripts/toolchain-build.sh` build the Go and Rust host toolchains after the tools and the cross toolchain. Its record, `wrt-toolchain.json`, gains the hash of the Rust standard library for the target, and is written as soon as the cross toolchain is built, so a failed Go or Rust build keeps it. The toolchains are built anew when the configuration's flags differ from the recorded ones, or a library differs from its record, as the C library already is. Add the build/environment scenario "Change the compiler flags" to `tests/verified-elsewhere.toml`.
 
   Verify:
@@ -111,7 +111,7 @@
 
 ## 5. CI (design D8)
 
-- [ ] 5.1 Update `.github/workflows/build.yml`:
+- [x] 5.1 Update `.github/workflows/build.yml`:
   - the host-toolchain job, on a miss, restores the download cache without saving it, restores `compiler-cache-host-…`, builds, trims, packs, and saves the archive and its compiler cache;
   - the firmware jobs use `compiler-cache-<board>-…` with `WRT_COMPILER_CACHE_TRIM`, and restore the archive last;
   - the `caches` job keeps the newest compiler cache of each stage and deletes the old `ccache-…` family;

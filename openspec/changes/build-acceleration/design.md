@@ -82,7 +82,7 @@ Upstream's own instrument already records every stage of every package, with end
 
   The patch is project-specific: upstream builds one tree for targets of several architectures, whose host toolchains cannot share a directory. It says so in its trailer, `Upstream-Status: Inappropriate [every board of this tree shares one architecture]`.
 - **The archive** gains `staging_dir/hostpkg` and the stamps of `build_dir/hostpkg`: the empty dot files `.prepared*`, `.configured` and `.built*`. Rust's 21 GB build tree stays out. `toolchain-unpack` touches the stamps with the rest.
-- **The key.** It already hashes the feed's `lang/golang` and `lang/rust` as patched, because `toolchain-key` runs after `patch`. It now hashes what the archive really holds. The changed recipe scripts make the first run a cold one.
+- **The key.** It already hashes the feed's `lang/golang` and `lang/rust` as patched, because `toolchain-key` runs after `patch`. It now hashes what the archive really holds, and the build files that name the stamps of `build_dir/hostpkg` it carries: `include/depends.mk`, `include/host-build.mk` and `rules.mk`. Without them, a change to how a prepared stamp is named would leave the restored stamps stale, and every firmware job would compile Rust for hours before its guard fails. The changed recipe scripts make the first run a cold one.
 
 Alternatives considered:
 - **Rust cached per board in the firmware jobs**: still one Rust build per board, two caches instead of one, and the same stamp problem (D4).

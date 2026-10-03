@@ -14,6 +14,7 @@ Any PR, issue or push to a repository the maintainer does not own requires expli
 | 8 | openwrt/openwrt | `patches/openwrt/0008-ubox-log-to-a-file-only-while-its-mount-point-is-mou.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
 | 9 | openwrt/openwrt | `patches/openwrt/0009-toolchain-check-the-version-stamp-without-a-race.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
 | 10 | git.openwrt.org/project/qosify | `patches/openwrt/0010-qosify-start-an-interface-anew-on-a-replaced-device.patch` (adds the package patch `100-interface-start-an-interface-anew-on-a-replaced-device.patch`) | Carried in the patch series; not submitted (awaiting approval) | — |
+| 11 | openwrt/openwrt | `patches/openwrt/0011-build-name-prepared-stamps-after-content-and-the-tar.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
 
 ## 1. EROFS compression algorithm
 
@@ -108,3 +109,11 @@ Why it matters here: the emulator hit it after a redial, in CI (run 36793323171)
 What the patch does: a package patch for qosify remembers the index of the device an interface was set up on, and starts the interface anew when its device has another name or another index. Upstream, it belongs to the qosify repository rather than to openwrt.git; the OpenWrt patch carries it until then. `PKG_RELEASE` goes to 3.
 
 Verification log: 2026-10-01, with every CPU of the VM kept busy, the second redial without the patch left pppoe-wan without qosify; with it, eight rounds of restarts and redials left einat and qosify on pppoe-wan every time, 14 to 28 s after the session came up.
+
+## 11. build: stamps that hold across checkouts and follow the flags
+
+Problem: the prepared stamps of packages and of the kernel are named after a hash of their files, which covers the files' modification times unless `CONFIG_AUTOREMOVE` is set. A checkout that gives a file a new time and the same content makes its stamps stale: a build made in one checkout never holds in another, and re-applying a patch series prepares the kernel and every patched package again. And no stamp names the flags the packages are compiled with: changing `CONFIG_TARGET_OPTIMIZATION` or `CONFIG_EXTRA_OPTIMIZATION` rebuilds nothing, and every package keeps its objects of the old flags.
+
+Why it matters here: `just patch` applied the series anew before every build, so a build with nothing changed took 28 minutes, 13.5 of them preparing and compiling the kernel again (`docs/dev-setup.md`). And toolchain-o3 changes the target's flags, which the packages of a tree's earlier builds would otherwise keep.
+
+What the patch does: the prepared stamps of packages (`PKG_FILES_MD5`) and of the kernel always hash content, as `CONFIG_AUTOREMOVE` builds already do; `rdep` still compares modification times, so an edit, or a touch to force a rebuild, still rebuilds. Each target package's prepared stamp also hashes the symbols `TARGET_CFLAGS` is made of (`TARGET_FLAGS_DEPENDS` in `rules.mk`), so a package prepared with other flags is prepared, and so built, anew. A configured stamp would not do: configuring again keeps the build directory, and with it most of a package's objects. The kernel needs no such stamp, as Kbuild compares every object's command line.

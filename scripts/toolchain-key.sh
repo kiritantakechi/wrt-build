@@ -20,6 +20,10 @@ ensure_fhs build "$@"
 arch=$(uname -m)
 trees=$(git -C "${TREE}" rev-parse HEAD:tools HEAD:toolchain)
 langs=$(git -C "${TREE}/feeds/packages" rev-parse HEAD:lang/golang HEAD:lang/rust)
+# The build files that name the stamps of the Go and Rust host builds, which the
+# archive carries (build_dir/hostpkg): a prepared stamp hashes the package's
+# files and configuration as these define it (build-acceleration D2).
+stamps=$(git -C "${TREE}" rev-parse HEAD:include/depends.mk HEAD:include/host-build.mk HEAD:rules.mk)
 # The board-neutral configuration of the profile, as toolchain-build.sh composes
 # it: every seed of the profile and every board's device (board-model D2).
 configuration=$(mktemp)
@@ -33,5 +37,5 @@ environment=${WRT_BUILD_INPUTS##*/}
 # The scripts that build and pack the archive decide what it holds.
 recipe=$(cat "${REPO_DIR}"/scripts/toolchain-build.sh "${REPO_DIR}"/scripts/toolchain-pack.sh | sha256sum)
 
-digest=$(printf '%s\n' "${arch}" "${trees}" "${langs}" "${seed}" "${environment}" "${recipe}" | sha256sum)
+digest=$(printf '%s\n' "${arch}" "${trees}" "${langs}" "${stamps}" "${seed}" "${environment}" "${recipe}" | sha256sum)
 printf 'key=toolchain-%s\n' "${digest%% *}"

@@ -1,4 +1,4 @@
-"""The helpers of scripts/lib.sh: the configuration's guard, the cache trim and the record."""
+"""The helpers of scripts/lib.sh: the configuration's guard, the cache trim and the toolchain's."""
 
 import hashlib
 import os
@@ -98,3 +98,38 @@ def test_an_uninstalled_rust_has_no_standard_library(tmp_path: Path) -> None:
     (lib / "libstd.rlib").write_bytes(b"std")
     listing = f"{hashlib.sha256(b'std').hexdigest()}  ./{target}/lib/libstd.rlib\n"
     assert _rust_std(tmp_path) == hashlib.sha256(listing.encode()).hexdigest()
+
+
+def test_toolchain_stages_name_what_only_toolchain_build_builds(tmp_path: Path) -> None:
+    # A board's time log: what tools/, toolchain/ or the Go and Rust host
+    # toolchains ran is named once per stage; the board's own packages are not.
+    log = tmp_path / "build-time-r4s.tsv"
+    log.write_text(
+        "".join(
+            f"{time}\t{event}\t{stage}\t{name}\n"
+            for time, event, stage, name in (
+                (1, "begin", "prepare", "tools/flock"),
+                (2, "end", "prepare", "tools/flock"),
+                (3, "begin", "compile", "toolchain/gcc/final"),
+                (4, "begin", "compile", "package/feeds/packages/golang1.27"),
+                (5, "begin", "compile", "package/feeds/packages/rust"),
+                (6, "begin", "compile", "package/feeds/packages/rust"),
+                (7, "begin", "compile", "package/feeds/packages/dae"),
+                (8, "begin", "compile", "package/feeds/packages/golang-protobuf"),
+                (9, "begin", "compile", "package/feeds/wrt/einat"),
+                (10, "begin", "compile", "target/linux"),
+            )
+        )
+    )
+    result = subprocess.run(
+        ["sh", "-c", f'. "{LIB}" && toolchain_stages "$1"', "sh", str(log)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.splitlines() == [
+        "package/feeds/packages/golang1.27 [compile]",
+        "package/feeds/packages/rust [compile]",
+        "toolchain/gcc/final [compile]",
+        "tools/flock [prepare]",
+    ]
