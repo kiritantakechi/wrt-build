@@ -264,6 +264,16 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
+      # The router's serial console over the whole run: what it did while a
+      # failing test waited, which the report cannot show.
+      - name: Console log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: system-test-console-${{ matrix.board }}-${{ matrix.suite.name }}
+          path: ${{ env.WRT_WORKDIR }}/test/${{ matrix.board }}/emulator*/console.log
+          if-no-files-found: ignore
+
   # The keys exist only in the release-signing environment, whose reviewers
   # approve every run; this job runs nothing but the pinned signing tools on
   # what the firmware jobs built, every board's build in one approval. Main and
@@ -358,6 +368,14 @@ jobs:
           path: tests/.reports
           include-hidden-files: true
           if-no-files-found: error
+
+      - name: Console log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: drill-console-${{ matrix.board }}
+          path: ${{ env.WRT_WORKDIR }}/test/${{ matrix.board }}/emulator*/console.log
+          if-no-files-found: ignore
 
   # The check main's rules require (board-model D9), under the name it always
   # had: a matrix reports each board's drill on its own. It fails unless the

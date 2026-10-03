@@ -50,6 +50,9 @@ CUT = 1 << 20
 # The byte a tampered image has changed.
 TAMPERED = 1 << 20
 SYNC_TIMEOUT = 900
+# What the router logged around a failed sync: the container's fetch goes through
+# podman's network and dae, either of which can refuse it (EPERM).
+SYNC_LOG = "logread | grep -E 'wrt-sync|podman|netavark|dae' | tail -n 40"
 
 
 @dataclass
@@ -79,11 +82,17 @@ class Releases:
         )
 
     def sync(self, *options: str) -> tuple[bool, str]:
-        """Run wrt-sync; return whether it succeeded and what it said."""
+        """Run wrt-sync; return whether it succeeded and what it said.
+
+        A failed sync's text ends with what the router logged around it.
+        """
         output = self.router.run(
             f"wrt-sync {' '.join(options)} 2>&1; echo $?", timeout=SYNC_TIMEOUT
         ).splitlines()
-        return output[-1] == "0", "\n".join(output[:-1])
+        ok, said = output[-1] == "0", "\n".join(output[:-1])
+        if not ok:
+            said += f"\n--- the router's log ---\n{self.router.run(SYNC_LOG)}"
+        return ok, said
 
     def current(self) -> str | None:
         """Return the tag of the current release, or None."""

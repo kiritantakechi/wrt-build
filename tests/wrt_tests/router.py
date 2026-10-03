@@ -40,6 +40,10 @@ SSH_FAILED = 255
 # How long a new connection is tried: the emulator stops answering while the
 # disk it runs from catches up with a burst of writes.
 RECONNECT_TIMEOUT = 60.0
+# How long an interactive login may take: zsh's first start after a boot builds
+# its completion dump in /tmp, 21 to 26 s under TCG on an idle host and several
+# times that on a busy one (2026-10-03); later logins take 7 to 9 s.
+LOGIN_TIMEOUT = 180.0
 
 
 class Router:
@@ -114,7 +118,7 @@ class Router:
     def _ssh(self, *options: str) -> list[str]:
         return ["ssh", *options, "-o", "BatchMode=yes", "-i", str(self.key), f"root@{self.address}"]
 
-    def login(self, script: str, *, timeout: float = 60) -> str:
+    def login(self, script: str, *, timeout: float = LOGIN_TIMEOUT) -> str:
         """Log in interactively (with a terminal) and type ``script``; return the session output.
 
         This is a real login shell, unlike run(), so /etc/profile and the zsh
