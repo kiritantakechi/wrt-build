@@ -2,7 +2,7 @@
 
 ## 1. Trust anchors in `/etc/usign/keys` (design D5)
 
-- [ ] 1.1 Patch base-files' `fwtool.sh`: it reads `/etc/usign/keys`, or `/etc/opkg/keys` when the new directory does not exist. Register the patch in `docs/patches.md`.
+- [ ] 1.1 Patch base-files' `fwtool.sh`: it reads `/etc/usign/keys`, or `/etc/opkg/keys` when the new directory does not exist. The patch takes the next free number, its trailer says `Upstream-Status: Pending`, and its write-up goes into `docs/patches.md`.
 
   Verify: `just patch` applies it. The firmware/ab-upgrade tests pass on both boards: a signed upgrade is taken, and an unsigned one is refused.
 - [ ] 1.2 Move every other user of the directory to `/etc/usign/keys`:
@@ -48,9 +48,9 @@
   - ingress shaping redirects with `bpf_redirect()` to the interface's ifb, whose index the daemon keeps in a map entry per interface;
   - patch 0010's re-attach on a replaced device carries over to the links.
 
-  Carry the patch in the series and register it in `docs/patches.md`.
+  Carry the patch in the series under the next free number, with the trailer `Upstream-Status: Inappropriate [needs a clsact fallback for kernels without tcx]`.
 
-  Verify: qosify builds for both boards, with no UB-indicative warning (toolchain-o3's register).
+  Verify: qosify builds for both boards, with no UB-indicative warning that `tests/reviewed-warnings.toml` does not review, and `tests/build/test_patches.py` passes.
 - [ ] 4.2 Update and add the tests:
   - network/tc-hook-order "Check the WAN port": tcx ingress and egress hold einat's program, then qosify's, and no legacy filter;
   - "After restarting components" stays as it is;

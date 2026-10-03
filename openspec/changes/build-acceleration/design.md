@@ -21,6 +21,9 @@ Locally, the no-change build re-extracted the R6S kernel, compiled `vmlinux` aga
 - A package's prepared stamp is named after a hash of its directory's files (`PKG_FILES_MD5`, `include/depends.mk`), and the kernel's after its patches and files (`include/kernel-build.mk`).
 - Without `CONFIG_AUTOREMOVE`, which neither profile sets, that hash covers each file's path and modification time (`find_md5`). Only with it does the hash cover content (`find_md5_reproducible`).
 - Separately, `rdep` rebuilds a step when any of its files is newer than its stamp.
+- A package's configured stamp is named after the values of the package's own configuration symbols (`PKG_CONFIG_DEPENDS`, `include/package.mk`). The target's compiler flags (`CONFIG_TARGET_OPTIMIZATION`, `CONFIG_EXTRA_OPTIMIZATION`) are in none of them, so changing a flag rebuilds no package.
+- The kernel is different: OpenWrt runs Kbuild on every build (its `.modules` and `.image` targets depend on `FORCE`), and Kbuild recompiles every object whose command line changed.
+- `toolchain-build.sh` builds the toolchain anew only when its C library is not the one its record names, never because the recorded flags differ.
 - Tools and the cross toolchain are also guarded by top-level stamps under `staging_dir`, which `toolchain-unpack` touches. So make never descends into them, and a firmware job keeps the restored ones. Host packages such as Go and Rust have no such stamp: make checks each one's own stamps, and a fresh checkout changes their names.
 
 **Where the host toolchains live.**
@@ -60,7 +63,7 @@ Locally, the no-change build re-extracted the R6S kernel, compiled `vmlinux` aga
 
 ### D1. Measure with OpenWrt's build time log
 
-- **Recording**: `toolchain-build.sh` and `build.sh` export `BUILD_TIME_LOG=$TREE/logs/build-time-<stage>.tsv`, where the stage is `host` or the board, emptied at the start of the build.
+- **Recording**: `toolchain-build.sh` and `build.sh` export `BUILD_TIME_LOG=$TREE/logs/build-time-<build>.tsv`, emptied at the start of the build. The build is `host`, or the build directories' suffix (`CONFIG_BUILD_SUFFIX`): the board, or a board and a profile with directories of its own, such as `toolchain-o3`'s `r4s_ubsan`. Each build keeps its own record, as it keeps its own directories.
 - **Report**: after make, they print `scripts/build-time-report.pl -n 15` of it.
 - **Where it shows**:
   - CI shows the report in the job log.
@@ -76,6 +79,8 @@ Upstream's own instrument already records every stage of every package, with end
   - every board compiles for the same Rust target;
   - the standard library's C parts compile with the host stage's board-neutral flags, as the C library does;
   - package builds find `cargo` and `rustc` on their `PATH` either way.
+
+  The patch is project-specific: upstream builds one tree for targets of several architectures, whose host toolchains cannot share a directory. It says so in its trailer, `Upstream-Status: Inappropriate [every board of this tree shares one architecture]`.
 - **The archive** gains `staging_dir/hostpkg` and the stamps of `build_dir/hostpkg`: the empty dot files `.prepared*`, `.configured` and `.built*`. Rust's 21 GB build tree stays out. `toolchain-unpack` touches the stamps with the rest.
 - **The key.** It already hashes the feed's `lang/golang` and `lang/rust` as patched, because `toolchain-key` runs after `patch`. It now hashes what the archive really holds. The changed recipe scripts make the first run a cold one.
 
@@ -97,19 +102,28 @@ Expected: Rust's build drops from 2.5–3.5 hours, as it ran alongside the packa
 
 The alternative is to link rustc against an external LLVM, the one `flake.nix` already pins for BPF. That builds no LLVM at all, but rustc would then run on an LLVM it is not released with, and the feed's `llvm-tools` dist component needs the in-tree LLVM.
 
-### D4. Prepared stamps named after content
+### D4. Stamps named after what built them: content and flags
 
-A patch to OpenWrt (`patches/openwrt/0011`) makes `PKG_FILES_MD5` and the kernel's prepared stamp always hash content, as upstream already does under `CONFIG_AUTOREMOVE`.
+A patch to OpenWrt (`patches/openwrt/0011`) does two things.
 
-With modification times in the name, a stamp packed in the host job never matches a firmware job's fresh checkout, where every file is new. Go and Rust would then build again despite the restored archive. With content in the name, a stamp names exactly the sources it was built from, in any checkout.
+**Prepared stamps after content.** `PKG_FILES_MD5` and the kernel's prepared stamp always hash content, as upstream already does under `CONFIG_AUTOREMOVE`.
+- With modification times in the name, a stamp packed in the host job never matches a firmware job's fresh checkout, where every file is new. Go and Rust would then build again despite the restored archive. With content in the name, a stamp names exactly the sources it was built from, in any checkout.
+- The `rdep` check still compares modification times. So a local edit, or a `touch` to force a rebuild, still rebuilds.
+- The cost is reading files instead of stat-ing them: once per package make, because `PKG_FILES_MD5` is evaluated only once, and about 20 MB of kernel patches per kernel make.
 
-The `rdep` check still compares modification times. So a local edit, or a `touch` to force a rebuild, still rebuilds.
+**Configured stamps after the flags.** Every target package's configured stamp also hashes `CONFIG_TARGET_OPTIMIZATION` and `CONFIG_EXTRA_OPTIMIZATION`, the flags that make up `TARGET_CFLAGS`.
+- A changed flag then reconfigures and recompiles every package, as a changed package option already does for one package. Nothing keeps objects compiled with other flags.
+- The kernel needs no stamp of this kind: Kbuild already compares each object's command line on every build.
+- Host packages are not affected, as they do not build with the target's flags. The exception is Rust, whose standard library has C parts built with them: the host stage's record covers it (D7).
 
-The cost is reading files instead of stat-ing them: once per package make, because `PKG_FILES_MD5` is evaluated only once, and about 20 MB of kernel patches per kernel make.
+On the toolchains' side, `toolchain-build.sh` compares the flags of the configuration with those of the record, and builds the toolchains anew when they differ (D7).
+
+The patch is meant for upstream: "stamps that hold across checkouts and follow the flags". Its trailer says `Upstream-Status: Pending`, and its write-up joins the others in `docs/upstream-contributions.md`, which `toolchain-o3` turns into `docs/patches.md`. Nothing is submitted without the maintainer's consent.
 
 Alternatives considered:
 - **`CONFIG_AUTOREMOVE`**: excluded above.
 - **Giving every file of a fresh checkout the commit's time**: the stamps would match, but a tree whose files went back in time could hide changed content from make. Content is the safe name.
+- **A `make clean` whenever the flags change**: correct, but it relies on whoever changes the flags remembering it. With the flags in the stamps, the rebuild follows from the change itself, locally as in CI.
 
 ### D5. The patch series as commits; the tree moves once
 
@@ -153,7 +167,7 @@ Each stage's cache holds all three languages, which gives one key family, one re
   - the hash of the C library, as today;
   - the hash of the Rust standard library for the target (`lib/rustlib/<target>/lib`).
 
-  `toolchain-build` rebuilds a toolchain whose library differs from its record, as it already does for the C library. `build.sh` checks both libraries before and after the build.
+  `toolchain-build` builds the toolchains anew when the configuration's flags differ from the recorded ones, and when a library differs from its record, as it already does for the C library. `build.sh` checks both libraries before and after the build.
 - **No toolchain in a board's build.** `build.sh` fails, naming the stage, when the board's time log holds a stage of `tools/`, `toolchain/`, or the Go or Rust host toolchain.
 
 A board's build that rebuilt Rust would put its `-mcpu` into the shared standard library, as one that rebuilt the C library would, and silently cost hours.
@@ -181,7 +195,8 @@ A board's build that rebuilt Rust would put its `-mcpu` into the shared standard
 ## Risks / Trade-offs
 
 - **[A cold host stage grows from 80 minutes to 2.5–3.5 hours, more on an EPYC 7763]** → It stays inside the 5-hour target thanks to D3. Its compiler cache brings most rebuilds down to 1–1.5 hours. D1 measures both.
-- **[The content-hash patch departs from upstream's choice]** → Two lines, registered in the docs. They are a candidate for upstream as "prepared stamps that hold across checkouts". Nothing is submitted without the maintainer's consent.
+- **[The stamps patch departs from upstream's choice]** → A few lines, with an `Upstream-Status: Pending` trailer and a write-up. They are a candidate for upstream as "stamps that hold across checkouts and follow the flags". Nothing is submitted without the maintainer's consent.
+- **[A flag change now rebuilds every package of every board]** → That is the point: a build that keeps objects of other flags is wrong, and the flags change rarely. The compiler caches serve every flag set they have seen.
 - **[The Rust patch has to follow every Rust bump of the feed]** → It touches a handful of lines. The weekly bump's patch step stops on a conflict and names the patch (build/upstream-pinning).
 - **[Rust's bootstrap may not work with sccache as `RUSTC_WRAPPER`]** The feed's recipe passes it to Rust's own build too. → If bootstrap fails or ignores it, the patch drops the wrapper from Rust's own build. Rust packages keep it.
 - **[Applying patches with plumbing could differ from `git am`]** → `git am` is `mailinfo`, `apply` and a commit, and the unit tests run the step on a scratch repository. The first run moves the tree to new commit IDs once.

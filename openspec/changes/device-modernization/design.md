@@ -127,7 +127,7 @@ DNS learning:       AF_PACKET (SOCK_DGRAM) on each managed WAN device, filtered 
 
 **The patch.**
 - One patch to qosify (interface, loader, DNS and BPF sources), carried by the patch series beside 0006 and 0010.
-- It is registered in `docs/patches.md` as meant for upstream once it has a `clsact` fallback.
+- Its trailer says `Upstream-Status: Inappropriate [needs a clsact fallback for kernels without tcx]`. With that fallback it would be meant for upstream, and would get a write-up in `docs/patches.md`.
 
 **Alternatives considered:**
 - `bpf_clone_redirect()` of DNS replies to `ifb-dns` would keep the device, and rely on how an ifb treats clones it did not get from mirred. The packet socket needs neither.
@@ -137,7 +137,7 @@ DNS learning:       AF_PACKET (SOCK_DGRAM) on each managed WAN device, filtered 
 
 - The directory is named after the tool whose keys it holds, as `/etc/apk/keys` is. usign reads them, and so does ucert, which builds on them.
 - `/etc/sysupgrade/keys` was considered and rejected: wrt-sync checks release manifests with the same keys.
-- base-files' `fwtool.sh` reads `/etc/usign/keys`, or `/etc/opkg/keys` when the new directory does not exist, so the patch stays harmless for upstream's images.
+- base-files' `fwtool.sh` reads `/etc/usign/keys`, or `/etc/opkg/keys` when the new directory does not exist, so the patch stays harmless for upstream's images. It is meant for upstream: its trailer says `Upstream-Status: Pending`, and its write-up goes into `docs/patches.md`.
 - wrt-keyring, wrt-sync, `wrt-release.sh`, `release-keys.sh`, `release-sign.sh` and the tests' keyring (`wrt_tests.keys`) move together.
 
 ### D6. The code-standards check
@@ -151,7 +151,7 @@ DNS learning:       AF_PACKET (SOCK_DGRAM) on each managed WAN device, filtered 
 
 - [ucode code paths fail silently where the shell ones failed loudly, for example a missing module or a misread file] → Every script runs `'use strict'`, and checks the result of each call that can fail. Each snippet is first tried with the host ucode. The existing tests hold the behavior: health check, slot status, device sync and config push.
 - [qosify's DNS learning sees replies before einat's reverse translation] → DNS learning reads only the DNS payload, which address translation does not change. The new "Classify by DNS name" test checks it.
-- [qosify on tcx diverges from upstream qosify] → One registered patch. Its upstream form would add a `clsact` fallback, noted in the register.
+- [qosify on tcx diverges from upstream qosify] → One patch, whose trailer states why it is not meant for upstream as it is: its upstream form would add a `clsact` fallback.
 - [The ingress shaping path is new code that the image's configuration never uses] → The "Enable ingress shaping" test exercises it in the emulator.
 - [Two implementations of the slot facts drift apart] → They are small, and the A/B suites test both. A comment in each names the other.
 

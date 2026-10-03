@@ -53,7 +53,9 @@ None.
   - `files/lib/upgrade/wrt-release.sh`;
   - `scripts/config-push.sh`, with `scripts/config-push.d/device.uc` replacing `device.sh`;
   - `scripts/release-sign.sh` and `scripts/release-keys.sh`.
-- **Patches**: one to base-files (`fwtool`'s key directory), and one to qosify (tcx, DNS capture, ingress redirect). It is carried by the patch series, builds on patch 0010's device tracking, and is registered in `docs/patches.md`.
+- **Patches**, carried by the series under the next free numbers, each stating its upstream status in its trailer (`toolchain-o3`'s convention):
+  - base-files: `fwtool`'s key directory, `Pending`, with a write-up in `docs/patches.md`;
+  - qosify: tcx, DNS capture and ingress redirect, building on patch 0010's device tracking. Its status is `Inappropriate`, until it has the `clsact` fallback upstream would need.
 - **Tests**:
   - `tests/network/test_tc_hook_order.py`;
   - `tests/network/test_qos.py`: DNS name, ingress shaping;
@@ -61,4 +63,4 @@ None.
   - `tests/wrt_tests/keys.py`;
   - the code-standards check and its test.
 - **Docs**: `docs/release-flow.md`, `docs/ops.md`, `docs/patches.md`.
-- **Order**: after `toolchain-o3`, whose patch register this change adds to, and whose audit covers qosify's earlier patches.
+- **Order**: the third of three changes, after the archived `board-model`: `build-acceleration`, then `toolchain-o3`, then `device-modernization`. It takes `toolchain-o3`'s patch convention and the audit of qosify's earlier patches as given.

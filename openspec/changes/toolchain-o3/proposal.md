@@ -16,19 +16,20 @@ The switch also rebuilds every package. That makes it the moment to audit every 
   - The kernel and its modules stay at `-O2`, the level upstream Linux supports. `CONFIG_KERNEL_CFLAGS` follows the shared optimization flags in the kernel's `KCFLAGS`, so it wins there.
   - musl keeps its own level, as OpenWrt filters `-O` flags out of its build.
   - BPF objects keep clang's `-O2`. Rust and Go are unaffected.
-  - The board-neutral toolchain is rebuilt under a new cache key.
+  - The board-neutral toolchain is rebuilt under a new cache key. In an existing tree, `build-acceleration`'s stamps rebuild the toolchains and every package with the new flags by themselves, so no clean is needed.
 - **Never fast-math**: no `-Ofast`, `-ffast-math` or other relaxed floating-point flag reaches a compile.
 - **Build failures under `-O3` are fixed in the source**, by patches. A package-level opt-out stays a registered last resort, as LTO's is.
 - **Undefined behavior, found in two ways**:
-  - **Warnings**: the build collects the warnings of a fixed set of UB-indicative GCC options (out-of-bounds, overflow, uninitialized, use-after-free, aliasing, alignment) from the packages the image ships. The collection goes into the build outputs, and a test fails on any warning that is neither fixed by a patch nor reviewed, with a reason, in a register.
+  - **Warnings**: the build collects the warnings of a fixed set of UB-indicative GCC options (out-of-bounds, overflow, uninitialized, use-after-free, aliasing, alignment) from the packages the image ships. The collection goes into the build outputs. A test fails on any warning that is neither fixed by a patch nor reviewed, with a reason, in `tests/reviewed-warnings.toml`, data like `tests/verified-elsewhere.toml`.
   - **A `ubsan` profile**: the dev profile with UBSan in trap mode, which needs no runtime, for every target package. The toolchain's libraries and the kernel stay uninstrumented, and the profile builds in directories of its own. The system tests run on it locally. A trap fails the test it happened in, naming the process. A small probe package proves that the detection works.
   - Every undefined behavior found is fixed by a patch.
-- **Patch audit and register**:
+- **Patch audit, every patch stating its upstream status**:
   - Every carried patch is reviewed against the current pins: OpenWrt, packages, QEMU and the feed packages' own patches.
-  - A patch is dropped when it is dead or upstream has it. 0002 goes: the A/B boot environment already passes the f2fs compression option.
+  - A patch is dropped when it is dead or upstream has it. 0002 goes: the A/B boot environment already passes the f2fs compression option. A patch's number is its identity: a dropped patch leaves its number unused, and no patch is renumbered.
   - BBRv3 is re-derived from its primary source, the google/bbr v3 branch as rebased for 6.18.
   - Each remaining patch gets a correct, current message.
-  - `docs/patches.md`, which replaces `docs/upstream-contributions.md`, lists every carried patch with its kind and upstream status, and keeps the write-ups of those meant for upstream. A test keeps the register and the patch files in step.
+  - Each patch states its upstream status in an `Upstream-Status` trailer, in OpenEmbedded's vocabulary: `Pending`, `Submitted [where]`, `Backport [source]` or `Inappropriate [reason]`. The status lives in the patch itself, so no separate list can drift from the files.
+  - `docs/patches.md`, which replaces `docs/upstream-contributions.md`, describes the convention and keeps the write-ups of the patches meant for upstream. A test reads every patch's trailer, and holds the write-ups and the `Pending` and `Submitted` patches in step.
 - **Size recorded**: the image grows. The growth is measured per board and recorded against the 1 GiB root partition.
 
 ## Capabilities
@@ -41,7 +42,7 @@ The switch also rebuilds every package. That makes it the moment to audit every 
   - target userspace optimizes with `-O3` instead of `-O2`;
   - the kernel keeps `-O2` (new requirement);
   - no relaxed floating-point semantics (new requirement).
-- `build/upstream-pinning`: every carried patch is registered with its kind and upstream status (new requirement).
+- `build/upstream-pinning`: every patch states its upstream status in its own trailer (new requirement).
 
 ## Impact
 
@@ -57,11 +58,13 @@ The switch also rebuilds every package. That makes it the moment to audit every 
   - `tests/firmware/test_toolchain.py`: `-O3`, the kernel's flags and fast-math;
   - new `tests/quality/test_undefined_behavior.py`;
   - the trap check in the router fixture;
-  - the patch register test;
+  - new `tests/build/test_patches.py`, over every patch's trailer;
+  - `tests/reviewed-warnings.toml`, the reviewed warnings;
   - `NEUTRAL_CFLAGS` in `tests/build/test_boards.py`.
 - **Docs**:
   - `docs/patches.md` replaces `docs/upstream-contributions.md`;
-  - `docs/undefined-behavior.md` holds the warnings register;
+  - `docs/undefined-behavior.md`: how warnings are reviewed, and how and when the `ubsan` profile runs;
   - `docs/lto-optouts.md` becomes `docs/optimization.md`: the flags, the LTO and `-O3` opt-outs, and the image sizes.
-- **CI**: the toolchain key changes, so the first run builds the toolchain and every package cold, and later runs hit the compiler cache again. The `ubsan` profile is not run in CI: it doubles a build, and CI has no time to spare.
+- **CI**: the toolchain key changes. On `build-acceleration`'s pipeline, the first run builds the host stage anew, its compiler cache serving what the flags do not touch (tools, the compilers, LLVM), and every firmware job compiles its packages cold; later runs hit again. The `ubsan` profile is not run in CI: it doubles a build, and CI has no time to spare.
 - **Disk**: the `ubsan` profile adds one board's build directories, about 45 GB, for as long as it is kept.
+- **Order**: the second of three changes, after the archived `board-model`: `build-acceleration`, then `toolchain-o3`, then `device-modernization`.

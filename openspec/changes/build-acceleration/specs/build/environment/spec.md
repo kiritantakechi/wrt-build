@@ -16,7 +16,7 @@ The location of the build working directory SHALL be configurable: it holds the 
 ## ADDED Requirements
 
 ### Requirement: Rebuild only what changed
-Running the build entry points again SHALL rebuild only what changed since the last build. The patch step SHALL leave every file whose content it does not change as it was, modification time included. A patch series that does not apply MUST leave the source tree as it was.
+Running the build entry points again SHALL rebuild only what changed since the last build, and all that the change affects. The patch step SHALL leave every file whose content it does not change as it was, modification time included. A patch series that does not apply MUST leave the source tree as it was. The target's compiler flags SHALL count among the inputs of every target package and toolchain, so that no build keeps an object compiled with other flags.
 
 #### Scenario: Re-apply an unchanged series
 - **WHEN** the patch step runs again with the same `upstream.lock` and the same patches
@@ -33,6 +33,10 @@ Running the build entry points again SHALL rebuild only what changed since the l
 #### Scenario: Build again without changes
 - **WHEN** a board is built twice in a row with no change to the sources, the patches or the configuration
 - **THEN** the second build prepares, configures and compiles nothing, as its time report shows
+
+#### Scenario: Change the compiler flags
+- **WHEN** the target's compiler flags change and a board is built again in the same tree
+- **THEN** the toolchains and every target package are compiled again with the new flags, as the toolchains' record and the time report show
 
 ### Requirement: Build time report
 Every build, of the host stage or of a board, SHALL record when each of its stages began and ended. At its end, it SHALL report the stages that took the most time. For each stage, the report SHALL give its share of the build's duration and the time during which it ran alone.

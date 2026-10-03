@@ -11,8 +11,12 @@ What run 36848242349 and the local VM show:
 - **A cached host build would not be reused.** OpenWrt names a package's prepared stamp after the modification times of its files. A host build packed in one job therefore never matches the stamps of another job's fresh checkout.
 - **A local build re-applies every patch.** `just build` resets the tree and applies the whole series again, which gives every patched file a new modification time. The kernel is then extracted and compiled again: about 3,500 compiles, 99.8% of them ccache hits, still 26 minutes.
 - **Only C and C++ keep a cache between CI runs.** Go's build cache sits in the tree's `tmp/`, and Rust packages have none.
+- **A changed compiler flag rebuilds nothing.**
+  - A package's configured stamp names only the package's own configuration symbols, not the target's compiler flags.
+  - `toolchain-build` rebuilds a toolchain only when its C library changed.
+  - So in an existing tree, `toolchain-o3`'s `-O3` would leave every package and the toolchain at `-O2`.
 
-The change has to come before `toolchain-o3`, whose first run rebuilds everything cold. At `-O2` the R6S firmware job already took 284 of its 330 minutes.
+The change has to come before `toolchain-o3`, whose first run rebuilds everything cold, and whose flags have to rebuild a local tree. At `-O2` the R6S firmware job already took 284 of its 330 minutes.
 
 ## What Changes
 
@@ -25,8 +29,10 @@ Four rules, applied the same way to CI and local builds, to every board and to e
   - the Rust host toolchain. A patch to the packages feed installs Rust under `staging_dir/hostpkg`, as Go already is, instead of once per board. It builds LLVM only for the host and the target, and sends LLVM's C++ through ccache.
 
   Firmware jobs compile target code only. A board's build fails if it compiled a toolchain, or changed one. The cache key already covers the feed's Go and Rust directories, and now they matter.
-- **Rebuild only what changed.**
-  - A patch makes OpenWrt name prepared stamps after the content of their files, so an unpacked host build is up to date in any checkout of the same sources.
+- **Rebuild only what changed, and everything that did.** A step's stamp names everything it was built from.
+  - A patch to OpenWrt names prepared stamps after the content of their files, so an unpacked host build is up to date in any checkout of the same sources.
+  - The same patch names configured stamps after the target's compiler flags as well, so a changed flag rebuilds every package. The kernel needs nothing: OpenWrt runs Kbuild on every build, and Kbuild compares each object's command line.
+  - `toolchain-build` rebuilds the toolchains whose recorded flags differ from the configuration's.
   - The patch step applies the series as commits in the object database. It then moves the work tree from the previous patched commit to the new one, so git rewrites only the files whose content changes. A series that does not apply leaves the tree untouched.
   - `fetch` no longer resets an existing tree.
 - **Keep a compiler cache for every language**: ccache for C and C++, Go's build cache, and sccache for Rust packages. They live together in `$WRT_WORKDIR/compiler-cache`, beside the tree, so they outlive it.
@@ -63,23 +69,24 @@ None.
   - every stage keeps a compiler cache for each language it compiles, and rebuilding unchanged sources is served from them.
 - `build/environment`:
   - the working directory holds the compiler caches of every language;
-  - entry points rebuild only what changed (new requirement);
+  - entry points rebuild only what changed, and all that a changed compiler flag affects (new requirement);
   - every build reports where its time went (new requirement).
-- `build/boards` (added by `board-model`, which is archived first): "One toolchain for every board" becomes "The same toolchains for every board", which covers the Go and Rust toolchains as well as the cross toolchain.
+- `build/boards`: "One toolchain for every board" covers the Go and Rust toolchains as well as the cross toolchain, and the toolchain is built anew when the configuration's flags differ from those recorded.
 
 ## Impact
 
 - **Scripts**:
   - `scripts/lib.sh`:
     - the series applied as commits, and the move of the work tree;
-    - `compose_seeds` writes the compiler cache directories;
+    - `link_tree` links the compiler cache directories;
+    - helpers for the time log and the cache trim;
   - `scripts/fetch.sh` and `scripts/patch.sh`;
-  - `scripts/toolchain-build.sh`: the Go and Rust host toolchains, the time log, the toolchains' record;
+  - `scripts/toolchain-build.sh`: the Go and Rust host toolchains, the time log, and the toolchains' record with its flags;
   - `scripts/toolchain-pack.sh` and `scripts/toolchain-unpack.sh`: `staging_dir/hostpkg` and the stamps of `build_dir/hostpkg`;
   - `scripts/build.sh`: the time report, the toolchain guards, the statistics and trimming of every compiler cache.
-- **Patches**:
-  - `patches/openwrt`: prepared stamps named after content;
-  - `patches/packages`: Rust under `staging_dir/hostpkg`, LLVM for the host and the target only, through ccache.
+- **Patches**, each with an `Upstream-Status` trailer from the start:
+  - `patches/openwrt/0011`: prepared stamps named after content, configured stamps after the target's compiler flags (`Pending`);
+  - `patches/packages/0002`: Rust under `staging_dir/hostpkg`, LLVM for the host and the target only, through ccache (`Inappropriate`: every board here shares one architecture).
 - **Configuration**:
   - `config/toolchain.seed`: sccache for Rust packages;
   - `flake.nix`: sccache in the build environment, which changes `WRT_BUILD_INPUTS` and so the toolchain key.
@@ -88,11 +95,12 @@ None.
   - the compiler cache keys become `compiler-cache-<stage>-…`;
   - the `caches` job keeps one per stage.
 - **Tests**:
-  - `tests/unit/test_lib.py`: re-applying a series;
-  - `tests/build/test_boards.py`: renamed requirement markers;
+  - `tests/build/test_environment.py`: re-applying a series;
+  - `tests/build/test_boards.py`: the toolchain guards;
+  - `tests/unit/test_lib.py`: the cache trim;
   - `tests/verified-elsewhere.toml`: the scenarios CI and the build prove.
 - **Docs**: `docs/ci.md` (stages, caches, budget and timings) and `docs/dev-setup.md` (the compiler cache directory).
 - **Disk**:
   - locally, one Rust build instead of one per board: each board's Rust build directory takes about 21 GB of the work volume;
   - in CI, the toolchain archive grows by the Go and Rust toolchains, and a host compiler cache joins the board caches. `docs/ci.md` keeps the budget against the 10 GB quota.
-- **Order**: after `board-model` is archived, and before `toolchain-o3`.
+- **Order**: the first of three changes, after the archived `board-model`: `build-acceleration`, then `toolchain-o3`, then `device-modernization`.

@@ -1,16 +1,19 @@
 # Tasks
 
-## 1. The patch register (design D6)
+## 1. Every patch states its upstream status (design D6)
 
-- [ ] 1.1 Turn `docs/upstream-contributions.md` into `docs/patches.md`:
-  - one table lists every patch file in the repository (`patches/openwrt`, `patches/packages`, `patches/qemu`, the feed packages' `patches/`, `docs/upstream`), each with its purpose, its kind (project-specific, meant for upstream, backport) and its upstream status;
-  - the write-ups of the patches meant for upstream follow, as before, together with the rule that nothing is submitted without the maintainer's consent;
+- [ ] 1.1 Give every patch file in the repository its `Upstream-Status` trailer: `patches/openwrt`, `patches/packages`, `patches/qemu`, the feed packages' `patches/` and `docs/upstream`. A `git format-patch` patch carries it at the end of its message, a plain diff in its header. The audit of group 5 refines the statuses; until then, they hold what the patch is today.
+
+  Verify: `git interpret-trailers --parse` finds the trailer in every format-patch file, and every plain diff's header has it.
+- [ ] 1.2 Turn `docs/upstream-contributions.md` into `docs/patches.md`:
+  - the trailer convention: its vocabulary, where the trailer goes in each kind of patch file, and that a patch's number is its identity, never reused or shifted;
+  - the write-ups of the `Pending` and `Submitted` patches, as before, with the rule that nothing is submitted without the maintainer's consent;
   - every reference to the old document points to the new one.
 
-  Verify: `grep -r upstream-contributions` finds nothing outside the archive, and every patch file has a row.
-- [ ] 1.2 Add `tests/build/test_patches.py` for the build/upstream-pinning scenarios "Patch without an entry" and "Entry without a patch": it matches the register's table against the patch files, both ways.
+  Verify: `grep -r upstream-contributions` finds nothing outside the archive.
+- [ ] 1.3 Add `tests/build/test_patches.py` for the build/upstream-pinning scenarios "Patch without a status", "Patch meant for upstream without a write-up" and "Write-up without a patch". It reads every patch file's trailer, and matches the `Pending` and `Submitted` patches against the write-ups, both ways.
 
-  Verify: the tests pass. With a row removed, or a stray patch file added, they fail and name the patch.
+  Verify: the tests pass. With a trailer removed, a status outside the vocabulary, a write-up removed or a stray one added, they fail and name the patch or the write-up.
 
 ## 2. `-O3` for the packages, `-O2` for the kernel (design D1–D3)
 
@@ -33,7 +36,7 @@
   Update `NEUTRAL_CFLAGS` in `tests/build/test_boards.py`.
 
   Verify: `spec-coverage --change toolchain-o3` lists the three scenarios as covered.
-- [ ] 2.4 Rebuild the toolchain (`just toolchain-build dev`) and build both boards. Fix every package that fails under `-O3` in its source, with a patch registered in `docs/patches.md`. If upstream's code is right and no reasonable fix exists, opt the package out (`TARGET_CFLAGS += -O2` in its Makefile, by patch) and register it.
+- [ ] 2.4 Build both boards in the existing tree: `build-acceleration`'s stamps rebuild the toolchains and every package with the new flags. Fix every package that fails under `-O3` in its source, with a patch stating its upstream status. If upstream's code is right and no reasonable fix exists, opt the package out (`TARGET_CFLAGS += -O2` in its Makefile, by patch) and record the opt-out in `docs/optimization.md`.
 
   Verify: both boards build, and every fix and opt-out has its row.
 - [ ] 2.5 Replace `docs/lto-optouts.md` with `docs/optimization.md`:
@@ -42,7 +45,7 @@
   - the sizes before and after (task 2.1 and now) against the 1 GiB root partition.
 
   Verify: every reference points to the new document, and the sizes are recorded.
-- [ ] 2.6 Run the full system tests on both boards with the `-O3` builds. Trace every failure to its cause and fix it in the code that is wrong, with a registered patch.
+- [ ] 2.6 Run the full system tests on both boards with the `-O3` builds. Trace every failure to its cause and fix it in the code that is wrong, with a patch stating its upstream status.
 
   Verify: `just test r4s dev` and `just test r6s dev` pass, and the firmware/toolchain tests pass on both boards.
 
@@ -51,10 +54,10 @@
 - [ ] 3.1 Make `scripts/build.sh` collect the warnings of the UB-indicative options, as D4 describes. It takes the packages of the board's image from the image's package list, maps them to source packages through `tmp/.packageinfo`, parses their build logs, and writes `out/<board>/<profile>/warnings.json`.
 
   Verify: unit tests for the log parser (`tests/unit/`) cover a warning inside a function, one outside any function, a continuation line and an option with a value (`-Warray-bounds=`). Both boards' builds produce the report.
-- [ ] 3.2 Add the register `docs/undefined-behavior.md` and `tests/quality/test_undefined_behavior.py` for the quality/undefined-behavior scenarios "Unreviewed warning" and "Stale review". Both read the build's report and the register, and match on package, option, file and function.
+- [ ] 3.2 Add the register `tests/reviewed-warnings.toml` and `tests/quality/test_undefined_behavior.py` for the quality/undefined-behavior scenarios "Unreviewed warning" and "Stale review". Both read the build's report and the register, and match on package, option, file and function. Add `docs/undefined-behavior.md`: how a warning is reviewed and recorded.
 
   Verify: with a report holding an unreviewed warning, and a register holding an entry nothing matches, each test fails and names it.
-- [ ] 3.3 Triage every UB-indicative warning of both boards' builds. Undefined behavior is fixed by a patch (registered in `docs/patches.md`); a false positive is reviewed in the register, with a reason.
+- [ ] 3.3 Triage every UB-indicative warning of both boards' builds. Undefined behavior is fixed by a patch, its status `Pending`; a false positive is reviewed in `tests/reviewed-warnings.toml`, with a reason.
 
   Verify: the two tests pass on both boards' builds.
 - [ ] 3.4 Add the test for the scenario "Check the shared flags": the manifest's package flags and kernel flags hold none of the masking options.
@@ -80,7 +83,7 @@
 - [ ] 4.4 Detect traps in the harness. In a build whose manifest names the `ubsan` profile, the router fixture reads the kernel log for user-space traps before it restores the snapshot, and fails the test with the process name and address. Add the test for the scenario "Trap during a system test": it runs the probe and expects the trap to be reported. It skips in other profiles.
 
   Verify: on a `ubsan` build the scenario's test passes, and a test that runs the probe without expecting the trap fails, naming `wrt-ubsan-probe`.
-- [ ] 4.5 Build and test both boards in the `ubsan` profile (`just build <board> ubsan`, `just test <board> ubsan`). Fix every trap in the code that is wrong, with a patch registered in `docs/patches.md`. Document in `docs/undefined-behavior.md` how to run the profile, and when: after an upstream bump, and before a stable release.
+- [ ] 4.5 Build and test both boards in the `ubsan` profile (`just build <board> ubsan`, `just test <board> ubsan`). Fix every trap in the code that is wrong, with a patch, its status `Pending`. Document in `docs/undefined-behavior.md` how to run the profile, and when: after an upstream bump, and before a stable release.
 
   Verify: both boards' suites pass under the `ubsan` profile, with no trap, and the run is logged in the document.
 
@@ -88,19 +91,19 @@
 
 - [ ] 5.1 Drop patch 0002: the A/B boot environment (`uboot/wrt-ab.env`) passes `fstools_overlay_compression_type=zstd` already.
 
-  Verify: the firmware/rootfs test "First boot creates the overlay" passes on both boards, and the register no longer lists 0002.
-- [ ] 5.2 Re-derive BBRv3 from its primary source: the google/bbr v3 branch as Oleksandr Natalenko rebases it onto 6.18. Compare it with the current series, explain or remove every difference, and record the source and the comparison in the register.
+  Verify: the firmware/rootfs test "First boot creates the overlay" passes on both boards, and no patch takes the number 0002.
+- [ ] 5.2 Re-derive BBRv3 from its primary source: the google/bbr v3 branch as Oleksandr Natalenko rebases it onto 6.18. Compare it with the current series, and explain or remove every difference. Its trailer names the source (`Backport [...]`), and its message the comparison.
 
   Verify: the kernel builds on both boards, and the firmware/kernel scenario "BBRv3 as default congestion control" passes on both.
-- [ ] 5.3 Review every other patch against the current pins: 0003–0010, the packages patch, einat's patch, QEMU's patch, and the two prepared upstream patches. For each, check:
+- [ ] 5.3 Review every other patch against the current pins: the series from 0003 on (`build-acceleration`'s 0011 included), the packages patches, einat's patch, QEMU's patch, and the two prepared upstream patches. For each, check:
   - still needed (not upstream, not dead);
   - minimal and correct;
   - its message accurate and current, with `Signed-off-by`;
   - for C, clean under the warnings and the UBSan run.
 
-  Refresh what falls short, and record the result per patch in the register.
+  Refresh what falls short, and set each patch's trailer to its status after the review.
 
-  Verify: `just patch` applies the series. The tests that cover each patch's behavior pass on both boards (named in its row), and QEMU builds with its patch.
+  Verify: `just patch` applies the series. The tests that cover each patch's behavior pass on both boards (named in its message), and QEMU builds with its patch.
 
 ## 6. Integration
 

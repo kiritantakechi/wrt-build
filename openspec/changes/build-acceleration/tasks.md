@@ -3,7 +3,7 @@
 ## 1. Measure every build (design D1)
 
 - [ ] 1.1 Record and report the build time log:
-  - `scripts/toolchain-build.sh` and `scripts/build.sh` export `BUILD_TIME_LOG=$TREE/logs/build-time-<stage>.tsv`, where the stage is `host` or the board, emptied before make runs;
+  - `scripts/toolchain-build.sh` and `scripts/build.sh` export `BUILD_TIME_LOG=$TREE/logs/build-time-<build>.tsv`, emptied before make runs. The build is `host`, or the build directories' suffix (`CONFIG_BUILD_SUFFIX`);
   - after make, whether it succeeded or not, they print `scripts/build-time-report.pl -n 15` of it.
 
   Add a "Build time" section to `docs/ci.md`: what the report shows, wall share and solo time, and that the timings below come from it. Add the build/environment scenario "Find what holds up a build" to `tests/verified-elsewhere.toml`.
@@ -19,12 +19,15 @@
 
 ## 2. Rebuild only what changed (design D4, D5)
 
-- [ ] 2.1 Add `patches/openwrt/0011`: `PKG_FILES_MD5` (`include/depends.mk`) and the kernel's prepared stamp (`include/kernel-build.mk`) always hash content (`find_md5_reproducible`). Register it in `docs/upstream-contributions.md` as meant for upstream and not submitted, with its write-up.
+- [ ] 2.1 Add `patches/openwrt/0011`, with the trailer `Upstream-Status: Pending`:
+  - `PKG_FILES_MD5` (`include/depends.mk`) and the kernel's prepared stamp (`include/kernel-build.mk`) always hash content (`find_md5_reproducible`);
+  - every target package's configured stamp (`include/package.mk`) also hashes `CONFIG_TARGET_OPTIMIZATION` and `CONFIG_EXTRA_OPTIMIZATION`.
+
+  Add its write-up to `docs/upstream-contributions.md`, as meant for upstream and not submitted.
 
   Verify:
-  1. In a built tree, set every file of `feeds/packages/lang/golang` to an older time, keeping its content.
-  2. Run `make package/feeds/packages/golang/host/compile` again; its time log shows no prepare stage.
-  3. Without the patch, the same check prepares again.
+  1. In a built tree, set every file of `feeds/packages/lang/golang` to an older time, keeping its content. Run `make package/feeds/packages/golang/host/compile` again: its time log shows no prepare stage. Without the patch, the same check prepares again.
+  2. Add `-g0` to `CONFIG_EXTRA_OPTIMIZATION` and build the board: the time log holds a configure stage for every target package. Remove it and build again: the same.
 - [ ] 2.2 In `scripts/lib.sh`, build a repository's patched commit in the object database, and move a work tree to a commit (D5):
   - `patch.sh` builds each repository's commit, then moves its tree once;
   - `fetch.sh` fetches the pinned commits and checks them out only in a new tree;
@@ -46,17 +49,19 @@
 - [ ] 3.1 Add `patches/packages/0002` for the feed's Rust recipe:
   - it builds in `build_dir/hostpkg` and installs into `staging_dir/hostpkg`, its uninstall script included;
   - `llvm.targets` holds only the host's and the target's backends, and `llvm.experimental-targets` is empty;
-  - with `CONFIG_CCACHE`, `llvm.ccache` is set.
+  - with `CONFIG_CCACHE`, `llvm.ccache` is set;
+  - its trailer says `Upstream-Status: Inappropriate [every board of this tree shares one architecture]`.
 
   If Rust's bootstrap fails, or ignores sccache as `RUSTC_WRAPPER`, the patch drops the wrapper from Rust's own build (design, risks).
 
   Verify: `staging_dir/hostpkg/bin/rustc -vV` runs, and `staging_dir/hostpkg/lib/rustlib/aarch64-unknown-linux-musl` exists. LLVM's CMake cache in the build directory lists the two backends. The host report shows Rust's stages.
-- [ ] 3.2 Make `scripts/toolchain-build.sh` build the Go and Rust host toolchains after the tools and the cross toolchain. Its record, `wrt-toolchain.json`, gains the hash of the Rust standard library for the target. A toolchain whose library differs from its record is built anew, as the C library already is.
+- [ ] 3.2 Make `scripts/toolchain-build.sh` build the Go and Rust host toolchains after the tools and the cross toolchain. Its record, `wrt-toolchain.json`, gains the hash of the Rust standard library for the target. The toolchains are built anew when the configuration's flags differ from the recorded ones, or a library differs from its record, as the C library already is. Add the build/environment scenario "Change the compiler flags" to `tests/verified-elsewhere.toml`.
 
   Verify:
   - after `just toolchain-build dev`, the record names both libraries;
   - a second run's report holds no compile stage;
-  - after the Rust library is changed by hand, the next run builds Rust again.
+  - after the Rust library is changed by hand, the next run builds Rust again;
+  - after a flag is added to `config/toolchain.seed`, the next run builds the toolchains anew and records the flag, and the board's next build configures every target package again (2.1).
 - [ ] 3.3 Make `scripts/toolchain-pack.sh` pack `staging_dir/hostpkg` and the stamps of `build_dir/hostpkg` (the empty dot files), and `scripts/toolchain-unpack.sh` touch them with the rest.
 
   Verify, on the VM:
@@ -72,11 +77,10 @@
 
   Tests:
   - extend `tests/build/test_boards.py`: "A toolchain built for a board" covers the Rust library;
-  - add "Boards share the toolchains", unit-testing the helper on a sample log;
-  - rename the requirement in the file's `@spec` markers to "The same toolchains for every board".
+  - add "Boards share the toolchain", unit-testing the helper on a sample log.
 
   Verify: the tests pass. Build r4s, then r6s, on the VM: neither report holds a toolchain stage.
-- [ ] 3.5 Update `docs/dev-setup.md` (section 4): the boards share every toolchain, and a board's first build no longer builds Rust. Under the migration plan, list the per-board Rust leftovers that may be deleted, and delete them on the VM.
+- [ ] 3.5 Update `docs/dev-setup.md` (section 4): the boards share the whole toolchain, Go and Rust included, and a board's first build no longer builds Rust. Under the migration plan, list the per-board Rust leftovers that may be deleted, and delete them on the VM.
 
   Verify: `build_dir/target-*/host/rustc-*` is gone, and both boards still build without a toolchain stage.
 

@@ -74,6 +74,8 @@ BPF               clang -O2
 - Its record (`wrt-toolchain.json`) holds the new flags, and its cache key changes.
 - GCC's runtime libraries follow `-O3` as every other target library does.
 
+**An existing tree.** `build-acceleration` names every package's configured stamp after these flags, and rebuilds the toolchains whose recorded flags differ from the configuration's. The new flags therefore rebuild the toolchains and every package in a tree built at `-O2`, with no clean. The kernel follows through Kbuild, which compares each object's command line.
+
 **The manifest** records the flags the kernel build adds (`kernel_cflags`). The board's build computes them from the configuration, so a test that sees only the build outputs can check them.
 
 ### D2. No relaxed floating point
@@ -84,7 +86,7 @@ The flags test checks the manifest's package flags and kernel flags for every re
 
 ### D3. A build that fails under `-O3` is fixed in the source
 
-`-O3` produces new warnings, and packages that build with `-Werror` stop on them. Each failure is fixed where the code is wrong, with a patch in the package's own patch directory, carried by the patch series and registered (D6).
+`-O3` produces new warnings, and packages that build with `-Werror` stop on them. Each failure is fixed where the code is wrong, with a patch in the package's own patch directory, carried by the patch series and stating its upstream status (D6).
 
 A package whose upstream code is correct but cannot be fixed reasonably opts out of `-O3` in its own Makefile (`TARGET_CFLAGS += -O2`). The opt-out is registered next to the LTO opt-outs, in `docs/lto-optouts.md`, which becomes `docs/optimization.md`: the flags of D1, the LTO and `-O3` opt-outs, and the sizes of D7.
 
@@ -104,9 +106,10 @@ A package whose upstream code is correct but cannot be fixed reasonably opts out
 - The warnings travel with the build's outputs, so CI's system tests see them as well.
 
 **The register.**
-- `docs/undefined-behavior.md` holds a table of the reviewed warnings: package, option, file, function, reason and review date.
+- `tests/reviewed-warnings.toml` holds the reviewed warnings, one `[[warning]]` table each: package, option, file, function, reason and review date. It is data that a test reads, as `tests/verified-elsewhere.toml` is for the scenarios proven outside the system tests.
 - An entry matches a warning on package, option, file and function, never on the line number, so a review survives upstream moving code around.
-- Fixed warnings disappear from the build, and their fixes are registered as patches (D6).
+- Fixed warnings disappear from the build, and their fixes are patches stating their upstream status (D6).
+- `docs/undefined-behavior.md` describes how a warning is reviewed, and how and when the `ubsan` profile runs (D5).
 
 **Alternatives considered:**
 - `-Werror` on these options would turn every false positive (`-Wmaybe-uninitialized` has many at `-O3`) into a build failure, with no room to review.
@@ -153,31 +156,36 @@ config/profiles
 
 **Triage.**
 - Every trap is undefined behavior in code the image runs.
-- It is fixed in that code, with a patch meant for upstream and registered (D6).
+- It is fixed in that code, with a patch meant for upstream, its status `Pending` (D6).
 - Alignment findings included: on arm64 the hardware forgives most unaligned loads, but the compiler is entitled to assume alignment, and vectorized code does.
 
 **Alternatives considered:**
 - A build per instrumented package, done by hand, is not reproducible.
 - Instrumenting the toolchain's libraries too would turn musl's own internals into findings in every process at once.
 
-### D6. Patch audit and the patch register
+### D6. Patch audit, and the status each patch states
 
 **Per patch.**
 - **Still needed**: not merged upstream at the pinned commit, and not dead code.
 - **Minimal and correct**: no unrelated hunks. For C, nothing the warnings and the UBSan run would flag.
 - **Message**: current and accurate (what, why, how it was verified), with `Signed-off-by`.
-- **Registered**: kind and upstream status.
+- **Status**: an `Upstream-Status` trailer.
 
 **Known actions.**
 - Drop 0002: the A/B images pass the option through `wrt-ab.env`, and `test_overlay_is_compressed_f2fs` guards the result.
-- Re-derive BBRv3 from its primary source: the google/bbr v3 branch, as Oleksandr Natalenko rebases it onto 6.18. The current series is then compared against it, and the differences are explained or removed.
-- Review 0003–0010, the packages patch, einat's patch, QEMU's patch, and the two prepared upstream patches against the current pins.
+- Re-derive BBRv3 from its primary source: the google/bbr v3 branch, as Oleksandr Natalenko rebases it onto 6.18. The current series is then compared against it, and the differences are explained or removed. Its trailer names the source, `Backport [google/bbr v3, rebased for 6.18]`, and its message the comparison.
+- Review every other carried patch against the current pins: the series from 0003 on (`build-acceleration`'s 0011 included), the packages patches, einat's patch, QEMU's patch, and the two prepared upstream patches.
 
-**The register.**
-- `docs/patches.md` replaces `docs/upstream-contributions.md`.
-- One table lists every patch file in the repository (spec build/upstream-pinning): its purpose, kind (project-specific, meant for upstream, backport) and upstream status.
-- The write-ups of the patches meant for upstream follow, as before.
-- `tests/build/test_patches.py` checks the table against the files, both ways. The rule for upstream submissions (none without the maintainer's consent) moves with the document.
+**Numbers are identities.** A patch keeps its number for good. A dropped patch leaves its number unused, and no patch is renumbered, so a number in a message, a document or a test always means the same patch. A new patch takes the next free number.
+
+**The status in the patch.**
+- Every patch file states its upstream status in an `Upstream-Status` trailer (spec build/upstream-pinning), in OpenEmbedded's vocabulary, which Buildroot follows as well: `Pending`, `Submitted [where]`, `Backport [source]`, `Inappropriate [reason]`.
+- In a patch made by `git format-patch` the trailer ends the message, where `git interpret-trailers --parse` reads it. A plain diff, as the feed packages' own patches are, carries it in its header.
+- The status lives with the patch, so no list elsewhere can drift from the files, and a patch moved or dropped takes its status along.
+- `docs/patches.md` replaces `docs/upstream-contributions.md`. It describes the convention, and keeps the write-ups of the `Pending` and `Submitted` patches, with the rule for upstream submissions: none without the maintainer's consent.
+- `tests/build/test_patches.py` reads every patch file's trailer, and holds the write-ups and the `Pending` and `Submitted` patches in step, both ways.
+
+**Alternative considered:** a table of every patch in `docs/patches.md`, checked against the files. It states each patch's status twice, and the second copy is the one that drifts.
 
 ### D7. Size, measured and recorded
 
@@ -185,10 +193,10 @@ For each board, the EROFS root and the upgrade image are measured before and aft
 
 ## Risks / Trade-offs
 
-- [`-O3` makes `-Wmaybe-uninitialized` and `-Wstringop-overflow` report more false positives] → They go to the register, each reviewed with a reason. No blanket suppression.
+- [`-O3` makes `-Wmaybe-uninitialized` and `-Wstringop-overflow` report more false positives] → They go to `tests/reviewed-warnings.toml`, each reviewed with a reason. No blanket suppression.
 - [`-Werror` packages stop building] → Fixed in the source (D3). An opt-out only as a registered last resort.
 - [The UBSan run finds more than this change can fix] → The findings are listed as they come. If they outgrow the change, the scope question goes back to the maintainer before anything is masked.
-- [The first CI run rebuilds the toolchain and every package] → Expected once, about five hours per firmware job (docs/ci.md). The compiler cache recovers on the next run.
+- [The first CI run rebuilds the toolchain and every package] → Expected once. After `build-acceleration`, the host stage rebuilds with its compiler cache serving what the flags do not touch, and a firmware job compiles its packages cold in 1.5 to 2.5 hours instead of the 3.5 to 4.75 of a cold run today (docs/ci.md). The compiler caches recover on the next run.
 - [The kernel briefly gets `-O3` if `CONFIG_KERNEL_CFLAGS` is lost] → The kernel flags test (spec firmware/toolchain) fails such a build.
 - [The board-only seeds and the one-line-per-symbol merge change `compose_seeds` for every profile] → For dev and ci the composed seed only loses duplicate lines. The toolchain key changes, as it does anyway with `-O3`.
 - [The `ubsan` profile costs about 45 GB per board, and a full build and test run each time] → It is kept off CI and run at the points D5 names. Its build directories can be deleted in between.
