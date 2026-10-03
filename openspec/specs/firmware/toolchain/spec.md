@@ -13,11 +13,11 @@ The target toolchain SHALL use GCC 15 and musl libc.
 - **THEN** the GCC major version is 15 and the C library is musl
 
 ### Requirement: Optimization flags for big.LITTLE cores
-Target userspace packages SHALL be compiled with `-O2` and `-mcpu=cortex-a72.cortex-a53+crypto`, and these two flags MUST come after the default `-Os` and generic CPU flags so that they take effect. Only packages that explicitly declare an opt-out are exempt.
+Target userspace packages SHALL be compiled with `-O2` and the `-mcpu` of the board they are built for: `cortex-a72.cortex-a53+crypto` for the NanoPi R4S, `cortex-a76.cortex-a55+crypto` for the NanoPi R6S. These two flags MUST come after the default `-Os` and generic CPU flags, so that they take effect. Only packages that explicitly declare an opt-out are exempt.
 
 #### Scenario: Check compile command
 - **WHEN** the actual compile command of any target userspace package that has not declared an opt-out is inspected
-- **THEN** the command contains `-O2 -mcpu=cortex-a72.cortex-a53+crypto`, positioned after `-Os`
+- **THEN** the command contains `-O2` and the `-mcpu` of the board it is built for, positioned after `-Os`
 
 ### Requirement: LTO, mold, and gc-sections by default
 Target packages SHALL use link-time optimization (LTO), the mold linker, and garbage collection of unused sections (gc-sections) by default. A package that fails to build with these options MUST opt out of the relevant option in its own build definition, rather than disabling it globally.

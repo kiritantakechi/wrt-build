@@ -24,7 +24,7 @@ Each signing SHALL require explicit approval from a repository maintainer. Witho
 - **THEN** the signing job stays in the waiting state and produces no signed artifacts
 
 ### Requirement: Signing targets
-The signing job SHALL sign all package indexes with the release apk key, and sign the factory image and the upgrade image with the release firmware key. Before signing, it MUST verify that these artifacts match the checksums in the build manifest.
+For every board's build, the signing job SHALL sign all package indexes with the release apk key, and the factory image and the upgrade image with the release firmware key. Before signing, it MUST verify that these artifacts match the checksums in their board's build manifest.
 
 #### Scenario: Artifact does not match the manifest
 - **WHEN** the checksum of an artifact to be signed differs from the record in the build manifest

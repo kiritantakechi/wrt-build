@@ -24,11 +24,11 @@ The data disk SHALL be identified and mounted by filesystem UUID, independent of
 - **THEN** it is not mounted at the data disk mount points
 
 ### Requirement: Dependent services wait for the mount
-Services that depend on the data disk (containers, file sharing, downloads) SHALL start only after their mount points are available, and SHALL restart when a mount point reappears. They MUST NOT write data to the SD card while a mount point is absent.
+Services that depend on the data disk (containers, file sharing, downloads) SHALL start only after their mount points are available, and SHALL restart when a mount point reappears. They MUST NOT write data to the boot disk while a mount point is absent.
 
 #### Scenario: Data disk mounts late
 - **WHEN** the data disk mounts 30 seconds late during boot
-- **THEN** the container and file-sharing services start running only after the mount completes, and no new data is written to the same-named directories on the SD card
+- **THEN** the container and file-sharing services start running only after the mount completes, and no new data is written to the same-named directories on the boot disk
 
 ### Requirement: Degraded mode without the data disk
 When the data disk is absent, the services that depend on it SHALL NOT start, and routing, firewall, NAT, proxy, DNS, and VPN MUST keep working normally.
@@ -38,7 +38,7 @@ When the data disk is absent, the services that depend on it SHALL NOT start, an
 - **THEN** LAN clients have normal internet access, the container and file-sharing services are not running, and the health check still passes
 
 ### Requirement: Persistent logs on the data disk
-System logs SHALL be written continuously to `@logs` while the data disk is available, and SHALL rotate when they reach the size limit. The SD card MUST NOT hold persistent logs.
+System logs SHALL be written continuously to `@logs` while the data disk is available, and SHALL rotate when they reach the size limit. The boot disk MUST NOT hold persistent logs.
 
 #### Scenario: View logs after reboot
 - **WHEN** the system runs for a while and then reboots

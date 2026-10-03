@@ -6,7 +6,7 @@ Defines where the container runtime stores data, how networking and firewalling 
 ## Requirements
 
 ### Requirement: Container storage on the data disk
-Container images and container data SHALL all be stored on `@containers`. The SD card MUST NOT hold any container image layers or container data.
+Container images and container data SHALL all be stored on `@containers`. The boot disk MUST NOT hold any container image layers or container data.
 
 #### Scenario: Pull an image
 - **WHEN** a container image is pulled

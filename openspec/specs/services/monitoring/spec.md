@@ -14,7 +14,7 @@ The router SHALL serve metrics in Prometheus text format on port 9101 of its LAN
 
 #### Scenario: Temperature metrics
 - **WHEN** metrics are requested from the LAN
-- **THEN** the hwmon collector reports success, and the kernel has registered the RK3399 temperature sensor driver (`rockchip-thermal`), which exports the SoC temperature through hwmon on the R4S
+- **THEN** the hwmon collector reports success, and the kernel has registered the Rockchip temperature sensor driver (`rockchip-thermal`), which exports the SoC temperature through hwmon on the board
 
 #### Scenario: Access from the WAN
 - **WHEN** the router's port 9101 is accessed from the WAN side
@@ -25,4 +25,4 @@ Metrics export SHALL keep working when the data disk is absent.
 
 #### Scenario: No data disk attached
 - **WHEN** metrics are requested from the LAN without the data disk attached
-- **THEN** metrics are still returned, including data for the filesystem on the SD card
+- **THEN** metrics are still returned, including data for the filesystem on the boot disk

@@ -30,9 +30,16 @@ A factory reset SHALL clear only the overlay, and the contents of the EROFS root
 - **WHEN** a factory reset is performed and the router reboots
 - **THEN** the configuration returns to the factory state, an empty overlay is recreated, and the EROFS contents are identical to those at flash time
 
-### Requirement: Complete R4S boot chain
-The factory image the build produces SHALL carry everything the NanoPi R4S 4GB needs to boot it with no manual steps: the RK3399 loader at sector 64, and at sector 16384 a U-Boot FIT for the R4S with TF-A whose built-in environment holds the slot logic. Each slot's boot partition SHALL hold a kernel FIT whose default configuration carries the R4S device tree with both network ports enabled. There is no boot script: the slot logic lives in the bootloader (firmware/boot-rollback). The emulator runs the kernel and root filesystem of this image through a U-Boot built for QEMU; this requirement covers the parts that only the RK3399 can run.
+### Requirement: Complete boot chain
+The factory image the build produces SHALL carry everything its board needs to boot it with no manual steps:
+- at sector 64, the loader of the board's SoC: the RK3399 loader for the NanoPi R4S, the RK3588 loader with its DDR initialization for the NanoPi R6S;
+- at sector 16384, a U-Boot FIT for the board with TF-A, whose built-in environment holds the slot logic.
+
+Each slot's boot partition SHALL hold a kernel FIT whose default configuration carries the board's device tree, with all of its network ports enabled. There is no boot script: the slot logic lives in the bootloader (firmware/boot-rollback). The emulator runs the kernel and root filesystem of this image through a U-Boot built for QEMU; this requirement covers the parts that only the board's SoC can run.
 
 #### Scenario: Inspect the boot chain
 - **WHEN** the factory image is inspected
-- **THEN** sector 64 holds an RK3399 SD boot loader; sector 16384 holds a U-Boot FIT whose default configuration is compatible with `friendlyarm,nanopi-r4s`, loads TF-A and boots with `run wrt_boot`; and the kernel FIT on both boot-A and boot-B carries a device tree compatible with `friendlyarm,nanopi-r4s` and `rockchip,rk3399`, with the GMAC and the PCIe controller enabled
+- **THEN**:
+  - sector 64 holds a loader for the board's SoC;
+  - sector 16384 holds a U-Boot FIT whose default configuration is compatible with the board's name, loads TF-A and boots with `run wrt_boot`;
+  - the kernel FIT on both boot-A and boot-B carries a device tree compatible with the board's name and its SoC, with the board's Ethernet and PCIe controllers enabled
