@@ -94,7 +94,7 @@
   On the VM, move the existing ccache and Go cache there. Document the layout and the move in `docs/dev-setup.md`.
 
   Verify: after `just config r4s dev`, the three links resolve into `compiler-cache`, and `sccache --version` runs in the build environment (`nix develop .#build -c wrt-build-fhs -c 'sccache --version'`).
-- [ ] 4.2 Make `scripts/build.sh` report every cache:
+- [x] 4.2 Make `scripts/build.sh` report every cache:
   - ccache's and sccache's `--show-stats`;
   - how many packages Go compiled instead of taking them from its cache;
   - and it runs one sccache server for the whole build, which it stops afterwards.
