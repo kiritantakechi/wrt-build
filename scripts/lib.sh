@@ -154,16 +154,18 @@ compiler_cache_report() (
 # compiler_cache_trim <start>: drop from every compiler cache what a build begun at
 # <start>, seconds since the epoch, did not use (CI, where each stage keeps a cache
 # of its own): ccache by its record of each entry's last use, Go's cache and
-# sccache's by modification time, which both refresh on use.
+# sccache's by modification time, which both refresh on use. sccache refreshes
+# an entry on every hit, Go only one more than an hour old, so Go's cache keeps
+# the hour before the build as well.
 compiler_cache_trim() (
 	now=$(date +%s)
 	ccache_run --evict-older-than "$((now - $1 + 1))s"
-	trim_unused "${TREE}/tmp/go-build" "$1"
+	trim_unused "${TREE}/tmp/go-build" "$(($1 - 3600))"
 	trim_unused "${TREE}/.sccache" "$1"
 )
 
-# trim_unused <directory> <start>: remove the files of <directory> last modified
-# before <start>, seconds since the epoch.
+# trim_unused <directory> <time>: remove the files of <directory> not modified
+# after <time>, seconds since the epoch.
 trim_unused() (
 	[ -d "$1/" ] || return 0
 	find "$1/" -type f ! -newermt "@$2" -delete
@@ -213,11 +215,15 @@ toolchain_stages() (
 
 # toolchain_rust_std: the hash of the Rust standard libraries in
 # staging_dir/hostpkg, the target's among them, or nothing when Rust is not
-# built (build-acceleration D7): a rebuild changes it, as it does libc.so.
+# built (build-acceleration D7): a rebuild changes it, as it does libc.so. Rust's
+# uninstaller leaves its directories, so it is the libraries that count.
 toolchain_rust_std() (
 	rustlib="${TREE}/staging_dir/hostpkg/lib/rustlib"
 	[ -d "${rustlib}" ] || return 0
-	sum=$(cd "${rustlib}" && find . -path './*/lib/*.rlib' -type f | LC_ALL=C sort | xargs -r sha256sum | sha256sum)
+	cd "${rustlib}" || return
+	rlibs=$(find . -path './*/lib/*.rlib' -type f | LC_ALL=C sort)
+	[ -n "${rlibs}" ] || return 0
+	sum=$(printf '%s\n' "${rlibs}" | xargs sha256sum | sha256sum)
 	echo "${sum%% *}"
 )
 

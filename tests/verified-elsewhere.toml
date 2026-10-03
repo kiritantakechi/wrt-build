@@ -64,7 +64,13 @@ by = "just build <board> dev on the local VM; build.yml firmware"
 capability = "build/environment"
 requirement = "Configurable build directory outside the repository"
 scenario = "Build directory on an external volume"
-by = "local VM: WRT_WORKDIR on the SSD volume (docs/dev-setup.md); require_workdir refuses paths inside the repository"
+by = "local VM: WRT_WORKDIR on the SSD volume (docs/dev-setup.md), the compiler caches of every language in its compiler-cache/ (ccache, go-build, sccache); require_workdir refuses paths inside the repository"
+
+[[scenario]]
+capability = "build/environment"
+requirement = "Configurable build directory outside the repository"
+scenario = "A new source tree"
+by = "every CI job of build.yml: each starts from a fresh checkout, fetch and patch, restores its compiler cache into $WRT_WORKDIR/compiler-cache, and reports what each cache served"
 
 [[scenario]]
 capability = "build/environment"

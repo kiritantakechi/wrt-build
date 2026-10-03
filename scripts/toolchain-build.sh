@@ -8,11 +8,14 @@
 # the profile's configuration without a board: its C library and Rust's standard
 # library carry no board's -mcpu. The flags it was built with and the hashes of
 # both libraries go to wrt-toolchain.json in the toolchain directory, which
-# build.sh checks. The toolchain stays only while the configuration's flags are
-# the recorded ones and both libraries are the ones the record names: one without
-# a record predates the board model, one with another library was rebuilt by a
-# board's build with that board's flags, and one of other flags would build
-# packages that keep objects of the old ones, so each is built anew.
+# build.sh checks. The record is written as soon as the cross toolchain is
+# built, and again with Rust's library, so a failed Go or Rust build leaves the
+# cross toolchain to the next run. The toolchain stays only while the
+# configuration's flags are the recorded ones and both libraries are the ones
+# the record names: one without a record predates the board model, one with
+# another library was rebuilt by a board's build with that board's flags, and
+# one of other flags would build packages that keep objects of the old ones, so
+# each is built anew.
 # The tree is left configured without a board; config configures it for one.
 # make world skips toolchain/compile only while the toolchain's compile stamp is up
 # to date, and toolchain/install does not write it. The packed archive has no
@@ -60,15 +63,34 @@ if [ -n "${rust_std}" ] && [ "${rust_std}" != "${recorded}" ]; then
 	info "Rust's standard library is not the one the record names: building it anew"
 	make -C "${TREE}" package/feeds/packages/rust/host/clean >/dev/null
 fi
+# write_record <rust_std>: what this configuration built, or found built as
+# recorded; Rust's library only once there is one.
+write_record() {
+	jq -n --arg cflags "${cflags}" --arg libc "${libc}" --arg rust_std "$1" \
+		'{cflags: $cflags, libc: $libc} + if $rust_std == "" then {} else {rust_std: $rust_std} end' \
+		>"${record}"
+}
+
 jobs=${WRT_JOBS:-$(nproc)}
 log=$(time_log host)
 go_entries=$(compiler_cache_start)
 start=$(date +%s)
 status=0
 BUILD_TIME_LOG="${log}" make -C "${TREE}" -j"${jobs}" tools/install toolchain/install || status=$?
-# The host toolchains of the other languages the firmware is written in, on the
-# cross toolchain (build-acceleration D2): no board's build compiles them again.
 if [ "${status}" -eq 0 ]; then
+	[ -d "${toolchain_dir}" ] || die "no toolchain directory at '${toolchain_dir}'"
+	# toolchain/Makefile: $(call stampfile,toolchain,compile) in $(TOOLCHAIN_DIR),
+	# and the version stamp as its buildbot mode writes it.
+	make -C "${TREE}" "${toolchain_dir}/stamp/.toolchain_compile"
+	git -C "${TREE}" log --no-show-signature --format=%h -1 toolchain >"${toolchain_dir}/stamp/.ver_check"
+	libc=$(toolchain_libc "${toolchain_dir}")
+	[ -n "${libc}" ] || die "the toolchain in ${toolchain_dir} has no C library"
+	# Rust's library is the recorded one here, or none: the checks above removed
+	# any other.
+	rust_std=$(toolchain_rust_std)
+	write_record "${rust_std}"
+	# The host toolchains of the other languages the firmware is written in, on the
+	# cross toolchain (build-acceleration D2): no board's build compiles them again.
 	BUILD_TIME_LOG="${log}" make -C "${TREE}" -j"${jobs}" \
 		package/feeds/packages/golang/host/compile package/feeds/packages/rust/host/compile || status=$?
 fi
@@ -80,18 +102,8 @@ time_report "${log}"
 if [ -n "${WRT_COMPILER_CACHE_TRIM:-}" ]; then
 	compiler_cache_trim "${start}"
 fi
-[ -d "${toolchain_dir}" ] || die "no toolchain directory at '${toolchain_dir}'"
-# toolchain/Makefile: $(call stampfile,toolchain,compile) in $(TOOLCHAIN_DIR),
-# and the version stamp as its buildbot mode writes it.
-make -C "${TREE}" "${toolchain_dir}/stamp/.toolchain_compile"
-git -C "${TREE}" log --no-show-signature --format=%h -1 toolchain >"${toolchain_dir}/stamp/.ver_check"
-
-# What this configuration built, or found built as recorded.
-libc=$(toolchain_libc "${toolchain_dir}")
-[ -n "${libc}" ] || die "the toolchain in ${toolchain_dir} has no C library"
 rust_std=$(toolchain_rust_std)
 [ -n "${rust_std}" ] || die "no Rust standard library in staging_dir/hostpkg"
-jq -n --arg cflags "${cflags}" --arg libc "${libc}" --arg rust_std "${rust_std}" \
-	'{cflags: $cflags, libc: $libc, rust_std: $rust_std}' >"${record}"
+write_record "${rust_std}"
 info "toolchains built with: ${cflags}"
 info "toolchains ready in ${toolchain_dir} and staging_dir/hostpkg"

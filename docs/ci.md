@@ -83,7 +83,7 @@ Until run 36412223299 the restored ccache hit almost nothing, for two reasons:
 
 `scripts/build.sh` prints the ccache statistics of each build (OpenWrt's own go to its silenced output) and the CPU, since runners differ (an Intel Xeon 6973P-C and an AMD EPYC 7763 in the two attempts above). A ci build fills about 4.5 GB of the 12 GB the cache may grow to.
 
-A new toolchain leaves every target entry of the old one behind, as the compiler's content changed: run 36793323171 hit 17% of its cacheable calls and grew the R6S cache from 4.7 to 9.3 GB, saved as 2.7 GB. Left alone, each board's cache would grow to its 12 GB, some 3.5 GB compressed, and the two past the quota. In CI `scripts/build.sh` therefore drops what the build did not use (`WRT_CCACHE_TRIM`; a hit refreshes an entry's time), so each board's cache holds one build, about 1.4 GB compressed. Locally both boards share one cache, which keeps everything up to `max_size`.
+A new toolchain leaves every target entry of the old one behind, as the compiler's content changed: run 36793323171 hit 17% of its cacheable calls and grew the R6S cache from 4.7 to 9.3 GB, saved as 2.7 GB. Left alone, each board's cache would grow to its 12 GB, some 3.5 GB compressed, and the two past the quota. In CI `scripts/build.sh` therefore drops what the build did not use (`WRT_COMPILER_CACHE_TRIM`: ccache by each entry's last use, Go's cache and sccache's by modification time, which their hits refresh), so each board's ccache holds one build, about 1.4 GB compressed. Locally both boards share one cache, which keeps everything up to `max_size`.
 
 ## Cache usage
 

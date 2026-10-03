@@ -156,7 +156,7 @@ The alternative is to keep `git am`, save the modification times of the patched 
   - **Keys**: `compiler-cache-host-<hash>-<run>`, restored and saved only when the host stage builds, and `compiler-cache-<board>-<hash>-<run>`. The hash is that of `config/ccache.conf`, which decides whether a ccache entry can hit. Go and sccache entries carry their compiler's identity themselves.
   - **Trim**: `WRT_COMPILER_CACHE_TRIM`, replacing `WRT_CCACHE_TRIM`, drops what the build did not use:
     - ccache by its own last-use time (`--evict-older-than`);
-    - Go and sccache by the files' modification times. Both refresh an entry's time when they use it: Go when the entry is more than an hour old, which every entry restored from an earlier run is, and sccache on every hit.
+    - Go and sccache by the files' modification times. Both refresh an entry's time when they use it: sccache on every hit, Go only when the entry is more than an hour old, so Go's cache also keeps what was modified in the hour before the build.
   - **Pruning**: the `caches` job keeps the newest compiler cache of each stage.
 
 Each stage's cache holds all three languages, which gives one key family, one restore and save per job, and one trim rule. Separate caches per language would triple the keys without changing what is kept.
@@ -168,7 +168,7 @@ Each stage's cache holds all three languages, which gives one key family, one re
   - the hash of the C library, as today;
   - the hash of the Rust standard library for the target (`lib/rustlib/<target>/lib`).
 
-  `toolchain-build` builds the toolchains anew when the configuration's flags differ from the recorded ones, and when a library differs from its record, as it already does for the C library. `build.sh` checks both libraries before and after the build.
+  `toolchain-build` builds the toolchains anew when the configuration's flags differ from the recorded ones, and when a library differs from its record, as it already does for the C library. It writes the record as soon as the cross toolchain is built, and again with Rust's library, so a failed Go or Rust build keeps the cross toolchain for the next run. `build.sh` checks both libraries before and after the build.
 - **No toolchain in a board's build.** `build.sh` fails, naming the stage, when the board's time log holds a stage of `tools/`, `toolchain/`, or the Go or Rust host toolchain.
 
 A board's build that rebuilt Rust would put its `-mcpu` into the shared standard library, as one that rebuilt the C library would, and silently cost hours.

@@ -337,7 +337,8 @@ def _tree_to_build_toolchain(
     holds as ``rust_std``. The tree's Makefile answers toolchain-build.sh's val.*
     queries, builds a toolchain with LIBC for its C library only where there is
     none, and installs the Rust library only where there is none, as make does;
-    it marks the tree when it builds either.
+    it marks the tree when it builds either. RUST_FAILS (from the environment)
+    fails Rust's build.
     """
     tree = workdir / "openwrt"
     toolchain = tree / "staging_dir" / "toolchain"
@@ -370,6 +371,7 @@ def _tree_to_build_toolchain(
         f" && cp {neutral} $(TOOLCHAIN_DIR)/lib/libc.so && touch $(CURDIR)/built; }}\n"
         "package/feeds/packages/rust/host/clean:\n\t@rm -rf $(RUSTLIB)\n"
         "package/feeds/packages/rust/host/compile:\n"
+        "\t@[ -z '$(RUST_FAILS)' ]\n"
         f"\t@[ -f $(RUSTLIB)/{RUST_STD} ] || {{ mkdir -p $(RUSTLIB)/{RUST_STD.parent}"
         f" && cp {neutral_std} $(RUSTLIB)/{RUST_STD} && touch $(CURDIR)/rust-built; }}\n"
         "$(TOOLCHAIN_DIR)/stamp/.toolchain_compile:\n\t@mkdir -p $(@D) && touch $@\n"
@@ -377,10 +379,10 @@ def _tree_to_build_toolchain(
     return tree
 
 
-def _toolchain_build(tree: Path) -> subprocess.CompletedProcess[str]:
+def _toolchain_build(tree: Path, **env: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [REPO / "scripts" / "toolchain-build.sh"],
-        env={**os.environ, "WRT_WORKDIR": str(tree.parent)},
+        env={**os.environ, "WRT_WORKDIR": str(tree.parent), **env},
         capture_output=True,
         text=True,
         check=False,
@@ -434,6 +436,24 @@ def test_a_changed_toolchain_is_built_anew(found: Found, tmp_path: Path) -> None
         "libc": hashlib.sha256(LIBC).hexdigest(),
         "rust_std": _rust_std_hash(),
     }
+
+
+@spec(CAPABILITY, "One toolchain for every board", "Keep the cross toolchain when Go or Rust fails")
+def test_a_failed_rust_build_keeps_the_cross_toolchain(tmp_path: Path) -> None:
+    tree = _tree_to_build_toolchain(tmp_path, None, None)
+    record = tree / "staging_dir" / "toolchain" / "wrt-toolchain.json"
+    cross = {"cflags": NEUTRAL_CFLAGS, "libc": hashlib.sha256(LIBC).hexdigest()}
+    failed = _toolchain_build(tree, RUST_FAILS="1")
+    assert failed.returncode != 0
+    assert (tree / "built").exists(), failed.stderr
+    # The cross toolchain is recorded as soon as it is built, Rust's library not yet.
+    assert json.loads(record.read_text()) == cross
+    (tree / "built").unlink()
+    result = _toolchain_build(tree)
+    assert result.returncode == 0, result.stderr
+    assert not (tree / "built").exists(), result.stderr
+    assert (tree / "rust-built").exists(), result.stderr
+    assert json.loads(record.read_text()) == {**cross, "rust_std": _rust_std_hash()}
 
 
 @spec(CAPABILITY, "One toolchain for every board", "Keep the toolchain in buildbot mode")
