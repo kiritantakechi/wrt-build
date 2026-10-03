@@ -79,9 +79,11 @@ None.
   - `scripts/lib.sh`:
     - the series applied as commits, and the move of the work tree;
     - `link_tree` links the compiler cache directories;
-    - helpers for the time log and the cache trim;
+    - the tree's links, files and configuration keep their times when unchanged;
+    - helpers for the time log, the cache trim and the toolchain guards;
   - `scripts/fetch.sh` and `scripts/patch.sh`;
   - `scripts/toolchain-build.sh`: the Go and Rust host toolchains, the time log, and the toolchains' record with its flags;
+  - `scripts/toolchain-key.sh`: the build files that name the stamps the archive carries;
   - `scripts/toolchain-pack.sh` and `scripts/toolchain-unpack.sh`: `staging_dir/hostpkg` and the stamps of `build_dir/hostpkg`;
   - `scripts/build.sh`: the time report, the toolchain guards, the statistics and trimming of every compiler cache.
 - **Patches**, each with an `Upstream-Status` trailer from the start:
@@ -97,7 +99,7 @@ None.
 - **Tests**:
   - `tests/build/test_environment.py`: re-applying a series;
   - `tests/build/test_boards.py`: the toolchain guards;
-  - `tests/unit/test_lib.py`: the cache trim;
+  - `tests/unit/test_lib.py`: the cache trim, the toolchain guards' helpers, and the writes that keep times;
   - `tests/verified-elsewhere.toml`: the scenarios CI and the build prove.
 - **Docs**: `docs/ci.md` (stages, caches, budget and timings) and `docs/dev-setup.md` (the compiler cache directory).
 - **Disk**:
