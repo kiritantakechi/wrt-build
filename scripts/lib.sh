@@ -152,11 +152,16 @@ go_cache_entries() (
 	find "${TREE}/tmp/go-build/" -type f -name '*-[ad]' | wc -l | tr -d ' '
 )
 
-# compiler_cache_start: zero ccache's and sccache's statistics, so that the
-# report counts this build alone, and print Go's entry count for it.
+# compiler_cache_start: zero ccache's statistics and start sccache's server
+# anew, so that the report counts this build alone, and print Go's entry count
+# for it. The server would exit after ten idle minutes, taking its statistics
+# with it, and a build may reach its Rust packages long after it starts: this
+# one runs until compiler_cache_report stops it.
 compiler_cache_start() (
 	ccache_run --zero-stats >/dev/null
-	sccache_run --zero-stats >/dev/null 2>&1 || true
+	export SCCACHE_IDLE_TIMEOUT=0
+	sccache_run --stop-server >/dev/null 2>&1 || true
+	sccache_run --start-server >/dev/null 2>&1 || true
 	go_cache_entries
 )
 

@@ -97,7 +97,7 @@
 - [ ] 4.2 Make `scripts/build.sh` report every cache:
   - ccache's and sccache's `--show-stats`;
   - the number of Go cache entries before and after the build;
-  - and it stops the sccache server afterwards.
+  - and it runs one sccache server for the whole build, which it stops afterwards.
 
   Verify: build r4s, then clean and rebuild `einat` and `dae`. The second build reports sccache hits and no new Go entries.
 - [x] 4.3 Trim every compiler cache in CI: `WRT_COMPILER_CACHE_TRIM` replaces `WRT_CCACHE_TRIM`. ccache evicts by its own last use, and Go and sccache drop files not modified since the build began (Go since the hour before it, as Go refreshes an entry at most once an hour). Put the file trim in a `scripts/lib.sh` helper with a unit test in `tests/unit/test_lib.py` over files of different ages.
