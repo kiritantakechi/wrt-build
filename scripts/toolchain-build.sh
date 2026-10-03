@@ -1,6 +1,7 @@
 #!/bin/sh
 # toolchain-build: build the host tools and the board-neutral cross toolchain.
 # Usage: scripts/toolchain-build.sh [profile]   (default dev)
+# It ends with the stages that took the most time (build-acceleration D1).
 # Every board builds on this one toolchain (board-model D2), so it is built from
 # the profile's configuration without a board: its C library carries no board's
 # -mcpu. The flags it was built with and the hash of its C library go to
@@ -46,7 +47,11 @@ if [ -d "${toolchain_dir}" ]; then
 	fi
 fi
 jobs=${WRT_JOBS:-$(nproc)}
-make -C "${TREE}" -j"${jobs}" tools/install toolchain/install
+log=$(time_log host)
+status=0
+BUILD_TIME_LOG="${log}" make -C "${TREE}" -j"${jobs}" tools/install toolchain/install || status=$?
+time_report "${log}"
+[ "${status}" -eq 0 ] || die "building the host tools and the toolchain failed"
 [ -d "${toolchain_dir}" ] || die "no toolchain directory at '${toolchain_dir}'"
 # toolchain/Makefile: $(call stampfile,toolchain,compile) in $(TOOLCHAIN_DIR),
 # and the version stamp as its buildbot mode writes it.

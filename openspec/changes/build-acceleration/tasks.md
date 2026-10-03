@@ -2,14 +2,14 @@
 
 ## 1. Measure every build (design D1)
 
-- [ ] 1.1 Record and report the build time log:
+- [x] 1.1 Record and report the build time log:
   - `scripts/toolchain-build.sh` and `scripts/build.sh` export `BUILD_TIME_LOG=$TREE/logs/build-time-<build>.tsv`, emptied before make runs. The build is `host`, or the build directories' suffix (`CONFIG_BUILD_SUFFIX`);
   - after make, whether it succeeded or not, they print `scripts/build-time-report.pl -n 15` of it.
 
   Add a "Build time" section to `docs/ci.md`: what the report shows, wall share and solo time, and that the timings below come from it. Add the build/environment scenario "Find what holds up a build" to `tests/verified-elsewhere.toml`.
 
   Verify: `just build r4s dev` on the VM ends with the report, and `logs/build-time-r4s.tsv` holds the record.
-- [ ] 1.2 Before anything else changes, take the baseline on the VM:
+- [x] 1.2 Before anything else changes, take the baseline on the VM:
   - `just build r4s dev` twice in a row;
   - the second run's duration and its report's top stages.
 

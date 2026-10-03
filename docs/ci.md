@@ -24,6 +24,14 @@ The build jobs enter `.#build`, which holds only the build environment, so they 
 
 Only `sign` references secrets, the release keys of the `release-signing` environment, and it runs neither for a pull request nor while `RELEASE_SIGNING` is unset; every other job is also the job of a fork without secrets. `just env-report` prints the same 28 lines in CI (x86_64) and in the local VM (aarch64), checked on run 36388876907.
 
+## Build time
+
+Every build reports where its time went (`scripts/toolchain-build.sh`, `scripts/build.sh`). OpenWrt's build time log (`BUILD_TIME_LOG`) records when each prepare, configure, compile and install stage of each package began and ended, in the tree's `logs/build-time-<build>.tsv`: `host`, or the build directories' suffix. At the end of the build, `scripts/build-time-report.pl` prints the 15 stages that took the most time, each with two figures:
+- **wall share**: each second of the build is divided among the stages that run in it, so the shares add up to the time anything ran;
+- **solo time**: the seconds in which the stage ran alone, the part of the build that only a faster stage would shorten.
+
+The report is in every build's log, CI's included. Timings measured since the build reports it come from these reports; the earlier ones below come from GitHub's timestamps on make's progress lines, which mark only when a stage began.
+
 ## Timings
 
 | Date | Run | Stage | Duration | Notes |

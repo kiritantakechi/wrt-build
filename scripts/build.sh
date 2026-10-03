@@ -2,6 +2,8 @@
 # build: build a board's configured tree and collect the outputs with a manifest.
 # Usage: scripts/build.sh <board> [profile]   (after fetch, patch, toolchain-build and config)
 # With WRT_CCACHE_TRIM set, the compiler cache keeps only what the build used.
+# It ends with the stages that took the most time, from OpenWrt's build time log
+# (build-acceleration D1), which stays in the tree's logs/.
 # Images and the package repository of one run belong together: kmods only load
 # on the kernel of the same build (vermagic), so they are collected side by side,
 # in $WRT_WORKDIR/out/<board>/<profile>. The toolchain must be the board-neutral
@@ -63,10 +65,14 @@ make -C "${TREE}" -j"${jobs}" download
 # Statistics of this build alone: the cache itself carries them from earlier builds.
 ccache_run --zero-stats >/dev/null
 info "make -j${jobs} (${board}, ${profile}) on ${cpu}"
+# The time log is named after the build directories, as each build keeps its own.
+suffix=$(sed -n 's/^CONFIG_BUILD_SUFFIX="\(.*\)"$/\1/p' "${TREE}/.config")
+log=$(time_log "${suffix}")
 start=$(date +%s)
 status=0
-make -C "${TREE}" -j"${jobs}" || status=$?
+BUILD_TIME_LOG="${log}" make -C "${TREE}" -j"${jobs}" || status=$?
 ccache_run --show-stats --verbose
+time_report "${log}"
 [ "${status}" -eq 0 ] ||
 	die "build failed; rerun 'make -C ${TREE} -j1 V=s' on the failing package for details"
 # WRT_CCACHE_TRIM (CI, where each board's cache is its own): drop the entries this

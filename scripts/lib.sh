@@ -128,6 +128,25 @@ toolchain_libc() (
 	echo "${sum%% *}"
 )
 
+# time_log <build>: OpenWrt's build time log of a build (BUILD_TIME_LOG), emptied:
+# host, or the build directories' suffix. make records a begin and an end event
+# there for every prepare, configure, compile and install stage it runs.
+time_log() (
+	log="${TREE}/logs/build-time-$1.tsv"
+	mkdir -p "${TREE}/logs"
+	: >"${log}"
+	printf '%s\n' "${log}"
+)
+
+# time_report <log>: the stages of a build that took the most time, each with its
+# wall share (each second split among the stages running in it) and its solo
+# time (the seconds it ran alone, which only a faster stage would shorten).
+time_report() (
+	[ -s "$1" ] || return 0
+	info "build time (${1##*/})"
+	perl "${TREE}/scripts/build-time-report.pl" -n 15 "$1"
+)
+
 # compose_seeds <profile> <board> <output>: the profile's seed files in order
 # (config/profiles), then the board's seed (board-model D2): its device, its
 # -mcpu after the profile's optimization flags, and build and output directories

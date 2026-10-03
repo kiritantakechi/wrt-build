@@ -66,6 +66,12 @@ requirement = "Configurable build directory outside the repository"
 scenario = "Build directory on an external volume"
 by = "local VM: WRT_WORKDIR on the SSD volume (docs/dev-setup.md); require_workdir refuses paths inside the repository"
 
+[[scenario]]
+capability = "build/environment"
+requirement = "Build time report"
+scenario = "Find what holds up a build"
+by = "scripts/build.sh and toolchain-build.sh end every build with the report (docs/ci.md, Build time), locally and in build.yml's host-toolchain and firmware jobs; the record stays in the tree's logs/"
+
 # build/upstream-pinning: every fetch and patch run in CI re-proves these.
 
 [[scenario]]
