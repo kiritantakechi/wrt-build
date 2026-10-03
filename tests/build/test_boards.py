@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -31,6 +32,9 @@ IMAGES = ("*-factory.img.gz", "*-sysupgrade.tar.gz")
 # The board-neutral flags a toolchain records (config/toolchain.seed after the target's).
 NEUTRAL_CFLAGS = "-Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -O2 -fhonour-copts"
 LIBC = b"the toolchain's C library"
+# The stand-in Rust standard library for the target, in staging_dir/hostpkg/lib/rustlib.
+RUST_STD = Path("aarch64-unknown-linux-musl/lib/libstd.rlib")
+RUST_STD_CONTENT = b"Rust's standard library"
 GIT_IDENTITY = {
     "GIT_AUTHOR_NAME": "upstream",
     "GIT_AUTHOR_EMAIL": "upstream@example.net",
@@ -221,6 +225,9 @@ def _tree_with_toolchain(workdir: Path, board: Board, record: dict[str, str] | N
     toolchain = tree / "staging_dir" / "toolchain"
     (toolchain / "lib").mkdir(parents=True)
     (toolchain / "lib" / "libc.so").write_bytes(LIBC)
+    rust_std = tree / "staging_dir" / "hostpkg" / "lib" / "rustlib" / RUST_STD
+    rust_std.parent.mkdir(parents=True)
+    rust_std.write_bytes(RUST_STD_CONTENT)
     if record is not None:
         (toolchain / "wrt-toolchain.json").write_text(json.dumps(record))
     (tree / ".config").write_text(f'CONFIG_BUILD_SUFFIX="{board.id}"\n')
@@ -228,28 +235,48 @@ def _tree_with_toolchain(workdir: Path, board: Board, record: dict[str, str] | N
         f"TOOLCHAIN_DIR := {toolchain}\n"
         ".DEFAULT_GOAL := world\n"
         "val.%:\n\t@echo '$($*)'\n"
-        "download world:\n\t@touch $(CURDIR)/built\n"
+        "download:\n\t@:\n"
+        "world:\n\t@touch $(CURDIR)/built\n"
+        # COMPILED (from the environment) logs a stage the build compiled.
+        "\t@[ -z '$(COMPILED)' ] || printf '1\\tbegin\\tcompile\\t%s\\n' '$(COMPILED)'"
+        " >>'$(BUILD_TIME_LOG)'\n"
     )
     return tree
 
 
+def _rust_std_hash() -> str:
+    """Return what toolchain_rust_std (scripts/lib.sh) makes of the stand-in Rust library."""
+    listing = f"{hashlib.sha256(RUST_STD_CONTENT).hexdigest()}  ./{RUST_STD}\n"
+    return hashlib.sha256(listing.encode()).hexdigest()
+
+
 def _board_toolchains() -> list[tuple[str, dict[str, str] | None, str | None]]:
     libc = hashlib.sha256(LIBC).hexdigest()
+    rust_std = _rust_std_hash()
     return [
-        ("neutral", {"cflags": NEUTRAL_CFLAGS, "libc": libc}, None),
+        ("neutral", {"cflags": NEUTRAL_CFLAGS, "libc": libc, "rust_std": rust_std}, None),
         ("no-record", None, "has no record of its flags"),
         *(
             (
                 f"{board.id}-mcpu",
-                {"cflags": f"{NEUTRAL_CFLAGS} -mcpu={board.cpu}", "libc": libc},
+                {
+                    "cflags": f"{NEUTRAL_CFLAGS} -mcpu={board.cpu}",
+                    "libc": libc,
+                    "rust_std": rust_std,
+                },
                 f"built with {board.id}'s -mcpu={board.cpu}",
             )
             for board in load_all()
         ),
         (
             "other-libc",
-            {"cflags": NEUTRAL_CFLAGS, "libc": "0" * 64},
+            {"cflags": NEUTRAL_CFLAGS, "libc": "0" * 64, "rust_std": rust_std},
             "C library is not the one its record names",
+        ),
+        (
+            "other-rust-std",
+            {"cflags": NEUTRAL_CFLAGS, "libc": libc, "rust_std": "0" * 64},
+            "Rust's standard library is not the one the toolchain's record names",
         ),
     ]
 
@@ -296,36 +323,55 @@ def _version_check() -> str:
     pytest.fail("no patch in patches/openwrt carries the version check of toolchain/Makefile")
 
 
-def _tree_to_build_toolchain(workdir: Path, libc: bytes | None, record: bytes | None) -> Path:
+def _tree_to_build_toolchain(
+    workdir: Path,
+    libc: bytes | None,
+    record: bytes | None,
+    *,
+    cflags: str = NEUTRAL_CFLAGS,
+    rust_std: bytes = RUST_STD_CONTENT,
+) -> Path:
     """Write a stand-in tree whose toolchain holds ``libc``, recorded as ``record``'s.
 
-    Its Makefile answers toolchain-build.sh's val.* queries and builds a toolchain,
-    with LIBC for its C library, only where there is none, as make does; it
-    marks the tree when it does.
+    The record names ``cflags`` and the stand-in Rust library, which the tree
+    holds as ``rust_std``. The tree's Makefile answers toolchain-build.sh's val.*
+    queries, builds a toolchain with LIBC for its C library only where there is
+    none, and installs the Rust library only where there is none, as make does;
+    it marks the tree when it builds either.
     """
     tree = workdir / "openwrt"
     toolchain = tree / "staging_dir" / "toolchain"
+    rustlib = tree / "staging_dir" / "hostpkg" / "lib" / "rustlib"
     _commit_toolchain(tree)
     (tree / "feeds.conf").touch()
     neutral = workdir / "neutral-libc.so"
     neutral.write_bytes(LIBC)
+    neutral_std = workdir / "neutral-libstd.rlib"
+    neutral_std.write_bytes(RUST_STD_CONTENT)
     if libc is not None:
         (toolchain / "lib").mkdir(parents=True)
         (toolchain / "lib" / "libc.so").write_bytes(libc)
+    (rustlib / RUST_STD).parent.mkdir(parents=True)
+    (rustlib / RUST_STD).write_bytes(rust_std)
     if record is not None:
         toolchain.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256(record).hexdigest()
         (toolchain / "wrt-toolchain.json").write_text(
-            json.dumps({"cflags": NEUTRAL_CFLAGS, "libc": digest})
+            json.dumps({"cflags": cflags, "libc": digest, "rust_std": _rust_std_hash()})
         )
     (tree / "Makefile").write_text(
         f"TOOLCHAIN_DIR := {toolchain}\n"
+        f"RUSTLIB := {rustlib}\n"
         f"TARGET_CFLAGS := {NEUTRAL_CFLAGS}\n"
         "val.%:\n\t@echo '$($*)'\n"
-        "defconfig tools/install:\n\t@:\n"
+        "defconfig tools/install package/feeds/packages/golang/host/compile:\n\t@:\n"
         "toolchain/install:\n"
         "\t@[ -f $(TOOLCHAIN_DIR)/lib/libc.so ] || { mkdir -p $(TOOLCHAIN_DIR)/lib"
         f" && cp {neutral} $(TOOLCHAIN_DIR)/lib/libc.so && touch $(CURDIR)/built; }}\n"
+        "package/feeds/packages/rust/host/clean:\n\t@rm -rf $(RUSTLIB)\n"
+        "package/feeds/packages/rust/host/compile:\n"
+        f"\t@[ -f $(RUSTLIB)/{RUST_STD} ] || {{ mkdir -p $(RUSTLIB)/{RUST_STD.parent}"
+        f" && cp {neutral_std} $(RUSTLIB)/{RUST_STD} && touch $(CURDIR)/rust-built; }}\n"
         "$(TOOLCHAIN_DIR)/stamp/.toolchain_compile:\n\t@mkdir -p $(@D) && touch $@\n"
     )
     return tree
@@ -341,23 +387,53 @@ def _toolchain_build(tree: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+@dataclass(frozen=True)
+class Found:
+    """A toolchain toolchain-build finds, recorded with LIBC, and what it should build."""
+
+    libc: bytes | None = LIBC
+    cflags: str = NEUTRAL_CFLAGS
+    rust_std: bytes = RUST_STD_CONTENT
+    rebuilt: bool = False
+    rust_rebuilt: bool = False
+
+
 @spec(CAPABILITY, "One toolchain for every board", "Rebuild a changed toolchain")
 @pytest.mark.parametrize(
-    ("libc", "rebuilt"),
-    [(LIBC, False), (b"a C library built with a board's -mcpu", True), (None, True)],
-    ids=["as recorded", "changed", "none"],
+    "found",
+    [
+        pytest.param(Found(), id="as recorded"),
+        pytest.param(
+            Found(libc=b"a C library built with a board's -mcpu", rebuilt=True, rust_rebuilt=True),
+            id="changed",
+        ),
+        pytest.param(Found(libc=None, rebuilt=True, rust_rebuilt=True), id="none"),
+        pytest.param(
+            Found(cflags=f"{NEUTRAL_CFLAGS} -O3", rebuilt=True, rust_rebuilt=True),
+            id="other flags",
+        ),
+        pytest.param(
+            Found(rust_std=b"a Rust library built with a board's -mcpu", rust_rebuilt=True),
+            id="other Rust library",
+        ),
+    ],
 )
-def test_a_changed_toolchain_is_built_anew(
-    libc: bytes | None, tmp_path: Path, *, rebuilt: bool
-) -> None:
-    tree = _tree_to_build_toolchain(tmp_path, libc, LIBC)
+def test_a_changed_toolchain_is_built_anew(found: Found, tmp_path: Path) -> None:
+    tree = _tree_to_build_toolchain(
+        tmp_path, found.libc, LIBC, cflags=found.cflags, rust_std=found.rust_std
+    )
     result = _toolchain_build(tree)
     assert result.returncode == 0, result.stderr
-    assert (tree / "built").exists() == rebuilt, result.stderr
+    assert (tree / "built").exists() == found.rebuilt, result.stderr
+    assert (tree / "rust-built").exists() == found.rust_rebuilt, result.stderr
     toolchain = tree / "staging_dir" / "toolchain"
     assert (toolchain / "lib" / "libc.so").read_bytes() == LIBC
     record = json.loads((toolchain / "wrt-toolchain.json").read_text())
-    assert record == {"cflags": NEUTRAL_CFLAGS, "libc": hashlib.sha256(LIBC).hexdigest()}
+    assert record == {
+        "cflags": NEUTRAL_CFLAGS,
+        "libc": hashlib.sha256(LIBC).hexdigest(),
+        "rust_std": _rust_std_hash(),
+    }
 
 
 @spec(CAPABILITY, "One toolchain for every board", "Keep the toolchain in buildbot mode")
@@ -453,3 +529,29 @@ def test_a_board_toolchain_is_refused(
         assert result.returncode != 0
         assert refusal in result.stderr
         assert "just toolchain-build" in result.stderr
+
+
+@spec(CAPABILITY, "One toolchain for every board", "Boards share the toolchain")
+def test_a_board_build_that_compiles_the_toolchain_fails(tmp_path: Path) -> None:
+    board = load_all()[0]
+    record = {
+        "cflags": NEUTRAL_CFLAGS,
+        "libc": hashlib.sha256(LIBC).hexdigest(),
+        "rust_std": _rust_std_hash(),
+    }
+    tree = _tree_with_toolchain(tmp_path, board, record)
+    result = subprocess.run(
+        [REPO / "scripts" / "build.sh", board.id],
+        env={
+            **os.environ,
+            "WRT_WORKDIR": str(tmp_path),
+            "COMPILED": "package/feeds/packages/rust",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (tree / "built").exists()
+    assert result.returncode != 0
+    assert "compiled part of the toolchain" in result.stderr
+    assert "package/feeds/packages/rust [compile]" in result.stderr

@@ -27,7 +27,7 @@ Upstream-Status: Inappropriate [every board of this tree shares one architecture
  1 file changed, 28 insertions(+), 9 deletions(-)
 
 diff --git a/lang/rust/Makefile b/lang/rust/Makefile
-index 2a01fb6..4d17ff6 100644
+index 2a01fb6..75f476d 100644
 --- a/lang/rust/Makefile
 +++ b/lang/rust/Makefile
 @@ -11,7 +11,7 @@ PKG_RELEASE:=2
@@ -93,7 +93,7 @@ index 2a01fb6..4d17ff6 100644
  	--bootstrap-cache-path=$(DL_DIR)/rustc \
  	--set=llvm.download-ci-llvm=false \
 +	$(if $(RUST_LLVM_TARGETS),'--set=llvm.targets=$(RUST_LLVM_TARGETS)' --set=llvm.experimental-targets=) \
-+	$(if $(CONFIG_CCACHE),--set=llvm.ccache=$(STAGING_DIR_HOST)/bin/ccache) \
++	$(if $(CONFIG_CCACHE),--set=build.ccache=$(STAGING_DIR_HOST)/bin/ccache) \
  	$(TARGET_CONFIGURE_ARGS)
  
  define Host/Uninstall

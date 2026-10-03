@@ -94,7 +94,7 @@ Alternatives considered:
 The same feed patch passes three settings to Rust's bootstrap:
 - `--set=llvm.targets=<host>;<target>`, mapping OpenWrt's architecture names to LLVM's (`aarch64` to `AArch64`, `x86_64` and `i386` to `X86`, `arm` to `ARM`, `mips*` to `Mips`, `powerpc*` to `PowerPC`, `riscv64` to `RISCV`, `loongarch64` to `LoongArch`);
 - `--set=llvm.experimental-targets=`;
-- with `CONFIG_CCACHE`, `--set=llvm.ccache=$(STAGING_DIR_HOST)/bin/ccache`.
+- with `CONFIG_CCACHE`, `--set=build.ccache=$(STAGING_DIR_HOST)/bin/ccache`, which bootstrap uses for LLVM and the other C and C++ it builds.
 
 LLVM is most of Rust's build. rustc needs only the backend of the host, for build scripts and procedural macros, and that of the target. einat's BPF object is compiled by the host's clang (its `build.rs`), not by rustc, so no BPF backend is needed. Through ccache, the host stage's compiler cache serves LLVM whenever only other inputs changed: tools, the cross toolchain, the configuration.
 

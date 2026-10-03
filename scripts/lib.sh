@@ -236,6 +236,7 @@ time_log() (
 # time (the seconds it ran alone, which only a faster stage would shorten).
 time_report() (
 	[ -s "$1" ] || return 0
+	[ -f "${TREE}/scripts/build-time-report.pl" ] || return 0
 	info "build time (${1##*/})"
 	perl "${TREE}/scripts/build-time-report.pl" -n 15 "$1"
 )

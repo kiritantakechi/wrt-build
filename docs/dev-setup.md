@@ -87,7 +87,15 @@ just config r6s dev
 just env-report
 ```
 
-The boards share one source tree and one cross toolchain, built without any board's CPU flags. `just build` brings the toolchain up to date first; a toolchain without the record of the flags it was built with, such as one from before the board model, is built anew. Each board builds in directories of its own (`build_dir/target-*_<board>`, `staging_dir/target-*_<board>` and `bin/<board>`), so building one board leaves another's build as it was. Those directories also hold the host builds that packages bring, Rust's compiler among them, so each board's first build takes much longer than its later ones. The outputs go to `$WRT_WORKDIR/out/<board>/<profile>`, and `just test <board> <profile>` boots them in the emulator.
+The boards share one source tree and one toolchain, built without any board's CPU flags by `just toolchain-build`: the cross toolchain, and the Go and Rust host toolchains built on it (in `staging_dir/hostpkg`). `just build` brings the toolchain up to date first. A toolchain is built anew when it has no record of the flags it was built with, when the configuration's flags differ from the recorded ones, or when its C library or Rust's standard library is not the one its record names. Each board builds in directories of its own (`build_dir/target-*_<board>`, `staging_dir/target-*_<board>` and `bin/<board>`), so building one board leaves another's build as it was, and a board's build that compiles any part of the toolchain fails. The outputs go to `$WRT_WORKDIR/out/<board>/<profile>`, and `just test <board> <profile>` boots them in the emulator.
+
+A build rebuilds only what changed. `just patch` moves the source tree to the patched commits in one checkout, so a file whose content stays the same keeps its modification time, and the build's stamps are named after the content of what they were built from and the target's compiler flags. A build with nothing changed therefore compiles nothing, and a change of `CONFIG_EXTRA_OPTIMIZATION` rebuilds every package with the new flags.
+
+The compiler caches live beside the tree, in `$WRT_WORKDIR/compiler-cache`, one per language: `ccache/` for C and C++ (with `config/ccache.conf` linked in), `go-build/` for Go's build cache, and `sccache/` for Rust packages. The tree links them as `.ccache`, `tmp/go-build` and `.sccache`, so they outlive the tree, and every build reports what each of them served.
+
+From a work directory of before build-acceleration, once:
+- move `$WRT_WORKDIR/ccache` to `$WRT_WORKDIR/compiler-cache/ccache`, and the tree's `tmp/go-build` to `$WRT_WORKDIR/compiler-cache/go-build` (`just config` refuses a `tmp/go-build` directory);
+- remove each board's own Rust, which its build's `PATH` would otherwise find first: run `staging_dir/target-*_<board>/host/lib/rustlib/uninstall.sh`, and delete `build_dir/target-*_<board>/host/rustc-*`.
 
 Every build ends with a report of the stages that took the most time (`docs/ci.md`, Build time). Before build-acceleration, `just build r4s dev` with nothing changed took 28 minutes (2026-10-03, 23 of them in make): re-applying the patch series gave every patched file a new modification time, so the kernel was prepared (3:48) and compiled (9:47) again, and 16 packages with it, 58 stages in all.
 

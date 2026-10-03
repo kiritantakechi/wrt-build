@@ -49,7 +49,7 @@
 - [ ] 3.1 Add `patches/packages/0002` for the feed's Rust recipe:
   - it builds in `build_dir/hostpkg` and installs into `staging_dir/hostpkg`, its uninstall script included;
   - `llvm.targets` holds only the host's and the target's backends, and `llvm.experimental-targets` is empty;
-  - with `CONFIG_CCACHE`, `llvm.ccache` is set;
+  - with `CONFIG_CCACHE`, `build.ccache` is set (Rust moved it there from `llvm.ccache`);
   - its trailer says `Upstream-Status: Inappropriate [every board of this tree shares one architecture]`.
 
   If Rust's bootstrap fails, or ignores sccache as `RUSTC_WRAPPER`, the patch drops the wrapper from Rust's own build (design, risks).
