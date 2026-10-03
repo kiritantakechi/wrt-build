@@ -44,6 +44,11 @@ RECONNECT_TIMEOUT = 60.0
 # its completion dump in /tmp, 21 to 26 s under TCG on an idle host and several
 # times that on a busy one (2026-10-03); later logins take 7 to 9 s.
 LOGIN_TIMEOUT = 180.0
+# The serial console's shell answers a knock with this line, and a script's end
+# with that one; the typed commands, which the console echoes, hold neither.
+CONSOLE_READY = "console-ready"
+CONSOLE_END = "console-end"
+CONSOLE_KNOCK = 15.0
 
 
 class Router:
@@ -142,6 +147,40 @@ class Router:
             session.wait(timeout=timeout)
             output = stdout.read()
         return _TERMINAL_CONTROL.sub("", output)
+
+    def console(self, script: str, *, timeout: float = LOGIN_TIMEOUT) -> str:
+        """Run ``script`` in the serial console's shell; return what it printed.
+
+        For a router that ssh cannot reach. Enter activates the console's shell,
+        whose login takes a while, so a knock repeats until the shell answers. A
+        console that never answers, or never finishes, is said so after what it
+        showed meanwhile.
+        """
+        console = self.emulator.console
+        since = console.mark()
+        deadline = time.monotonic() + timeout
+
+        def shows(line: str, mark: int, limit: float) -> bool:
+            remaining = min(limit, deadline - time.monotonic())
+            try:
+                console.wait_for(rf"(?m)^{line}\r?$", since=mark, timeout=max(remaining, 0.0))
+            except TimeoutError:
+                return False
+            return True
+
+        self.emulator.send_keys("\n")
+        while True:
+            mark = console.mark()
+            self.emulator.send_keys(f"echo '{CONSOLE_READY[:4]}''{CONSOLE_READY[4:]}'\n")
+            if shows(CONSOLE_READY, mark, CONSOLE_KNOCK):
+                break
+            if time.monotonic() >= deadline:
+                return f"{console.text(since)}\n(no shell answered on the console)"
+        mark = console.mark()
+        self.emulator.send_keys(f"{script}; echo '{CONSOLE_END[:4]}''{CONSOLE_END[4:]}'\n")
+        if not shows(CONSOLE_END, mark, timeout):
+            return f"{console.text(since)}\n(the console did not finish the script)"
+        return _TERMINAL_CONTROL.sub("", console.text(mark))
 
     def put(self, local: Path, remote: str) -> None:
         """Copy a local file to the router (over ssh; dropbear has no sftp server).

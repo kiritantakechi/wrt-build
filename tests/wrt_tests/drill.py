@@ -36,6 +36,11 @@ HEALTH_LIMITS = {"total": 20, "interval": 5, "timeout": 5}
 BOOT_LIMIT = 3
 SYNC_TIMEOUT = 600
 DRILL_TIMEOUT = 3600
+# What the router's own console tells of a drill that ended neither way: the
+# slot's state, what still runs (the health check starts after every other
+# service), the end of the log and the addresses. CI's run 37126344220 had a
+# trial slot that booted and then answered neither ssh nor the drill.
+CONSOLE_REPORT = "wrt-slot status; ps w | grep -v ' \\['; logread | tail -n 80; ip -br addr"
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,7 +136,10 @@ class Drill:
             if status.get("slot") not in {None, base} and status.get("state") == "confirmed":
                 break
             if time.monotonic() > deadline:
-                msg = f"the drill of {tag} ended neither confirmed nor rolled back"
+                msg = (
+                    f"the drill of {tag} ended neither confirmed nor rolled back;"
+                    f" the router's console:\n{_console_report(router)}"
+                )
                 raise TimeoutError(msg)
             time.sleep(5)
         router.wait_ready()
@@ -139,6 +147,14 @@ class Drill:
         status = _status(router)
         running = slot(router)
         return Outcome(base, running, running != base and status.get("state") == "confirmed")
+
+
+def _console_report(router: Router) -> str:
+    """Return CONSOLE_REPORT as the router's serial console answers it, or why it does not."""
+    try:
+        return router.console(CONSOLE_REPORT)
+    except Exception as error:  # noqa: BLE001 # a report must not hide the drill's own failure
+        return f"(no report: {error!r})"
 
 
 def _status(router: Router) -> dict[str, str]:
