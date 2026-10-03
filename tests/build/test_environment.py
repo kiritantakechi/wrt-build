@@ -74,7 +74,10 @@ class Series:
     """A scratch repository and a series of two patches, applied as patch.sh does."""
 
     def __init__(self, root: Path) -> None:
-        """Create the repository under ``root``, its base commit and the two patches."""
+        """Create the repository under ``root``, its base commit and the two patches.
+
+        The first patch changes a.txt; the second changes b.txt and adds d.txt.
+        """
         self.repo = root / "repo"
         self.patches = root / "patches"
         self.repo.mkdir()
@@ -84,9 +87,12 @@ class Series:
         self._git("add", ".")
         self._git("commit", "-q", "-m", "base")
         self.base = self._git("rev-parse", "HEAD")
-        for name in ("a", "b"):
-            (self.repo / f"{name}.txt").write_text(f"{name}\none\ntwo, patched\n")
-            self._git("commit", "-q", "-a", "-m", f"patch {name}")
+        (self.repo / "a.txt").write_text("a\none\ntwo, patched\n")
+        self._git("commit", "-q", "-a", "-m", "patch a")
+        (self.repo / "b.txt").write_text("b\none\ntwo, patched\n")
+        (self.repo / "d.txt").write_text("d\n")
+        self._git("add", "d.txt")
+        self._git("commit", "-q", "-a", "-m", "patch b")
         self._git("format-patch", "-q", "-2", "-o", str(self.patches))
         self._git("checkout", "-q", "--detach", self.base)
 
@@ -126,15 +132,19 @@ class Series:
             check=False,
         )
 
+    def files(self) -> list[Path]:
+        """Return the files of the work tree, untracked ones included."""
+        return [path for path in self.repo.iterdir() if path.is_file()]
+
     def age(self) -> dict[str, int]:
         """Give every file of the work tree an old time; return the times."""
-        for path in self.repo.glob("*.txt"):
+        for path in self.files():
             os.utime(path, ns=(OLD, OLD))
         return self.times()
 
     def times(self) -> dict[str, int]:
         """Return each file's modification time."""
-        return {path.name: path.stat().st_mtime_ns for path in self.repo.glob("*.txt")}
+        return {path.name: path.stat().st_mtime_ns for path in self.files()}
 
 
 @pytest.fixture
@@ -149,6 +159,8 @@ def series(tmp_path: Path) -> Series:
 @spec(CAPABILITY, "Rebuild only what changed", "Re-apply an unchanged series")
 def test_reapplied_series_writes_nothing(series: Series) -> None:
     head = series.head
+    # What a package builds in its own source directory stays, time included.
+    (series.repo / "po2lmo.o").write_bytes(b"built")
     before = series.age()
     applied = series.apply()
     assert applied.returncode == 0, applied.stderr
@@ -160,11 +172,17 @@ def test_reapplied_series_writes_nothing(series: Series) -> None:
 def test_changed_patch_rewrites_its_files_only(series: Series) -> None:
     before = series.age()
     patch = series.patch(2)
-    patch.write_text(patch.read_text().replace("+two, patched", "+two, patched again"))
+    # The second patch changes b.txt another way and no longer adds d.txt.
+    head, *diffs = (
+        patch.read_text().replace("+two, patched", "+two, patched again").split("\ndiff --git ")
+    )
+    kept = [diff for diff in diffs if not diff.startswith("a/d.txt ")]
+    patch.write_text("\ndiff --git ".join([head, *kept]).rstrip("\n") + "\n")
     applied = series.apply()
     assert applied.returncode == 0, applied.stderr
     after = series.times()
-    assert {name for name in before if after[name] != before[name]} == {"b.txt"}
+    assert {name for name in before if after.get(name) != before[name]} == {"b.txt", "d.txt"}
+    assert "d.txt" not in after
     assert (series.repo / "b.txt").read_text().endswith("two, patched again\n")
 
 
