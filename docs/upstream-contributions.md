@@ -15,6 +15,7 @@ Any PR, issue or push to a repository the maintainer does not own requires expli
 | 9 | openwrt/openwrt | `patches/openwrt/0009-toolchain-check-the-version-stamp-without-a-race.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
 | 10 | git.openwrt.org/project/qosify | `patches/openwrt/0010-qosify-start-an-interface-anew-on-a-replaced-device.patch` (adds the package patch `100-interface-start-an-interface-anew-on-a-replaced-device.patch`) | Carried in the patch series; not submitted (awaiting approval) | — |
 | 11 | openwrt/openwrt | `patches/openwrt/0011-build-name-prepared-stamps-after-content-and-the-tar.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
+| 12 | openwrt/openwrt | `patches/openwrt/0012-kernel-keep-the-modules-pass-up-to-date-past-the-ima.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
 
 ## 1. EROFS compression algorithm
 
@@ -117,3 +118,12 @@ Problem: the prepared stamps of packages and of the kernel are named after a has
 Why it matters here: `just patch` applied the series anew before every build, so a build with nothing changed took 28 minutes, 13.5 of them preparing and compiling the kernel again (`docs/dev-setup.md`). And toolchain-o3 changes the target's flags, which the packages of a tree's earlier builds would otherwise keep.
 
 What the patch does: the prepared stamps of packages (`PKG_FILES_MD5`) and of the kernel always hash content, as `CONFIG_AUTOREMOVE` builds already do; `rdep` still compares modification times, so an edit, or a touch to force a rebuild, still rebuilds. Each target package's prepared stamp also hashes the symbols `TARGET_CFLAGS` is made of (`TARGET_FLAGS_DEPENDS` in `rules.mk`), so a package prepared with other flags is prepared, and so built, anew. A configured stamp would not do: configuring again keeps the build directory, and with it most of a package's objects. The kernel needs no such stamp, as Kbuild compares every object's command line.
+
+## 12. kernel: the modules pass up to date past the image pass
+
+Problem: `Kernel/Make` skips kbuild when its command line is the one of its last run and no file of the kernel tree is newer than that run's stamp. The image pass runs after the modules pass and writes `vmlinux.symvers`, which modpost writes whenever it links `vmlinux` alone. The next build's modules pass finds that file newer than its stamp and runs kbuild, which removes `vmlinux` and `System.map` first and so links the kernel again, BTF included; the image pass then runs again in turn. No build ever skips kbuild.
+
+Why it matters here: a build with nothing changed linked the kernel again in 6.5 of its minutes (5:45 for the modules pass, 0:43 for the image pass, on the VM; build-acceleration, task 2.4).
+
+What the patch does: once the image pass has run, it refreshes the modules pass's stamp. The image pass builds on what the modules pass built and changes none of its inputs, so that pass is still up to date.
+

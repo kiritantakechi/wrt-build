@@ -119,6 +119,8 @@ A patch to OpenWrt (`patches/openwrt/0011`) does two things.
 
 On the toolchains' side, `toolchain-build.sh` compares the flags of the configuration with those of the record, and builds the toolchains anew when they differ (D7).
 
+**The kernel's own skip.** Upstream skips kbuild when no file of the kernel tree is newer than the stamp of a pass's last run. But the image pass, which runs after the modules pass, writes `vmlinux.symvers`: the next modules pass took it for a change and linked the kernel again, BTF included, and so did every build, for 6.5 minutes on the VM. A second patch (`patches/openwrt/0012`, `Upstream-Status: Pending`) refreshes the modules pass's stamp once the image pass has run, as the image pass changes none of that pass's inputs. This was found during the implementation.
+
 The patch is meant for upstream: "stamps that hold across checkouts and follow the flags". Its trailer says `Upstream-Status: Pending`, and its write-up joins the others in `docs/upstream-contributions.md`, which `toolchain-o3` turns into `docs/patches.md`. Nothing is submitted without the maintainer's consent.
 
 Alternatives considered:

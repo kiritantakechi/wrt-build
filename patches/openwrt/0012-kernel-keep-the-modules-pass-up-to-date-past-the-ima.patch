@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Sun, 4 Oct 2026 02:54:18 +0800
+Subject: [PATCH] kernel: keep the modules pass up to date past the image pass
+
+Kernel/Make skips kbuild when its command line is the one of its last
+run and no file of the kernel tree is newer than that run's stamp. The
+image pass runs after the modules pass and writes vmlinux.symvers, which
+modpost writes whenever it links vmlinux alone. The next build's modules
+pass finds that file newer than its stamp, runs kbuild, removes vmlinux
+and System.map and so links vmlinux again, BTF included, and the image
+pass then runs again in turn. So no build skips kbuild, and each one
+links the kernel again: six minutes on an arm64 host with BTF.
+
+The image pass builds on what the modules pass built and changes none
+of its inputs, so that pass's stamp still holds once the image is built.
+Refresh it then.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ include/kernel-defaults.mk | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/include/kernel-defaults.mk b/include/kernel-defaults.mk
+index c0449ef..7e2a5f8 100644
+--- a/include/kernel-defaults.mk
++++ b/include/kernel-defaults.mk
+@@ -195,6 +195,9 @@ endef
+ define Kernel/CompileImage/Default
+ 	rm -f $(TARGET_DIR)/init
+ 	+$(call Kernel/Make,image,$(KERNEL_MAKEOPTS_IMAGE) $(if $(KERNELNAME),$(KERNELNAME),all))
++	# The image pass writes vmlinux.symvers, but changes none of the inputs
++	# of the modules pass before it: that pass is still up to date.
++	touch -c $(LINUX_DIR)/.kbuild_modules
+ 	$(call Kernel/CopyImage)
+ endef
+ 

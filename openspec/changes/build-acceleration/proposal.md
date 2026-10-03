@@ -35,6 +35,8 @@ Four rules, applied the same way to CI and local builds, to every board and to e
   - `toolchain-build` rebuilds the toolchains whose recorded flags differ from the configuration's.
   - The patch step applies the series as commits in the object database. It then moves the work tree from the previous patched commit to the new one, so git rewrites only the files whose content changes. A series that does not apply leaves the tree untouched.
   - `fetch` no longer resets an existing tree.
+  - The other steps keep times too: links, generated files and a configuration the same as before are left as they are.
+  - A second patch to OpenWrt keeps the kernel's modules pass up to date past its image pass, so that OpenWrt's own skip of Kbuild holds when nothing changed.
 - **Keep a compiler cache for every language**: ccache for C and C++, Go's build cache, and sccache for Rust packages. They live together in `$WRT_WORKDIR/compiler-cache`, beside the tree, so they outlive it.
   - In CI, each stage keeps one compiler cache per run: one for the host stage, and one for each board. Each is trimmed to what its build used.
   - The `caches` job keeps the newest of each.
@@ -88,6 +90,7 @@ None.
   - `scripts/build.sh`: the time report, the toolchain guards, the statistics and trimming of every compiler cache.
 - **Patches**, each with an `Upstream-Status` trailer from the start:
   - `patches/openwrt/0011`: prepared stamps named after content and the target's compiler flags (`Pending`);
+  - `patches/openwrt/0012`: the kernel's modules pass kept up to date past its image pass, so that kbuild is skipped when nothing changed (`Pending`);
   - `patches/packages/0002`: Rust under `staging_dir/hostpkg`, LLVM for the host and the target only, through ccache (`Inappropriate`: every board here shares one architecture).
 - **Configuration**:
   - `config/toolchain.seed`: sccache for Rust packages;
