@@ -187,3 +187,41 @@ def test_an_unchanged_configuration_keeps_its_time(tmp_path: Path) -> None:
     assert configure(board) == OLD
     assert configure(board.replace("=y", "=n")) > OLD
     assert configure(board) > OLD
+
+
+def test_go_cache_counts_what_go_compiled(tmp_path: Path) -> None:
+    # Go writes an action entry, its creation time inside, only for an action it
+    # ran; a hit refreshes an old entry's file time alone.
+    start = 1_700_000_000
+    tree = tmp_path / "openwrt"
+    cache = tree / "tmp" / "go-build"
+    entries = (
+        ("aa", "11", 10, start - 86_400, b"compiled"),  # a hit
+        ("bb", "22", 10, start + 60, b"compiled"),  # compiled anew
+        ("cc", "e3", 0, start + 60, None),  # an action with no output
+        ("dd", "44", 514, start + 60, b"go index v2 ..."),  # sources unpacked anew
+    )
+    for action, output, size, created, data in entries:
+        action_id, output_id = action * 32, output * 32
+        entry = cache / action / f"{action_id}-a"
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_text(f"v1 {action_id} {output_id} {size:20d} {created * 10**9:20d}\n")
+        if data is not None:
+            (cache / output).mkdir(exist_ok=True)
+            (cache / output / f"{output_id}-d").write_bytes(data)
+    for path in cache.rglob("*-[ad]"):
+        os.utime(path, (start + 120, start + 120))
+    result = subprocess.run(
+        [
+            "sh",
+            "-c",
+            f'TREE="$1" && . "{LIB}" && go_cache_compiled "$2"',
+            "sh",
+            str(tree),
+            str(start),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "1"

@@ -96,10 +96,10 @@
   Verify: after `just config r4s dev`, the three links resolve into `compiler-cache`, and `sccache --version` runs in the build environment (`nix develop .#build -c wrt-build-fhs -c 'sccache --version'`).
 - [ ] 4.2 Make `scripts/build.sh` report every cache:
   - ccache's and sccache's `--show-stats`;
-  - the number of Go cache entries before and after the build;
+  - how many packages Go compiled instead of taking them from its cache;
   - and it runs one sccache server for the whole build, which it stops afterwards.
 
-  Verify: build r4s, then clean and rebuild `einat` and `dae`. The second build reports sccache hits and no new Go entries.
+  Verify: build r4s, then clean and rebuild `einat` and `dae`. The second build reports sccache hits and no package Go compiled anew.
 - [x] 4.3 Trim every compiler cache in CI: `WRT_COMPILER_CACHE_TRIM` replaces `WRT_CCACHE_TRIM`. ccache evicts by its own last use, and Go and sccache drop files not modified since the build began (Go since the hour before it, as Go refreshes an entry at most once an hour). Put the file trim in a `scripts/lib.sh` helper with a unit test in `tests/unit/test_lib.py` over files of different ages.
 
   Verify: the unit test passes, and `grep -r WRT_CCACHE_TRIM` finds nothing outside the archive.
@@ -126,7 +126,7 @@
   Update the build/ci records in `tests/verified-elsewhere.toml` for "Toolchain cache hit", "Only the packages feed updated" and "Toolchain inputs change".
 
   Verify: the run is green, and the records cite it.
-- [ ] 5.3 Dispatch a second run of the same commit (`workflow_dispatch`). From its firmware reports, record that no compiler cache missed and that Go's gained no entry. Then record the cache budget after the `caches` job (`gh cache list`) against the estimate of D8. Add "Rebuild from warm compiler caches" and "One compiler cache per stage" to `tests/verified-elsewhere.toml`.
+- [ ] 5.3 Dispatch a second run of the same commit (`workflow_dispatch`). From its firmware reports, record that no compiler cache missed and that Go compiled no package anew. Then record the cache budget after the `caches` job (`gh cache list`) against the estimate of D8. Add "Rebuild from warm compiler caches" and "One compiler cache per stage" to `tests/verified-elsewhere.toml`.
 
   Verify: the second run's firmware jobs take under an hour, and the ref holds one compiler cache per stage.
 - [ ] 5.4 Rewrite the stage, cache and timing sections of `docs/ci.md`:

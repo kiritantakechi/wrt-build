@@ -58,15 +58,14 @@ cpu=$(lscpu | awk -F ': *' '
 info "make download"
 make -C "${TREE}" -j"${jobs}" download
 # Statistics of this build alone: the caches carry them from earlier builds.
-go_entries=$(compiler_cache_start)
+start=$(compiler_cache_start)
 info "make -j${jobs} (${board}, ${profile}) on ${cpu}"
 # The time log is named after the build directories, as each build keeps its own.
 suffix=$(sed -n 's/^CONFIG_BUILD_SUFFIX="\(.*\)"$/\1/p' "${TREE}/.config")
 log=$(time_log "${suffix}")
-start=$(date +%s)
 status=0
 BUILD_TIME_LOG="${log}" make -C "${TREE}" -j"${jobs}" || status=$?
-compiler_cache_report "${go_entries}"
+compiler_cache_report "${start}"
 time_report "${log}"
 [ "${status}" -eq 0 ] ||
 	die "build failed; rerun 'make -C ${TREE} -j1 V=s' on the failing package for details"

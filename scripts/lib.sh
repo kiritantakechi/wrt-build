@@ -142,8 +142,7 @@ sccache_run() (
 	SCCACHE_DIR="${TREE}/.sccache" sccache "$@"
 )
 
-# go_cache_entries: how many entries Go's build cache holds. Go keeps no
-# statistics: a build that adds no entry was served from the cache.
+# go_cache_entries: how many entries Go's build cache holds.
 go_cache_entries() (
 	[ -d "${TREE}/tmp/go-build/" ] || {
 		echo 0
@@ -152,26 +151,47 @@ go_cache_entries() (
 	find "${TREE}/tmp/go-build/" -type f -name '*-[ad]' | wc -l | tr -d ' '
 )
 
+# go_cache_compiled <start>: how many packages Go compiled since <start>,
+# seconds since the epoch, instead of taking them from its build cache. Go keeps
+# no statistics, but writes an action entry, its creation time inside, only for
+# an action it ran. Those since <start> that hold an output count, but the index
+# of a package's sources, which Go writes again for sources unpacked anew.
+go_cache_compiled() (
+	cache="${TREE}/tmp/go-build"
+	[ -d "${cache}/" ] || {
+		echo 0
+		return 0
+	}
+	find "${cache}/" -type f -name '*-a' -newermt "@$1" \
+		-exec awk -v start="$1" '$5 / 1e9 >= start && $4 > 0 { print $3 }' {} + |
+		while read -r output; do
+			head -c 8 "${cache}/$(printf %.2s "${output}")/${output}-d" 2>/dev/null |
+				grep -qx 'go index' || echo "${output}"
+		done | wc -l | tr -d ' '
+)
+
 # compiler_cache_start: zero ccache's statistics and start sccache's server
-# anew, so that the report counts this build alone, and print Go's entry count
-# for it. The server would exit after ten idle minutes, taking its statistics
-# with it, and a build may reach its Rust packages long after it starts: this
-# one runs until compiler_cache_report stops it.
+# anew, so that the report counts this build alone; print the time, seconds
+# since the epoch, for compiler_cache_report and compiler_cache_trim. The server
+# would exit after ten idle minutes, taking its statistics with it, and a build
+# may reach its Rust packages long after it starts: this one runs until
+# compiler_cache_report stops it.
 compiler_cache_start() (
 	ccache_run --zero-stats >/dev/null
 	export SCCACHE_IDLE_TIMEOUT=0
 	sccache_run --stop-server >/dev/null 2>&1 || true
 	sccache_run --start-server >/dev/null 2>&1 || true
-	go_cache_entries
+	date +%s
 )
 
-# compiler_cache_report <Go entries at the start>: what every compiler cache did
-# in this build; then stop sccache's server, which outlives the build otherwise.
+# compiler_cache_report <start>: what every compiler cache did in the build
+# begun at <start>; then stop sccache's server, which outlives the build otherwise.
 compiler_cache_report() (
 	ccache_run --show-stats --verbose
 	sccache_run --show-stats 2>/dev/null || true
-	after=$(go_cache_entries)
-	info "Go build cache: $1 entries before the build, ${after} after"
+	compiled=$(go_cache_compiled "$1")
+	entries=$(go_cache_entries)
+	info "Go build cache: ${compiled} packages compiled anew, ${entries} entries"
 	sccache_run --stop-server >/dev/null 2>&1 || true
 )
 

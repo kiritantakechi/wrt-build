@@ -73,8 +73,7 @@ write_record() {
 
 jobs=${WRT_JOBS:-$(nproc)}
 log=$(time_log host)
-go_entries=$(compiler_cache_start)
-start=$(date +%s)
+start=$(compiler_cache_start)
 status=0
 BUILD_TIME_LOG="${log}" make -C "${TREE}" -j"${jobs}" tools/install toolchain/install || status=$?
 if [ "${status}" -eq 0 ]; then
@@ -95,7 +94,7 @@ if [ "${status}" -eq 0 ]; then
 	BUILD_TIME_LOG="${log}" make -C "${TREE}" -j"${jobs}" \
 		package/feeds/packages/golang/host/compile package/feeds/packages/rust/host/compile || status=$?
 fi
-compiler_cache_report "${go_entries}"
+compiler_cache_report "${start}"
 time_report "${log}"
 [ "${status}" -eq 0 ] || die "building the host tools and the toolchains failed"
 # WRT_COMPILER_CACHE_TRIM (CI, where the host stage keeps a cache of its own): drop
