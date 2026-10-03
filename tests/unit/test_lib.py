@@ -1,4 +1,4 @@
-"""The helpers of scripts/lib.sh: the configuration's guard, the cache trim and the toolchain's."""
+"""The helpers of scripts/lib.sh: the tree's files, the caches and the toolchain."""
 
 import hashlib
 import os
@@ -133,3 +133,57 @@ def test_toolchain_stages_name_what_only_toolchain_build_builds(tmp_path: Path) 
         "toolchain/gcc/final [compile]",
         "tools/flock [prepare]",
     ]
+
+
+def _lib(script: str, *args: str) -> None:
+    """Run ``script`` with scripts/lib.sh sourced; its arguments are ``args``."""
+    subprocess.run(["sh", "-c", f'. "{LIB}" && {script}', "sh", *args], check=True)
+
+
+OLD = 1_700_000_000
+
+
+def test_an_unchanged_link_keeps_its_time(tmp_path: Path) -> None:
+    link = tmp_path / "link"
+    _lib('symlink "$1" "$2"', "target", str(link))
+    os.utime(link, (OLD, OLD), follow_symlinks=False)
+    _lib('symlink "$1" "$2"', "target", str(link))
+    assert link.lstat().st_mtime == OLD
+    _lib('symlink "$1" "$2"', "other", str(link))
+    assert link.readlink() == Path("other")
+
+
+def test_an_unchanged_file_keeps_its_time(tmp_path: Path) -> None:
+    file = tmp_path / "file"
+    file.write_text("same\n")
+    os.utime(file, (OLD, OLD))
+    _lib('printf "same\\n" | update_file "$1"', str(file))
+    assert file.stat().st_mtime == OLD
+    _lib('printf "other\\n" | update_file "$1"', str(file))
+    assert file.read_text() == "other\n"
+    assert file.stat().st_mtime > OLD
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["file"]
+
+
+def test_an_unchanged_configuration_keeps_its_time(tmp_path: Path) -> None:
+    # A stand-in tree whose defconfig keeps the seed as the configuration.
+    tree = tmp_path / "openwrt"
+    (tree / "tmp").mkdir(parents=True)
+    (tree / "Makefile").write_text("defconfig:\n\t@:\n")
+    config = tree / ".config"
+    seed = tmp_path / "seed"
+
+    def configure(text: str) -> float:
+        seed.write_text(text)
+        _lib('TREE="$1" && configure_tree "$2"', str(tree), str(seed))
+        return config.stat().st_mtime
+
+    board = 'CONFIG_BUILD_SUFFIX="r4s"\nCONFIG_X=y\n'
+    configure(board)
+    # The build directories were configured with it long ago.
+    for path in (config, tree / "tmp" / "wrt-config-r4s"):
+        os.utime(path, (OLD, OLD))
+    assert configure("CONFIG_X=y\n") > OLD
+    assert configure(board) == OLD
+    assert configure(board.replace("=y", "=n")) > OLD
+    assert configure(board) > OLD

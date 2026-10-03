@@ -89,9 +89,9 @@ kernel_dir() (
 # cache (files/, env/ and .ccache are all gitignored upstream). The cache reads
 # its settings from config/ccache.conf.
 link_tree() (
-	ln -sfn "${REPO_DIR}/files" "${TREE}/files"
+	symlink "${REPO_DIR}/files" "${TREE}/files"
 	mkdir -p "${TREE}/env" "${TREE}/tmp" "${WRT_WORKDIR}/out"
-	ln -sfn "${REPO_DIR}/config/kernel.config" "${TREE}/env/kernel-config"
+	symlink "${REPO_DIR}/config/kernel.config" "${TREE}/env/kernel-config"
 	# The compiler caches live beside the tree, one per language, linked where
 	# rules.mk, the feed's Go values and its Rust values look for them
 	# (build-acceleration D6).
@@ -99,10 +99,29 @@ link_tree() (
 	[ -L "${TREE}/tmp/go-build" ] || [ ! -e "${TREE}/tmp/go-build" ] ||
 		die "${TREE}/tmp/go-build is a directory; move it to ${cache}/go-build"
 	mkdir -p "${cache}/ccache" "${cache}/go-build" "${cache}/sccache"
-	ln -sfn "${cache}/ccache" "${TREE}/.ccache"
-	ln -sfn "${cache}/go-build" "${TREE}/tmp/go-build"
-	ln -sfn "${cache}/sccache" "${TREE}/.sccache"
-	ln -sfn "${REPO_DIR}/config/ccache.conf" "${cache}/ccache/ccache.conf"
+	symlink "${cache}/ccache" "${TREE}/.ccache"
+	symlink "${cache}/go-build" "${TREE}/tmp/go-build"
+	symlink "${cache}/sccache" "${TREE}/.sccache"
+	symlink "${REPO_DIR}/config/ccache.conf" "${cache}/ccache/ccache.conf"
+)
+
+# symlink <target> <link>: make <link> point to <target>, leaving a link that
+# already does as it is. The kernel's configuration follows its inputs'
+# times, a link's own among them (build-acceleration D4).
+symlink() (
+	current=$(readlink "$2") || current=
+	[ "${current}" = "$1" ] || ln -sfn "$1" "$2"
+)
+
+# update_file <file>: write standard input to <file>, leaving a file that holds
+# it already as it is, modification time included (build-acceleration D4).
+update_file() (
+	cat >"$1.new"
+	if cmp -s "$1.new" "$1"; then
+		rm -f "$1.new"
+	else
+		mv -f "$1.new" "$1"
+	fi
 )
 
 # ccache_run <args>: the ccache that OpenWrt builds (tools/ccache), on the cache
@@ -186,7 +205,7 @@ write_board_table() (
 		devices="${devices:+${devices} }${device}"
 	done
 	mkdir -p "${TREE}/env"
-	cat >"${TREE}/env/wrt-boards.mk" <<-EOF
+	update_file "${TREE}/env/wrt-boards.mk" <<-EOF
 		# Written by scripts/lib.sh from boards/*.json (board-model D3, D4): the
 		# U-Boot variant, id and environment directory, and the device of every board.
 		WRT_AB_BOARDS := ${boards}
@@ -302,7 +321,11 @@ compose_seeds() (
 
 # configure_tree <seed file>: the tree's .config from the seeds. Fails if make
 # defconfig dropped or changed any of their lines (renamed or removed options,
-# unmet dependencies).
+# unmet dependencies). A configuration the same as the one its build
+# directories were last configured with keeps that one's time
+# (tmp/wrt-config-<build>, the build being host or the build directories'
+# suffix): the kernel's configuration follows .config's time, and every kernel
+# module follows the kernel's (build-acceleration D4).
 configure_tree() (
 	cp "$1" "${TREE}/.config"
 	make -C "${TREE}" defconfig >/dev/null
@@ -310,6 +333,13 @@ configure_tree() (
 	if [ -n "${missing}" ]; then
 		printf 'error: defconfig dropped or changed these seed lines:\n%s\n' "${missing}" >&2
 		exit 1
+	fi
+	suffix=$(sed -n 's/^CONFIG_BUILD_SUFFIX="\(.*\)"$/\1/p' "${TREE}/.config")
+	last="${TREE}/tmp/wrt-config-${suffix:-host}"
+	if cmp -s "${TREE}/.config" "${last}"; then
+		touch -r "${last}" "${TREE}/.config"
+	else
+		cp -p "${TREE}/.config" "${last}"
 	fi
 )
 

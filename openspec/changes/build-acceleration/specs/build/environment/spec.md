@@ -16,7 +16,7 @@ The location of the build working directory SHALL be configurable: it holds the 
 ## ADDED Requirements
 
 ### Requirement: Rebuild only what changed
-Running the build entry points again SHALL rebuild only what changed since the last build, and all that the change affects. The patch step SHALL leave every file whose content it does not change as it was, modification time included. A patch series that does not apply MUST leave the source tree as it was. The target's compiler flags SHALL count among the inputs of every target package and toolchain, so that no build keeps an object compiled with other flags.
+Running the build entry points again SHALL rebuild only what changed since the last build, and all that the change affects. The patch and configuration steps SHALL leave every file whose content they do not change as it was, modification time included. A patch series that does not apply MUST leave the source tree as it was. The target's compiler flags SHALL count among the inputs of every target package and toolchain, so that no build keeps an object compiled with other flags.
 
 #### Scenario: Re-apply an unchanged series
 - **WHEN** the patch step runs again with the same `upstream.lock` and the same patches

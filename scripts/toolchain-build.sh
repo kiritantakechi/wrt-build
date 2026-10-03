@@ -82,7 +82,8 @@ if [ "${status}" -eq 0 ]; then
 	# toolchain/Makefile: $(call stampfile,toolchain,compile) in $(TOOLCHAIN_DIR),
 	# and the version stamp as its buildbot mode writes it.
 	make -C "${TREE}" "${toolchain_dir}/stamp/.toolchain_compile"
-	git -C "${TREE}" log --no-show-signature --format=%h -1 toolchain >"${toolchain_dir}/stamp/.ver_check"
+	version=$(git -C "${TREE}" log --no-show-signature --format=%h -1 toolchain)
+	printf '%s\n' "${version}" | update_file "${toolchain_dir}/stamp/.ver_check"
 	libc=$(toolchain_libc "${toolchain_dir}")
 	[ -n "${libc}" ] || die "the toolchain in ${toolchain_dir} has no C library"
 	# Rust's library is the recorded one here, or none: the checks above removed

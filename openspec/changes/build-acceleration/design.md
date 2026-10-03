@@ -138,6 +138,8 @@ Alternatives considered:
 - **The move.** The work tree then moves to the patched commit with a single `git checkout -f --detach` from wherever it was, followed by `git clean -fd`. Git writes only the files whose content differs between the two commits. Ignored build output stays, and `version.date` is restored as before.
 - **`fetch`** fetches the pinned commits and checks them out only in a new tree. An existing tree is left for `patch` to move.
 
+- **The other writes.** The steps after the patch keep times as well. Links that already point where they should stay; `env/wrt-boards.mk` and the toolchain's version stamp are written only when they change. A configuration the same as the one its build directories were last configured with keeps that one's time (`tmp/wrt-config-<build>`). This was found during the implementation: `make defconfig` touches `.config`, and `toolchain-build` and `config` configure the tree twice in every build. The kernel configures again when `.config`, or one of its configuration files (`env/kernel-config`, a link, among them), is newer than its configured stamp, and every kernel module's build stamp follows the kernel's `.config`. So a build with nothing changed configured the kernel and rebuilt every kernel module.
+
 The result:
 - running fetch and patch again with nothing changed writes no file;
 - a changed patch rewrites only the files it changes, so only their packages rebuild;
