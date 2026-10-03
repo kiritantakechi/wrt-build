@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Sun, 4 Oct 2026 04:15:57 +0800
+Subject: [PATCH] luci-base: build po2lmo and jsmin in the host build directory
+
+The host build compiled both tools in the package's own source
+directory, after its prepared stamp. Their objects and binaries were
+then newer than that stamp, so every build prepared luci-base again,
+for the host and for the target, and packaged it anew. Host/Prepare
+already copies src/ into the host build directory: build there.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ modules/luci-base/Makefile | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/modules/luci-base/Makefile b/modules/luci-base/Makefile
+index 952c993..52c63bc 100644
+--- a/modules/luci-base/Makefile
++++ b/modules/luci-base/Makefile
+@@ -64,13 +64,13 @@ define Host/Configure
+ endef
+ 
+ define Host/Compile
+-	$(MAKE) -C src/ clean po2lmo jsmin
++	$(MAKE) -C $(HOST_BUILD_DIR) clean po2lmo jsmin
+ endef
+ 
+ define Host/Install
+ 	$(INSTALL_DIR) $(1)/bin
+-	$(INSTALL_BIN) src/po2lmo $(1)/bin/po2lmo
+-	$(INSTALL_BIN) src/jsmin $(1)/bin/jsmin
++	$(INSTALL_BIN) $(HOST_BUILD_DIR)/po2lmo $(1)/bin/po2lmo
++	$(INSTALL_BIN) $(HOST_BUILD_DIR)/jsmin $(1)/bin/jsmin
+ endef
+ 
+ $(eval $(call HostBuild))

@@ -16,6 +16,7 @@ Any PR, issue or push to a repository the maintainer does not own requires expli
 | 10 | git.openwrt.org/project/qosify | `patches/openwrt/0010-qosify-start-an-interface-anew-on-a-replaced-device.patch` (adds the package patch `100-interface-start-an-interface-anew-on-a-replaced-device.patch`) | Carried in the patch series; not submitted (awaiting approval) | — |
 | 11 | openwrt/openwrt | `patches/openwrt/0011-build-name-prepared-stamps-after-content-and-the-tar.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
 | 12 | openwrt/openwrt | `patches/openwrt/0012-kernel-keep-the-modules-pass-up-to-date-past-the-ima.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
+| 13 | openwrt/luci | `patches/luci/0001-luci-base-build-po2lmo-and-jsmin-in-the-host-build-d.patch` | Carried in the patch series; not submitted (awaiting approval) | — |
 
 ## 1. EROFS compression algorithm
 
@@ -126,4 +127,14 @@ Problem: `Kernel/Make` skips kbuild when its command line is the one of its last
 Why it matters here: a build with nothing changed linked the kernel again in 6.5 of its minutes (5:45 for the modules pass, 0:43 for the image pass, on the VM; build-acceleration, task 2.4).
 
 What the patch does: once the image pass has run, it refreshes the modules pass's stamp. The image pass builds on what the modules pass built and changes none of its inputs, so that pass is still up to date.
+
+## 13. luci-base: the host tools built in the host build directory
+
+Problem: luci-base's host build compiles `po2lmo` and `jsmin` with `make -C src/`, in the package's own source directory, after it has written its prepared stamp. Their objects and binaries are then newer than that stamp, so every build prepares luci-base again, for the host and for the target, and packages it anew.
+
+Why it matters here: with the rest of build-acceleration, luci-base was the only package a build with nothing changed still prepared and compiled.
+
+What the patch does: `Host/Prepare` already copies `src/` into the host build directory, so `Host/Compile` builds there, and `Host/Install` takes the tools from there.
+
+Verification log: 2026-10-04, both tools build from a copy of `src/`, as in the host build directory.
 

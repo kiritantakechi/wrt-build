@@ -91,6 +91,7 @@ None.
 - **Patches**, each with an `Upstream-Status` trailer from the start:
   - `patches/openwrt/0011`: prepared stamps named after content and the target's compiler flags (`Pending`);
   - `patches/openwrt/0012`: the kernel's modules pass kept up to date past its image pass, so that kbuild is skipped when nothing changed (`Pending`);
+  - `patches/luci/0001`: luci-base's host tools built in its host build directory, not in its sources (`Pending`);
   - `patches/packages/0002`: Rust under `staging_dir/hostpkg`, LLVM for the host and the target only, through ccache (`Inappropriate`: every board here shares one architecture).
 - **Configuration**:
   - `config/toolchain.seed`: sccache for Rust packages;

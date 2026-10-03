@@ -82,6 +82,7 @@ class Series:
         self.patches = root / "patches"
         self.repo.mkdir()
         self._git("init", "-q")
+        (self.repo / ".gitignore").write_text("*.o\n")
         for name in ("a", "b", "c"):
             (self.repo / f"{name}.txt").write_text(f"{name}\none\ntwo\n")
         self._git("add", ".")
@@ -159,13 +160,14 @@ def series(tmp_path: Path) -> Series:
 @spec(CAPABILITY, "Rebuild only what changed", "Re-apply an unchanged series")
 def test_reapplied_series_writes_nothing(series: Series) -> None:
     head = series.head
-    # What a package builds in its own source directory stays, time included.
+    # Ignored build output stays, time included; an untracked file of no commit goes.
     (series.repo / "po2lmo.o").write_bytes(b"built")
+    (series.repo / "stray.patch").write_text("a patch a package would apply\n")
     before = series.age()
     applied = series.apply()
     assert applied.returncode == 0, applied.stderr
     assert series.head == head
-    assert series.times() == before
+    assert series.times() == {name: time for name, time in before.items() if name != "stray.patch"}
 
 
 @spec(CAPABILITY, "Rebuild only what changed", "Change one patch")

@@ -469,13 +469,13 @@ series_commit() (
 # so every other file keeps its modification time, and make rebuilds only what
 # changed (build-acceleration D5). A file whose time changed but not its content
 # counts as unchanged too: the index is refreshed first, or checkout would take
-# it for a local change and write it again. The files of the commit the tree
-# was on that <commit> lacks go; untracked files stay, among them what a package
-# builds in its own source directory (luci-base's po2lmo and jsmin), which a
-# clean would remove, and so have rebuilt, every time.
+# it for a local change and write it again. Untracked files that are not ignored
+# go, such as a patch a package would apply, but version.date, which patch.sh
+# keeps; ignored build output stays.
 move_tree() (
 	git -C "$1" update-index -q --refresh >/dev/null || true
 	git -C "$1" -c advice.detachedHead=false checkout -q -f --detach "$2"
+	git -C "$1" clean -q -f -d -e /version.date
 	head=$(git -C "$1" rev-parse HEAD)
 	wanted=$(git -C "$1" rev-parse "$2^{commit}")
 	[ "${head}" = "${wanted}" ] || die "$1 is not at $2"
