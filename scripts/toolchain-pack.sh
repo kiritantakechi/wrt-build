@@ -1,5 +1,5 @@
 #!/bin/sh
-# toolchain-pack: pack the built host tools and cross toolchain into a tarball.
+# toolchain-pack: pack the built host tools and the toolchain of every language into a tarball.
 # Usage: scripts/toolchain-pack.sh <archive.tar.zst>
 set -eu
 # shellcheck source=scripts/lib.sh
@@ -21,7 +21,7 @@ toolchain="staging_dir/${toolchain_dir##*/}"
 # Without its compile stamp, make world rebuilds the toolchain (toolchain-build).
 [ -f "${toolchain}/stamp/.toolchain_compile" ] ||
 	die "the toolchain has no compile stamp; build it with toolchain-build"
-# staging_dir/hostpkg only exists once host packages (golang, rust, ...) are built.
+# staging_dir/hostpkg holds the host packages, Go and Rust among them.
 set --
 for path in staging_dir/host staging_dir/hostpkg "${toolchain}" build_dir/host; do
 	if [ -e "${path}" ]; then
@@ -29,5 +29,13 @@ for path in staging_dir/host staging_dir/hostpkg "${toolchain}" build_dir/host; 
 	fi
 done
 [ "$#" -gt 0 ] || die "nothing to pack; build the toolchain first"
-tar -I 'zstd -T0 -3' -cf "${archive}" "$@"
+# Of the host packages' build directories, only the stamps that tell make they
+# are built: their empty dot files (.prepared*, .configured, .built*). Rust's
+# build tree alone takes 20 GB, and nothing reads it once Rust is installed.
+stamps=$(mktemp)
+trap 'rm -f "${stamps}"' EXIT INT TERM
+if [ -d build_dir/hostpkg ]; then
+	find build_dir/hostpkg -mindepth 2 -maxdepth 2 -type f -name '.*' -size 0 >"${stamps}"
+fi
+tar -I 'zstd -T0 -3' -cf "${archive}" "$@" -T "${stamps}"
 ls -lh "${archive}"

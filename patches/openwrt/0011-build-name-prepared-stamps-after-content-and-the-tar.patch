@@ -1,0 +1,93 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Sat, 3 Oct 2026 22:08:45 +0800
+Subject: [PATCH] build: name prepared stamps after content and the target's
+ flags
+
+A package's prepared stamp is named after a hash of its files. Unless
+CONFIG_AUTOREMOVE is set, that hash covers their modification times. A
+build made in one checkout therefore never matches the stamps of
+another, where every file is new, and re-applying a patch series of the
+same content prepares the kernel and every patched package again. Hash
+the content always, as CONFIG_AUTOREMOVE builds already do. rdep still
+compares modification times, so an edit, or a touch to force a rebuild,
+still rebuilds.
+
+The flags a package is compiled with are inputs of its build too, but
+no stamp named them: changing CONFIG_TARGET_OPTIMIZATION or
+CONFIG_EXTRA_OPTIMIZATION rebuilt nothing, and kept every package
+compiled with the old flags. Naming the configured stamps after them
+would not do, as configuring again keeps the build directory, and with
+it the objects of most packages. Name the prepared stamps after the
+symbols TARGET_CFLAGS is made of, so that a package prepared with other
+flags is prepared, and so built, anew. The kernel needs no such stamp:
+Kbuild compares each object's command line on every build.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ include/depends.mk      | 5 +++--
+ include/kernel-build.mk | 2 +-
+ include/package.mk      | 2 +-
+ rules.mk                | 3 +++
+ 4 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/include/depends.mk b/include/depends.mk
+index b6ed06a..bdafdad 100644
+--- a/include/depends.mk
++++ b/include/depends.mk
+@@ -15,8 +15,9 @@ find_md5=find $(wildcard $(1)) -type f $(patsubst -x,-and -not -path,$(DEP_FINDP
+ find_md5_reproducible=find $(wildcard $(1)) -type f $(patsubst -x,-and -not -path,$(DEP_FINDPARAMS) $(2)) -print0 | xargs -0 $(MKHASH) md5 | LC_ALL=C sort | $(MKHASH) md5
+ 
+ # Make expands the names of the prepared stamps several times, so hash the
+-# package files only on first use.
+-PKG_FILES_MD5=$(eval PKG_FILES_MD5:=$(shell $(call $(if $(CONFIG_AUTOREMOVE),find_md5_reproducible,find_md5),${CURDIR} $(PKG_FILE_DEPENDS),)))$(PKG_FILES_MD5)
++# package files only on first use. The hash covers their content, so that a
++# build made in another checkout of the same sources is up to date.
++PKG_FILES_MD5=$(eval PKG_FILES_MD5:=$(shell $(call find_md5_reproducible,${CURDIR} $(PKG_FILE_DEPENDS),)))$(PKG_FILES_MD5)
+ 
+ define rdep
+   .PRECIOUS: $(2)
+diff --git a/include/kernel-build.mk b/include/kernel-build.mk
+index f9b321f..ea1d523 100644
+--- a/include/kernel-build.mk
++++ b/include/kernel-build.mk
+@@ -10,7 +10,7 @@ ifneq ($(DUMP),1)
+ endif
+ 
+ KERNEL_FILE_DEPENDS=$(GENERIC_BACKPORT_DIR) $(GENERIC_PATCH_DIR) $(GENERIC_HACK_DIR) $(PATCH_DIR) $(GENERIC_FILES_DIR) $(FILES_DIR)
+-STAMP_PREPARED=$(LINUX_DIR)/.prepared$(if $(QUILT)$(DUMP),,_$(shell $(call $(if $(CONFIG_AUTOREMOVE),find_md5_reproducible,find_md5),$(KERNEL_FILE_DEPENDS),)))
++STAMP_PREPARED=$(LINUX_DIR)/.prepared$(if $(QUILT)$(DUMP),,_$(shell $(call find_md5_reproducible,$(KERNEL_FILE_DEPENDS),)))
+ STAMP_CONFIGURED:=$(LINUX_DIR)/.configured
+ include $(INCLUDE_DIR)/download.mk
+ include $(INCLUDE_DIR)/quilt.mk
+diff --git a/include/package.mk b/include/package.mk
+index 4e70baf..823a055 100644
+--- a/include/package.mk
++++ b/include/package.mk
+@@ -126,7 +126,7 @@ ifneq ($(PREV_STAMP_PREPARED),)
+   STAMP_PREPARED:=$(PREV_STAMP_PREPARED)
+   CONFIG_AUTOREBUILD:=
+ else
+-  STAMP_PREPARED=$(PKG_BUILD_DIR)/.prepared$(if $(QUILT)$(DUMP),,_$(PKG_FILES_MD5)_$(call confvar,CONFIG_AUTOREMOVE $(PKG_PREPARED_DEPENDS)))
++  STAMP_PREPARED=$(PKG_BUILD_DIR)/.prepared$(if $(QUILT)$(DUMP),,_$(PKG_FILES_MD5)_$(call confvar,CONFIG_AUTOREMOVE $(TARGET_FLAGS_DEPENDS) $(PKG_PREPARED_DEPENDS)))
+ endif
+ STAMP_CONFIGURED=$(PKG_BUILD_DIR)/.configured$(if $(DUMP),,_$(call confvar,$(PKG_CONFIG_DEPENDS)))
+ STAMP_CONFIGURED_WILDCARD=$(PKG_BUILD_DIR)/.configured_*
+diff --git a/rules.mk b/rules.mk
+index 82b83dc..6b3cc0d 100644
+--- a/rules.mk
++++ b/rules.mk
+@@ -254,6 +254,9 @@ TARGET_PATH:=$(subst $(space),:,$(filter-out .,$(filter-out ./,$(subst :,$(space
+ TARGET_INIT_PATH:=$(call qstrip,$(CONFIG_TARGET_INIT_PATH))
+ TARGET_INIT_PATH:=$(if $(TARGET_INIT_PATH),$(TARGET_INIT_PATH),/usr/sbin:/sbin:/usr/bin:/bin)
+ TARGET_CFLAGS:=$(TARGET_OPTIMIZATION)$(if $(CONFIG_DEBUG), -g3) $(call qstrip,$(CONFIG_EXTRA_OPTIMIZATION))
++# The configuration symbols TARGET_CFLAGS is made of: a package prepared with
++# other values is prepared, and so built, anew (include/package.mk).
++TARGET_FLAGS_DEPENDS:=CONFIG_TARGET_OPTIMIZATION CONFIG_DEBUG CONFIG_EXTRA_OPTIMIZATION
+ TARGET_CXXFLAGS = $(TARGET_CFLAGS)
+ TARGET_ASFLAGS_DEFAULT = $(TARGET_CFLAGS)
+ TARGET_ASFLAGS = $(TARGET_ASFLAGS_DEFAULT)
+-- 
+2.51.2
+

@@ -124,6 +124,9 @@
           # Bootstraps OpenWrt's host Go (CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT,
           # its GOROOT is /usr/share/go in the FHS), on every host architecture.
           go
+          # The compiler cache of Rust packages (CONFIG_RUST_SCCACHE), as ccache is
+          # C's and Go's own build cache Go's (build-acceleration D6).
+          sccache
         ]
         ++ gccLtoTools;
 

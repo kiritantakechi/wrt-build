@@ -21,20 +21,20 @@
 
 - [ ] 2.1 Add `patches/openwrt/0011`, with the trailer `Upstream-Status: Pending`:
   - `PKG_FILES_MD5` (`include/depends.mk`) and the kernel's prepared stamp (`include/kernel-build.mk`) always hash content (`find_md5_reproducible`);
-  - every target package's configured stamp (`include/package.mk`) also hashes `CONFIG_TARGET_OPTIMIZATION` and `CONFIG_EXTRA_OPTIMIZATION`.
+  - every target package's prepared stamp (`include/package.mk`) also hashes the symbols `TARGET_CFLAGS` is made of, `TARGET_FLAGS_DEPENDS` in `rules.mk` (a configured stamp would keep the build directory and, with it, objects of the old flags).
 
   Add its write-up to `docs/upstream-contributions.md`, as meant for upstream and not submitted.
 
   Verify:
   1. In a built tree, set every file of `feeds/packages/lang/golang` to an older time, keeping its content. Run `make package/feeds/packages/golang/host/compile` again: its time log shows no prepare stage. Without the patch, the same check prepares again.
-  2. Add `-g0` to `CONFIG_EXTRA_OPTIMIZATION` and build the board: the time log holds a configure stage for every target package. Remove it and build again: the same.
-- [ ] 2.2 In `scripts/lib.sh`, build a repository's patched commit in the object database, and move a work tree to a commit (D5):
+  2. Add `-g0` to `CONFIG_EXTRA_OPTIMIZATION` and build the board: the time log holds a prepare stage for every target package. Remove it and build again: the same.
+- [x] 2.2 In `scripts/lib.sh`, build a repository's patched commit in the object database, and move a work tree to a commit (D5):
   - `patch.sh` builds each repository's commit, then moves its tree once;
   - `fetch.sh` fetches the pinned commits and checks them out only in a new tree;
   - the usage lines and comments of both scripts say what they now do.
 
   Verify: on the VM, `just fetch patch` twice in a row leaves no file of the tree newer than a marker file touched in between, and the HEADs are the same both times.
-- [ ] 2.3 Add tests for the build/environment requirement "Rebuild only what changed" to `tests/build/test_environment.py`. They run the helpers of 2.2 on a scratch repository with a series of two patches:
+- [x] 2.3 Add tests for the build/environment requirement "Rebuild only what changed" to `tests/build/test_environment.py`. They run the helpers of 2.2 on a scratch repository with a series of two patches:
   - "Re-apply an unchanged series": no file's modification time changes;
   - "Change one patch": exactly the files whose content changed get a new time;
   - "A patch that does not apply": the step fails naming the patch, and no file changes.
@@ -61,7 +61,7 @@
   - after `just toolchain-build dev`, the record names both libraries;
   - a second run's report holds no compile stage;
   - after the Rust library is changed by hand, the next run builds Rust again;
-  - after a flag is added to `config/toolchain.seed`, the next run builds the toolchains anew and records the flag, and the board's next build configures every target package again (2.1).
+  - after a flag is added to `config/toolchain.seed`, the next run builds the toolchains anew and records the flag, and the board's next build prepares every target package again (2.1).
 - [ ] 3.3 Make `scripts/toolchain-pack.sh` pack `staging_dir/hostpkg` and the stamps of `build_dir/hostpkg` (the empty dot files), and `scripts/toolchain-unpack.sh` touch them with the rest.
 
   Verify, on the VM:

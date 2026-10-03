@@ -90,10 +90,83 @@ kernel_dir() (
 # its settings from config/ccache.conf.
 link_tree() (
 	ln -sfn "${REPO_DIR}/files" "${TREE}/files"
-	mkdir -p "${TREE}/env" "${WRT_WORKDIR}/ccache" "${WRT_WORKDIR}/out"
+	mkdir -p "${TREE}/env" "${TREE}/tmp" "${WRT_WORKDIR}/out"
 	ln -sfn "${REPO_DIR}/config/kernel.config" "${TREE}/env/kernel-config"
-	ln -sfn "${WRT_WORKDIR}/ccache" "${TREE}/.ccache"
-	ln -sfn "${REPO_DIR}/config/ccache.conf" "${WRT_WORKDIR}/ccache/ccache.conf"
+	# The compiler caches live beside the tree, one per language, linked where
+	# rules.mk, the feed's Go values and its Rust values look for them
+	# (build-acceleration D6).
+	cache="${WRT_WORKDIR}/compiler-cache"
+	[ -L "${TREE}/tmp/go-build" ] || [ ! -e "${TREE}/tmp/go-build" ] ||
+		die "${TREE}/tmp/go-build is a directory; move it to ${cache}/go-build"
+	mkdir -p "${cache}/ccache" "${cache}/go-build" "${cache}/sccache"
+	ln -sfn "${cache}/ccache" "${TREE}/.ccache"
+	ln -sfn "${cache}/go-build" "${TREE}/tmp/go-build"
+	ln -sfn "${cache}/sccache" "${TREE}/.sccache"
+	ln -sfn "${REPO_DIR}/config/ccache.conf" "${cache}/ccache/ccache.conf"
+)
+
+# ccache_run <args>: the ccache that OpenWrt builds (tools/ccache), on the cache
+# the tree links to. OpenWrt prints the cache's statistics after a build itself,
+# but only into its silenced output.
+ccache_run() (
+	grep -qx 'CONFIG_CCACHE=y' "${TREE}/.config" || return 0
+	ccache="${TREE}/staging_dir/host/bin/ccache"
+	[ -x "${ccache}" ] || return 0
+	CCACHE_DIR="${TREE}/.ccache" "${ccache}" "$@"
+)
+
+# sccache_run <args>: sccache, on the cache the tree links to, when Rust packages
+# use it (CONFIG_RUST_SCCACHE).
+sccache_run() (
+	grep -qx 'CONFIG_RUST_SCCACHE=y' "${TREE}/.config" || return 0
+	command -v sccache >/dev/null || return 0
+	SCCACHE_DIR="${TREE}/.sccache" sccache "$@"
+)
+
+# go_cache_entries: how many entries Go's build cache holds. Go keeps no
+# statistics: a build that adds no entry was served from the cache.
+go_cache_entries() (
+	[ -d "${TREE}/tmp/go-build/" ] || {
+		echo 0
+		return 0
+	}
+	find "${TREE}/tmp/go-build/" -type f -name '*-[ad]' | wc -l | tr -d ' '
+)
+
+# compiler_cache_start: zero ccache's and sccache's statistics, so that the
+# report counts this build alone, and print Go's entry count for it.
+compiler_cache_start() (
+	ccache_run --zero-stats >/dev/null
+	sccache_run --zero-stats >/dev/null 2>&1 || true
+	go_cache_entries
+)
+
+# compiler_cache_report <Go entries at the start>: what every compiler cache did
+# in this build; then stop sccache's server, which outlives the build otherwise.
+compiler_cache_report() (
+	ccache_run --show-stats --verbose
+	sccache_run --show-stats 2>/dev/null || true
+	after=$(go_cache_entries)
+	info "Go build cache: $1 entries before the build, ${after} after"
+	sccache_run --stop-server >/dev/null 2>&1 || true
+)
+
+# compiler_cache_trim <start>: drop from every compiler cache what a build begun at
+# <start>, seconds since the epoch, did not use (CI, where each stage keeps a cache
+# of its own): ccache by its record of each entry's last use, Go's cache and
+# sccache's by modification time, which both refresh on use.
+compiler_cache_trim() (
+	now=$(date +%s)
+	ccache_run --evict-older-than "$((now - $1 + 1))s"
+	trim_unused "${TREE}/tmp/go-build" "$1"
+	trim_unused "${TREE}/.sccache" "$1"
+)
+
+# trim_unused <directory> <start>: remove the files of <directory> last modified
+# before <start>, seconds since the epoch.
+trim_unused() (
+	[ -d "$1/" ] || return 0
+	find "$1/" -type f ! -newermt "@$2" -delete
 )
 
 # write_board_table: each board's U-Boot variant, id and environment directory,
@@ -125,6 +198,26 @@ write_board_table() (
 toolchain_libc() (
 	[ -f "$1/lib/libc.so" ] || return 0
 	sum=$(sha256sum "$1/lib/libc.so")
+	echo "${sum%% *}"
+)
+
+# toolchain_stages <time log>: the stages of a build's time log that built part of
+# the toolchain (tools, the cross toolchain, Go or Rust), which only toolchain-build
+# builds (build-acceleration D7), one per line.
+toolchain_stages() (
+	awk -F '\t' '$2 == "begin" && ($4 ~ /^(tools|toolchain)\// ||
+		$4 ~ /^package\/feeds\/packages\/(golang|golang-bootstrap|golang1\.[0-9]+|rust)$/) {
+		print $4 " [" $3 "]"
+	}' "$1" | LC_ALL=C sort -u
+)
+
+# toolchain_rust_std: the hash of the Rust standard libraries in
+# staging_dir/hostpkg, the target's among them, or nothing when Rust is not
+# built (build-acceleration D7): a rebuild changes it, as it does libc.so.
+toolchain_rust_std() (
+	rustlib="${TREE}/staging_dir/hostpkg/lib/rustlib"
+	[ -d "${rustlib}" ] || return 0
+	sum=$(cd "${rustlib}" && find . -path './*/lib/*.rlib' -type f | LC_ALL=C sort | xargs -r sha256sum | sha256sum)
 	echo "${sum%% *}"
 )
 
@@ -262,30 +355,13 @@ lock_feeds() (
 	awk '/^[[:space:]]*(#|$)/ { next } $1 != "openwrt" { print $1 }' "${LOCK_FILE}"
 )
 
-# checkout_locked <name> <dir>: put <dir> on the pinned commit of <name>.
-checkout_locked() (
+# fetch_locked <name> <dir>: make the pinned commit of <name> available in <dir>,
+# shallow-fetched once, and check it out when <dir> is a new tree. An existing
+# tree stays where it is, for patch_tree to move (build-acceleration D5).
+fetch_locked() (
+	dir=$2
 	url=$(lock_field "$1" url)
 	sha=$(lock_field "$1" sha)
-	git_checkout_sha "$2" "${url}" "${sha}"
-)
-
-# reset_to_lock: put the openwrt tree and every feed back on its pinned commit
-# (dropping applied patches) and restore version.date, which git clean removes.
-reset_to_lock() (
-	checkout_locked openwrt "${TREE}"
-	# Build timestamp comes from the pinned commit, not from when patches were
-	# applied (scripts/get_source_date_epoch.sh reads version.date first).
-	lock_field openwrt epoch >"${TREE}/version.date"
-	feeds=$(lock_feeds)
-	for feed in ${feeds}; do
-		checkout_locked "${feed}" "${TREE}/feeds/${feed}"
-	done
-)
-
-# git_checkout_sha <dir> <url> <sha>: shallow-fetch exactly <sha> and check it out
-# detached, discarding local commits (e.g. previously applied patches).
-git_checkout_sha() (
-	dir=$1 url=$2 sha=$3
 	if [ ! -d "${dir}/.git" ]; then
 		mkdir -p "${dir}"
 		git -C "${dir}" init -q
@@ -295,10 +371,69 @@ git_checkout_sha() (
 	if ! git -C "${dir}" cat-file -e "${sha}^{commit}" 2>/dev/null; then
 		git -C "${dir}" fetch -q --depth 1 origin "${sha}"
 	fi
-	git -C "${dir}" -c advice.detachedHead=false checkout -q -f --detach "${sha}"
-	# Files added by earlier patch runs are untracked now; drop them so git am can
-	# re-add them. Ignored build output (dl/, build_dir/, feeds/, .config) is kept.
-	git -C "${dir}" clean -q -f -d
-	head=$(git -C "${dir}" rev-parse HEAD)
-	[ "${head}" = "${sha}" ] || die "${dir} is not at ${sha}"
+	git -C "${dir}" rev-parse -q --verify HEAD >/dev/null || move_tree "${dir}" "${sha}"
+)
+
+# patch_tree <name> <dir>: put <dir> on the pinned commit of <name> with
+# patches/<name>/*.patch applied (series_commit, then move_tree).
+patch_tree() (
+	sha=$(lock_field "$1" sha)
+	commit=$(series_commit "${REPO_DIR}/patches/$1" "$2" "${sha}")
+	move_tree "$2" "${commit}"
+)
+
+# series_commit <patch dir> <repository> <base>: print the commit of <base> with
+# <patch dir>/*.patch applied in name order. It is made in the object database,
+# on an index of its own, so the work tree stays as it is: what git am makes of
+# the series, with each patch's author, its date for both dates, and a fixed
+# committer, so the same series always gives the same commit. Dies naming the
+# first patch that does not apply.
+series_commit() (
+	dir=$1 repository=$2 commit=$3
+	scratch=$(mktemp -d "${TMPDIR:-/tmp}/wrt-series.XXXXXX")
+	trap 'rm -rf "${scratch}"' EXIT
+	export GIT_INDEX_FILE="${scratch}/index" \
+		GIT_COMMITTER_NAME=wrt-build GIT_COMMITTER_EMAIL=wrt-build@localhost
+	git -C "${repository}" read-tree "${commit}"
+	for patch in "${dir}"/*.patch; do
+		[ -e "${patch}" ] || continue
+		name=${patch#"${REPO_DIR}/"}
+		git -C "${repository}" mailinfo "${scratch}/message" "${scratch}/diff" \
+			<"${patch}" >"${scratch}/info" || die "not a patch: ${name}"
+		if ! git -C "${repository}" apply --cached "${scratch}/diff"; then
+			die "patch does not apply: ${name}"
+		fi
+		tree=$(git -C "${repository}" write-tree)
+		author=$(sed -n 's/^Author: //p' "${scratch}/info")
+		email=$(sed -n 's/^Email: //p' "${scratch}/info")
+		date=$(sed -n 's/^Date: //p' "${scratch}/info")
+		subject=$(sed -n 's/^Subject: //p' "${scratch}/info")
+		commit=$(
+			{
+				printf '%s\n\n' "${subject}"
+				cat "${scratch}/message"
+			} | git stripspace |
+				GIT_AUTHOR_NAME=${author} GIT_AUTHOR_EMAIL=${email} \
+					GIT_AUTHOR_DATE=${date} GIT_COMMITTER_DATE=${date} \
+					git -C "${repository}" commit-tree "${tree}" -p "${commit}"
+		)
+		info "applied ${name}"
+	done
+	printf '%s\n' "${commit}"
+)
+
+# move_tree <repository> <commit>: put the work tree on <commit>, detached. git
+# writes only the files whose content differs from the commit the tree was on,
+# so every other file keeps its modification time, and make rebuilds only what
+# changed (build-acceleration D5). A file whose time changed but not its content
+# counts as unchanged too: the index is refreshed first, or checkout would take
+# it for a local change and write it again. Untracked files that are not ignored
+# go, but version.date, which patch.sh keeps; ignored build output stays.
+move_tree() (
+	git -C "$1" update-index -q --refresh >/dev/null || true
+	git -C "$1" -c advice.detachedHead=false checkout -q -f --detach "$2"
+	git -C "$1" clean -q -f -d -e /version.date
+	head=$(git -C "$1" rev-parse HEAD)
+	wanted=$(git -C "$1" rev-parse "$2^{commit}")
+	[ "${head}" = "${wanted}" ] || die "$1 is not at $2"
 )

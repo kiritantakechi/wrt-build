@@ -111,8 +111,9 @@ A patch to OpenWrt (`patches/openwrt/0011`) does two things.
 - The `rdep` check still compares modification times. So a local edit, or a `touch` to force a rebuild, still rebuilds.
 - The cost is reading files instead of stat-ing them: once per package make, because `PKG_FILES_MD5` is evaluated only once, and about 20 MB of kernel patches per kernel make.
 
-**Configured stamps after the flags.** Every target package's configured stamp also hashes `CONFIG_TARGET_OPTIMIZATION` and `CONFIG_EXTRA_OPTIMIZATION`, the flags that make up `TARGET_CFLAGS`.
-- A changed flag then reconfigures and recompiles every package, as a changed package option already does for one package. Nothing keeps objects compiled with other flags.
+**Prepared stamps after the flags, too.** Every target package's prepared stamp also hashes the symbols `TARGET_CFLAGS` is made of (`CONFIG_TARGET_OPTIMIZATION`, `CONFIG_DEBUG`, `CONFIG_EXTRA_OPTIMIZATION`), which `rules.mk` lists beside it as `TARGET_FLAGS_DEPENDS`.
+- A changed flag then prepares every package anew: its build directory is removed and its sources unpacked again, so nothing keeps objects compiled with other flags.
+- The configured stamp would not do. A new configured stamp configures and compiles again, but keeps the build directory, and the many packages whose builds do not track their flags (plain makefiles, autotools) then keep their objects. This was found during the implementation; the first plan named the configured stamp.
 - The kernel needs no stamp of this kind: Kbuild already compares each object's command line on every build.
 - Host packages are not affected, as they do not build with the target's flags. The exception is Rust, whose standard library has C parts built with them: the host stage's record covers it (D7).
 

@@ -1,10 +1,12 @@
 # Build the firmware of every board (boards/) in two stages that each fit in the
 # 6-hour job limit, test each board's image in the emulator (design D11), then
 # sign and release them together (r4s-release-pipeline D2, D3, D5; board-model D9):
-#   host-toolchain: tools + the board-neutral cross toolchain, cached by the inputs
-#                   that affect them; the list of boards
-#   firmware:       per board, everything else (ci profile: all kmods), unsigned
-#   caches:         of this ref's caches, only the current and newest stay
+#   host-toolchain: tools and every toolchain, board-neutral: the cross
+#                   toolchain, Go and Rust (build-acceleration D2), cached by the
+#                   inputs that affect them; the list of boards
+#   firmware:       per board, the target code only (ci profile: all kmods), unsigned
+#   caches:         of this ref's caches, only the current and newest stay: the
+#                   toolchain, and one download cache and compiler cache per stage
 #   system-test:    per board, the system tests against the shipped image, JUnit
 #                   reports, in parallel emulators (the drill among them, with
 #                   test keys)
@@ -81,8 +83,31 @@ jobs:
           key: ${{ steps.key.outputs.key }}
           path: ${{ env.WRT_WORKDIR }}/toolchain-cache.tar.zst
 
-      - name: Build tools and toolchain
+      # On a miss only, and read-only: the firmware jobs save the download cache,
+      # and one saved first here would lack the target's sources under its key.
+      - name: Restore download cache
         if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v6
+        with:
+          key: dl-${{ hashFiles('upstream.lock', 'feed/**/Makefile') }}
+          restore-keys: dl-
+          path: ${{ env.WRT_WORKDIR }}/dl
+
+      # The host stage's own compiler cache (build-acceleration D6): what an
+      # earlier host build compiled, LLVM's C++ included, for one that only some
+      # of its inputs changed.
+      - name: Restore compiler cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v6
+        with:
+          key: compiler-cache-host-${{ hashFiles('config/ccache.conf') }}-${{ github.run_id }}
+          restore-keys: compiler-cache-host-${{ hashFiles('config/ccache.conf') }}-
+          path: ${{ env.WRT_WORKDIR }}/compiler-cache
+
+      - name: Build tools and toolchains
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          WRT_COMPILER_CACHE_TRIM: 1
         run: |
           nix develop .#build -c just toolchain-build ci
           nix develop .#build -c just toolchain-pack "$WRT_WORKDIR/toolchain-cache.tar.zst"
@@ -93,6 +118,13 @@ jobs:
         with:
           key: ${{ steps.key.outputs.key }}
           path: ${{ env.WRT_WORKDIR }}/toolchain-cache.tar.zst
+
+      - name: Save compiler cache
+        if: always() && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          key: compiler-cache-host-${{ hashFiles('config/ccache.conf') }}-${{ github.run_id }}
+          path: ${{ env.WRT_WORKDIR }}/compiler-cache
 
   firmware:
     needs: host-toolchain
@@ -124,15 +156,17 @@ jobs:
           restore-keys: dl-
           path: ${{ env.WRT_WORKDIR }}/dl
 
-      # Keyed by the board, whose packages no other board's build compiles alike,
-      # by config/ccache.conf, which decides whether an entry can hit (it
-      # identifies the compiler by its content), then by run.
+      # Every language's compiler cache in one (build-acceleration D6), keyed by
+      # the board, whose packages no other board's build compiles alike, by
+      # config/ccache.conf, which decides whether a ccache entry can hit (it
+      # identifies the compiler by its content), then by run. Go's and sccache's
+      # entries name their compiler themselves.
       - name: Restore compiler cache
         uses: actions/cache/restore@v6
         with:
-          key: ccache-${{ matrix.board }}-${{ hashFiles('config/ccache.conf') }}-${{ github.run_id }}
-          restore-keys: ccache-${{ matrix.board }}-${{ hashFiles('config/ccache.conf') }}-
-          path: ${{ env.WRT_WORKDIR }}/ccache
+          key: compiler-cache-${{ matrix.board }}-${{ hashFiles('config/ccache.conf') }}-${{ github.run_id }}
+          restore-keys: compiler-cache-${{ matrix.board }}-${{ hashFiles('config/ccache.conf') }}-
+          path: ${{ env.WRT_WORKDIR }}/compiler-cache
 
       # Restored last, so that the toolchain is the most recently used of the
       # caches this job restores: past the quota GitHub evicts the least recently
@@ -151,7 +185,7 @@ jobs:
       - name: Build firmware
         env:
           # The board's own cache: it keeps what this build used (scripts/build.sh).
-          WRT_CCACHE_TRIM: 1
+          WRT_COMPILER_CACHE_TRIM: 1
         run: nix develop .#build -c scripts/build.sh "$BOARD" ci
 
       - name: Save download cache
@@ -165,8 +199,8 @@ jobs:
         if: always()
         uses: actions/cache/save@v6
         with:
-          key: ccache-${{ matrix.board }}-${{ hashFiles('config/ccache.conf') }}-${{ github.run_id }}
-          path: ${{ env.WRT_WORKDIR }}/ccache
+          key: compiler-cache-${{ matrix.board }}-${{ hashFiles('config/ccache.conf') }}-${{ github.run_id }}
+          path: ${{ env.WRT_WORKDIR }}/compiler-cache
 
       - name: Build logs
         if: failure()
@@ -184,10 +218,12 @@ jobs:
           if-no-files-found: error
 
   # Every run saves a compiler cache per board, holding what its build used, and,
-  # whenever their inputs change, a download cache and a toolchain. Past the 10 GB
-  # quota GitHub evicts the least recently used caches, so the firmware jobs
-  # restore the toolchain last. The run then keeps, of its own ref's caches, the
-  # current toolchain and the newest download cache and compiler cache of each board.
+  # whenever their inputs change, a download cache, a toolchain and the host
+  # stage's compiler cache. Past the 10 GB quota GitHub evicts the least recently
+  # used caches, so the firmware jobs restore the toolchain last. The run then
+  # keeps, of its own ref's caches, the current toolchain, the newest download
+  # cache, and the newest compiler cache of each stage: the host's and each
+  # board's. The ccache-<board> family, which compiler caches replaced, goes.
   caches:
     needs: [host-toolchain, firmware]
     if: always() && github.event_name != 'pull_request' && needs.host-toolchain.result == 'success'
@@ -206,7 +242,8 @@ jobs:
           awk -v toolchain="$TOOLCHAIN" '
             /^toolchain-/ { if ($0 != toolchain) print; next }
             /^dl-/ { if (kept["dl"]++) print; next }
-            /^ccache-/ { split($0, part, "-"); if (kept[part[2]]++) print; next }
+            /^compiler-cache-/ { split($0, part, "-"); if (kept[part[3]]++) print; next }
+            /^ccache-/ { print; next }
           ' caches >superseded
           # A cache GitHub evicted meanwhile is gone either way.
           while read -r key; do

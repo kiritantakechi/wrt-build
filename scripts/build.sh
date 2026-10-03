@@ -1,7 +1,8 @@
 #!/bin/sh
 # build: build a board's configured tree and collect the outputs with a manifest.
 # Usage: scripts/build.sh <board> [profile]   (after fetch, patch, toolchain-build and config)
-# With WRT_CCACHE_TRIM set, the compiler cache keeps only what the build used.
+# With WRT_COMPILER_CACHE_TRIM set, every compiler cache keeps only what the build
+# used.
 # It ends with the stages that took the most time, from OpenWrt's build time log
 # (build-acceleration D1), which stays in the tree's logs/.
 # Images and the package repository of one run belong together: kmods only load
@@ -26,16 +27,6 @@ device=$(board_field "${board}" .device)
 grep -qx "CONFIG_BUILD_SUFFIX=\"${board}\"" "${TREE}/.config" ||
 	die "the tree is not configured for ${board}; run 'just config ${board} ${profile}' first"
 
-# ccache_run <args>: the ccache that OpenWrt builds (tools/ccache), on the cache
-# directory that rules.mk gives it, $(TOPDIR)/.ccache. OpenWrt prints the cache
-# statistics after the build itself, but only into the silenced output.
-ccache_run() {
-	grep -qx 'CONFIG_CCACHE=y' "${TREE}/.config" || return 0
-	ccache="${TREE}/staging_dir/host/bin/ccache"
-	[ -x "${ccache}" ] || return 0
-	CCACHE_DIR="${TREE}/.ccache" "${ccache}" "$@"
-}
-
 toolchain_dir=$(make -C "${TREE}" -s val.TOOLCHAIN_DIR)
 record="${toolchain_dir}/wrt-toolchain.json"
 [ -f "${record}" ] || die "the toolchain has no record of its flags; run 'just toolchain-build'"
@@ -52,6 +43,10 @@ libc=$(toolchain_libc "${toolchain_dir}")
 recorded=$(jq -r .libc "${record}")
 [ "${libc}" = "${recorded}" ] ||
 	die "the toolchain's C library is not the one its record names; run 'just toolchain-build'"
+rust_std=$(toolchain_rust_std)
+recorded=$(jq -r '.rust_std // ""' "${record}")
+[ "${rust_std}" = "${recorded}" ] ||
+	die "Rust's standard library is not the one the toolchain's record names; run 'just toolchain-build'"
 
 jobs=${WRT_JOBS:-$(nproc)}
 # Build times depend on the CPU, which differs between CI runners. lscpu names some
@@ -62,8 +57,8 @@ cpu=$(lscpu | awk -F ': *' '
 	END { print (model != "" ? model : vendor) }')
 info "make download"
 make -C "${TREE}" -j"${jobs}" download
-# Statistics of this build alone: the cache itself carries them from earlier builds.
-ccache_run --zero-stats >/dev/null
+# Statistics of this build alone: the caches carry them from earlier builds.
+go_entries=$(compiler_cache_start)
 info "make -j${jobs} (${board}, ${profile}) on ${cpu}"
 # The time log is named after the build directories, as each build keeps its own.
 suffix=$(sed -n 's/^CONFIG_BUILD_SUFFIX="\(.*\)"$/\1/p' "${TREE}/.config")
@@ -71,21 +66,27 @@ log=$(time_log "${suffix}")
 start=$(date +%s)
 status=0
 BUILD_TIME_LOG="${log}" make -C "${TREE}" -j"${jobs}" || status=$?
-ccache_run --show-stats --verbose
+compiler_cache_report "${go_entries}"
 time_report "${log}"
 [ "${status}" -eq 0 ] ||
 	die "build failed; rerun 'make -C ${TREE} -j1 V=s' on the failing package for details"
-# WRT_CCACHE_TRIM (CI, where each board's cache is its own): drop the entries this
-# build did not use; a hit refreshes an entry's time. Those of an earlier
-# toolchain or kernel configuration would otherwise pile up to max_size, past the
-# cache quota. Locally the boards share the cache, which keeps all up to max_size.
-if [ -n "${WRT_CCACHE_TRIM:-}" ]; then
-	now=$(date +%s)
-	ccache_run --evict-older-than "$((now - start + 1))s"
+# WRT_COMPILER_CACHE_TRIM (CI, where each board's cache is its own): drop what this
+# build did not use. Entries of an earlier toolchain or kernel configuration would
+# otherwise pile up past the cache quota. Locally the boards share the caches,
+# which keep everything up to their own limits.
+if [ -n "${WRT_COMPILER_CACHE_TRIM:-}" ]; then
+	compiler_cache_trim "${start}"
 fi
+# The board's build left the shared toolchain alone (build-acceleration D7).
 libc_after=$(toolchain_libc "${toolchain_dir}")
 [ "${libc_after}" = "${libc}" ] ||
 	die "the build rebuilt the toolchain's C library with ${board}'s flags; run 'just toolchain-build' and build again"
+rust_std_after=$(toolchain_rust_std)
+[ "${rust_std_after}" = "${rust_std}" ] ||
+	die "the build rebuilt Rust's standard library with ${board}'s flags; run 'just toolchain-build' and build again"
+compiled=$(toolchain_stages "${log}" | paste -sd ',' -)
+[ -z "${compiled}" ] ||
+	die "the build compiled part of the toolchain, which only 'just toolchain-build' builds: ${compiled}"
 
 # The kernel configuration overlay must reach the kernel unchanged: a line that
 # kconfig dropped (unmet dependency, renamed symbol) would silently lose a feature.

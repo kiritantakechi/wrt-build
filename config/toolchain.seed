@@ -16,3 +16,6 @@ CONFIG_BPF_TOOLCHAIN_HOST=y
 # downloaded bootstrap, which OpenWrt does not offer for arm64 hosts.
 CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT="/usr/share/go"
 # CONFIG_GOLANG_BUILD_BOOTSTRAP is not set
+# Rust packages compile through sccache, the Rust counterpart of ccache, whose
+# cache lives beside the tree with ccache's and Go's (build-acceleration D6).
+CONFIG_RUST_SCCACHE=y

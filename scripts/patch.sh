@@ -1,8 +1,12 @@
 #!/bin/sh
-# patch: apply patches/<repo>/*.patch on top of the pinned sources with git am.
+# patch: put the sources on the pinned commits with patches/<repo>/*.patch applied.
 # Usage: scripts/patch.sh
-# Starts from the pinned commits every time and stops at the first patch that
-# does not apply, naming it; the resulting HEAD is the same on every run.
+# Each repository's patched commit is made in the object database first, then
+# its work tree moves there in one checkout (build-acceleration D5): a file
+# whose content the patches leave as it was keeps its modification time, so
+# make rebuilds only what changed. The first patch that does not apply stops
+# the step, named, before any file changes; the resulting HEAD is the same on
+# every run.
 set -eu
 # shellcheck source=scripts/lib.sh
 . "$(dirname -- "$0")/lib.sh"
@@ -13,28 +17,16 @@ ensure_fhs build "$@"
 
 [ -f "${TREE}/feeds.conf" ] || die "no source tree; run 'just fetch' first"
 
-# Fixed identity; the committer date is taken from each patch's author date, so
-# the resulting commit SHAs do not depend on who applied the patches or when.
-export GIT_COMMITTER_NAME=wrt-build GIT_COMMITTER_EMAIL=wrt-build@localhost
-
-# apply_series <repo> <dir>
-apply_series() {
-	for patch in "${REPO_DIR}/patches/$1"/*.patch; do
-		[ -e "${patch}" ] || continue
-		name="patches/$1/${patch##*/}"
-		if ! git -C "$2" am -q --committer-date-is-author-date "${patch}"; then
-			git -C "$2" am --abort 2>/dev/null || true
-			die "patch does not apply: ${name}"
-		fi
-		info "applied ${name}"
-	done
-}
-
-reset_to_lock
-apply_series openwrt "${TREE}"
+patch_tree openwrt "${TREE}"
+# The build timestamp is the pinned commit's, whenever the patches were applied
+# (scripts/get_source_date_epoch.sh reads version.date first). It is written only
+# when it changes, like every other file.
+epoch=$(lock_field openwrt epoch)
+recorded=$(cat "${TREE}/version.date" 2>/dev/null || true)
+[ "${recorded}" = "${epoch}" ] || printf '%s\n' "${epoch}" >"${TREE}/version.date"
 feeds=$(lock_feeds)
 for feed in ${feeds}; do
-	apply_series "${feed}" "${TREE}/feeds/${feed}"
+	patch_tree "${feed}" "${TREE}/feeds/${feed}"
 done
 
 # Our own feed wins over upstream packages with the same name.

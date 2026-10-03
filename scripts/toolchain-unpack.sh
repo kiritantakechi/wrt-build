@@ -19,5 +19,7 @@ ensure_fhs build "$@"
 [ -f "${archive}" ] || die "archive not found: ${archive}"
 tar -I zstd -xf "${archive}" -C "${TREE}"
 now=$(date +%s.%N)
-find "${TREE}/staging_dir" "${TREE}/build_dir/host" -exec touch -h -d "@${now}" {} +
+set -- "${TREE}/staging_dir" "${TREE}/build_dir/host"
+[ ! -d "${TREE}/build_dir/hostpkg" ] || set -- "$@" "${TREE}/build_dir/hostpkg"
+find "$@" -exec touch -h -d "@${now}" {} +
 info "toolchain restored into ${TREE}"

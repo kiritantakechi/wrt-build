@@ -74,7 +74,7 @@ BPF               clang -O2
 - Its record (`wrt-toolchain.json`) holds the new flags, and its cache key changes.
 - GCC's runtime libraries follow `-O3` as every other target library does.
 
-**An existing tree.** `build-acceleration` names every package's configured stamp after these flags, and rebuilds the toolchains whose recorded flags differ from the configuration's. The new flags therefore rebuild the toolchains and every package in a tree built at `-O2`, with no clean. The kernel follows through Kbuild, which compares each object's command line.
+**An existing tree.** `build-acceleration` names every package's prepared stamp after these flags, and rebuilds the toolchains whose recorded flags differ from the configuration's. The new flags therefore rebuild the toolchains and every package in a tree built at `-O2`, with no clean. The kernel follows through Kbuild, which compares each object's command line.
 
 **The manifest** records the flags the kernel build adds (`kernel_cflags`). The board's build computes them from the configuration, so a test that sees only the build outputs can check them.
 

@@ -1,6 +1,9 @@
 #!/bin/sh
-# fetch: check out the pinned upstream sources into $WRT_WORKDIR/openwrt.
+# fetch: fetch the pinned upstream sources into $WRT_WORKDIR/openwrt.
 # Usage: scripts/fetch.sh
+# A new tree is checked out at the pinned commits; an existing one stays where it
+# is until patch moves it, so that the files patch leaves as they were keep their
+# modification times (build-acceleration D5).
 set -eu
 # shellcheck source=scripts/lib.sh
 . "$(dirname -- "$0")/lib.sh"
@@ -14,7 +17,10 @@ for name in openwrt ${feeds}; do
 	sha=$(lock_field "${name}" sha)
 	info "${name} @ ${sha}"
 done
-reset_to_lock
+fetch_locked openwrt "${TREE}"
+for feed in ${feeds}; do
+	fetch_locked "${feed}" "${TREE}/feeds/${feed}"
+done
 
 # Shared download cache, kept outside the tree so CI can cache it on its own.
 mkdir -p "${WRT_WORKDIR}/dl"

@@ -31,7 +31,7 @@ Four rules, applied the same way to CI and local builds, to every board and to e
   Firmware jobs compile target code only. A board's build fails if it compiled a toolchain, or changed one. The cache key already covers the feed's Go and Rust directories, and now they matter.
 - **Rebuild only what changed, and everything that did.** A step's stamp names everything it was built from.
   - A patch to OpenWrt names prepared stamps after the content of their files, so an unpacked host build is up to date in any checkout of the same sources.
-  - The same patch names configured stamps after the target's compiler flags as well, so a changed flag rebuilds every package. The kernel needs nothing: OpenWrt runs Kbuild on every build, and Kbuild compares each object's command line.
+  - The same patch names prepared stamps after the target's compiler flags as well, so a changed flag prepares, and so rebuilds, every package. The kernel needs nothing: OpenWrt runs Kbuild on every build, and Kbuild compares each object's command line.
   - `toolchain-build` rebuilds the toolchains whose recorded flags differ from the configuration's.
   - The patch step applies the series as commits in the object database. It then moves the work tree from the previous patched commit to the new one, so git rewrites only the files whose content changes. A series that does not apply leaves the tree untouched.
   - `fetch` no longer resets an existing tree.
@@ -85,7 +85,7 @@ None.
   - `scripts/toolchain-pack.sh` and `scripts/toolchain-unpack.sh`: `staging_dir/hostpkg` and the stamps of `build_dir/hostpkg`;
   - `scripts/build.sh`: the time report, the toolchain guards, the statistics and trimming of every compiler cache.
 - **Patches**, each with an `Upstream-Status` trailer from the start:
-  - `patches/openwrt/0011`: prepared stamps named after content, configured stamps after the target's compiler flags (`Pending`);
+  - `patches/openwrt/0011`: prepared stamps named after content and the target's compiler flags (`Pending`);
   - `patches/packages/0002`: Rust under `staging_dir/hostpkg`, LLVM for the host and the target only, through ccache (`Inappropriate`: every board here shares one architecture).
 - **Configuration**:
   - `config/toolchain.seed`: sccache for Rust packages;
