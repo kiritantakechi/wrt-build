@@ -40,7 +40,7 @@ DRILL_TIMEOUT = 3600
 # slot's state, what still runs (the health check starts after every other
 # service), the end of the log and the addresses. CI's run 37126344220 had a
 # trial slot that booted and then answered neither ssh nor the drill.
-CONSOLE_REPORT = "wrt-slot status; ps w | grep -v ' \\['; logread | tail -n 80; ip -br addr"
+CONSOLE_REPORT = "wrt-slot status; ps w | grep -v ' \\['; logread | tail -n 80; ip -o addr"
 
 
 @dataclass(frozen=True, slots=True)
