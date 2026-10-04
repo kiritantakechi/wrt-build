@@ -74,6 +74,18 @@ by = "every CI job of build.yml: each starts from a fresh checkout, fetch and pa
 
 [[scenario]]
 capability = "build/environment"
+requirement = "Rebuild only what changed"
+scenario = "Build again without changes"
+by = "local VM, 2026-10-04: just build r4s dev with nothing changed took 5 min 37 s; its time report held only the kernel's two forced passes, 2.5 s, which skip kbuild, and its compiler caches saw no compile (docs/dev-setup.md)"
+
+[[scenario]]
+capability = "build/environment"
+requirement = "Rebuild only what changed"
+scenario = "Change the compiler flags"
+by = "local VM, 2026-10-04: dropping -fno-plt from config/toolchain.seed built the toolchains anew, recorded the flags without it, and prepared all 132 target packages of the R4S again; restoring it did the same (docs/upstream-contributions.md, patch 0011)"
+
+[[scenario]]
+capability = "build/environment"
 requirement = "Build time report"
 scenario = "Find what holds up a build"
 by = "scripts/build.sh and toolchain-build.sh end every build with the report (docs/ci.md, Build time), locally and in build.yml's host-toolchain and firmware jobs; the record stays in the tree's logs/"

@@ -19,7 +19,7 @@
 
 ## 2. Rebuild only what changed (design D4, D5)
 
-- [ ] 2.1 Add `patches/openwrt/0011`, with the trailer `Upstream-Status: Pending`:
+- [x] 2.1 Add `patches/openwrt/0011`, with the trailer `Upstream-Status: Pending`:
   - `PKG_FILES_MD5` (`include/depends.mk`) and the kernel's prepared stamp (`include/kernel-build.mk`) always hash content (`find_md5_reproducible`);
   - every target package's prepared stamp (`include/package.mk`) also hashes the symbols `TARGET_CFLAGS` is made of, `TARGET_FLAGS_DEPENDS` in `rules.mk` (a configured stamp would keep the build directory and, with it, objects of the old flags).
 
@@ -27,7 +27,7 @@
 
   Verify:
   1. In a built tree, set every file of `feeds/packages/lang/golang` to an older time, keeping its content. Run `make package/feeds/packages/golang/host/compile` again: its time log shows no prepare stage. Without the patch, the same check prepares again.
-  2. Add `-g0` to `CONFIG_EXTRA_OPTIMIZATION` and build the board: the time log holds a prepare stage for every target package. Remove it and build again: the same.
+  2. Drop `-fno-plt` from `CONFIG_EXTRA_OPTIMIZATION` and build the board: the time log holds a prepare stage for every target package. Restore it and build again: the same. (`-g0`, the first choice, reaches the kernel too, whose `KCFLAGS` take every extra flag but `-fno-plt`, and its BTF needs debug information.)
 - [x] 2.2 In `scripts/lib.sh`, build a repository's patched commit in the object database, and move a work tree to a commit (D5):
   - `patch.sh` builds each repository's commit, then moves its tree once;
   - `fetch.sh` fetches the pinned commits and checks them out only in a new tree;
@@ -40,9 +40,9 @@
   - "A patch that does not apply": the step fails naming the patch, and no file changes.
 
   Verify: the three tests pass, and fail against the old `git am` path.
-- [ ] 2.4 Make a no-change build compile nothing: run `just build r4s dev` twice, and fix whatever the second build's report still prepares, configures or compiles, for example a step that follows the configuration that `toolchain-build` and `config` rewrite. Add "Build again without changes" to `tests/verified-elsewhere.toml`. Note the new duration next to the baseline of 1.2.
+- [x] 2.4 Make a no-change build compile nothing: run `just build r4s dev` twice, and fix whatever the second build's report still prepares, configures or compiles, for example a step that follows the configuration that `toolchain-build` and `config` rewrite. Add "Build again without changes" to `tests/verified-elsewhere.toml`. Note the new duration next to the baseline of 1.2.
 
-  Verify: the second build's report lists no prepare, configure or compile stage, and the build takes minutes.
+  Verify: the second build's report lists no prepare or configure stage, and no compile stage but the kernel's two forced passes, which find nothing to build; its compiler caches report no compile, and the build takes minutes.
 
 ## 3. Every toolchain in the host stage (design D2, D3, D7)
 
@@ -55,13 +55,13 @@
   If Rust's bootstrap fails, or ignores sccache as `RUSTC_WRAPPER`, the patch drops the wrapper from Rust's own build (design, risks).
 
   Verify: `staging_dir/hostpkg/bin/rustc -vV` runs, and `staging_dir/hostpkg/lib/rustlib/aarch64-unknown-linux-musl` exists. LLVM's CMake cache in the build directory lists the host's and the target's backends (one, AArch64, where both are aarch64). The host report shows Rust's stages.
-- [ ] 3.2 Make `scripts/toolchain-build.sh` build the Go and Rust host toolchains after the tools and the cross toolchain. Its record, `wrt-toolchain.json`, gains the hash of the Rust standard library for the target, and is written as soon as the cross toolchain is built, so a failed Go or Rust build keeps it. The toolchains are built anew when the configuration's flags differ from the recorded ones, or a library differs from its record, as the C library already is. Add the build/environment scenario "Change the compiler flags" to `tests/verified-elsewhere.toml`.
+- [x] 3.2 Make `scripts/toolchain-build.sh` build the Go and Rust host toolchains after the tools and the cross toolchain. Its record, `wrt-toolchain.json`, gains the hash of the Rust standard library for the target, and is written as soon as the cross toolchain is built, so a failed Go or Rust build keeps it. The toolchains are built anew when the configuration's flags differ from the recorded ones, or a library differs from its record, as the C library already is. Add the build/environment scenario "Change the compiler flags" to `tests/verified-elsewhere.toml`.
 
   Verify:
   - after `just toolchain-build dev`, the record names both libraries;
   - a second run's report holds no compile stage;
   - after the Rust library is changed by hand, the next run builds Rust again;
-  - after a flag is added to `config/toolchain.seed`, the next run builds the toolchains anew and records the flag, and the board's next build prepares every target package again (2.1).
+  - after a flag in `config/toolchain.seed` changes, the next run builds the toolchains anew and records the flags, and the board's next build prepares every target package again (2.1).
 - [ ] 3.3 Make `scripts/toolchain-pack.sh` pack `staging_dir/hostpkg` and the stamps of `build_dir/hostpkg` (the empty dot files), and `scripts/toolchain-unpack.sh` touch them with the rest.
 
   Verify, on the VM:
@@ -71,7 +71,7 @@
   4. unpack.
 
   Then `make package/feeds/packages/golang/host/compile package/feeds/packages/rust/host/compile` does nothing.
-- [ ] 3.4 Guard the shared toolchains (D7):
+- [x] 3.4 Guard the shared toolchains (D7):
   - `scripts/build.sh` checks the C and Rust libraries against the record before and after the build;
   - it fails, naming the stage, when the board's time log holds a stage of `tools/`, `toolchain/` or a Go or Rust host toolchain. Put that check in a `scripts/lib.sh` helper over the log.
 
@@ -80,7 +80,7 @@
   - add "Boards share the toolchain", unit-testing the helper on a sample log.
 
   Verify: the tests pass. Build r4s, then r6s, on the VM: neither report holds a toolchain stage.
-- [ ] 3.5 Update `docs/dev-setup.md` (section 4): the boards share the whole toolchain, Go and Rust included, and a board's first build no longer builds Rust. Under the migration plan, list the per-board Rust leftovers that may be deleted, and delete them on the VM.
+- [x] 3.5 Update `docs/dev-setup.md` (section 4): the boards share the whole toolchain, Go and Rust included, and a board's first build no longer builds Rust. Under the migration plan, list the per-board Rust leftovers that may be deleted, and delete them on the VM.
 
   Verify: `build_dir/target-*/host/rustc-*` is gone, and both boards still build without a toolchain stage.
 

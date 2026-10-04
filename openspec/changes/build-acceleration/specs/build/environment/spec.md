@@ -32,7 +32,7 @@ Running the build entry points again SHALL rebuild only what changed since the l
 
 #### Scenario: Build again without changes
 - **WHEN** a board is built twice in a row with no change to the sources, the patches or the configuration
-- **THEN** the second build prepares, configures and compiles nothing, as its time report shows
+- **THEN** the second build prepares, configures and compiles nothing, as its time report and its compiler caches' reports show
 
 #### Scenario: Change the compiler flags
 - **WHEN** the target's compiler flags change and a board is built again in the same tree

@@ -120,6 +120,8 @@ Why it matters here: `just patch` applied the series anew before every build, so
 
 What the patch does: the prepared stamps of packages (`PKG_FILES_MD5`) and of the kernel always hash content, as `CONFIG_AUTOREMOVE` builds already do; `rdep` still compares modification times, so an edit, or a touch to force a rebuild, still rebuilds. Each target package's prepared stamp also hashes the symbols `TARGET_CFLAGS` is made of (`TARGET_FLAGS_DEPENDS` in `rules.mk`), so a package prepared with other flags is prepared, and so built, anew. A configured stamp would not do: configuring again keeps the build directory, and with it most of a package's objects. The kernel needs no such stamp, as Kbuild compares every object's command line.
 
+Verification log: 2026-10-04, on the VM. With every file of the packages feed's `lang/golang` set to 2020, Go's host build prepared nothing again: its prepared stamp kept the name of its files' content, where the former name, of their paths and times, changed. Dropping `-fno-plt` from `config/toolchain.seed` prepared all 132 target packages of the R4S again, and neither the kernel nor the host builds; restoring it, the same 132. A first try with `-g0` failed in the kernel, which takes `CONFIG_EXTRA_OPTIMIZATION`, all but `-fno-plt`, as its `KCFLAGS`: without debug information, its modules' BTF could not be made.
+
 ## 12. kernel: the modules pass up to date past the image pass
 
 Problem: `Kernel/Make` skips kbuild when its command line is the one of its last run and no file of the kernel tree is newer than that run's stamp. The image pass runs after the modules pass and writes `vmlinux.symvers`, which modpost writes whenever it links `vmlinux` alone. The next build's modules pass finds that file newer than its stamp and runs kbuild, which removes `vmlinux` and `System.map` first and so links the kernel again, BTF included; the image pass then runs again in turn. No build ever skips kbuild.
@@ -127,6 +129,8 @@ Problem: `Kernel/Make` skips kbuild when its command line is the one of its last
 Why it matters here: a build with nothing changed linked the kernel again in 6.5 of its minutes (5:45 for the modules pass, 0:43 for the image pass, on the VM; build-acceleration, task 2.4).
 
 What the patch does: once the image pass has run, it refreshes the modules pass's stamp. The image pass builds on what the modules pass built and changes none of its inputs, so that pass is still up to date.
+
+Verification log: 2026-10-04, on the VM: the first build with the patch ran the modules pass once more; every later build with nothing changed skipped kbuild in both passes, in 2.5 s.
 
 ## 13. luci-base: the host tools built in the host build directory
 
@@ -136,5 +140,5 @@ Why it matters here: with the rest of build-acceleration, luci-base was the only
 
 What the patch does: `Host/Prepare` already copies `src/` into the host build directory, so `Host/Compile` builds there, and `Host/Install` takes the tools from there.
 
-Verification log: 2026-10-04, both tools build from a copy of `src/`, as in the host build directory.
+Verification log: 2026-10-04, both tools build from a copy of `src/`, as in the host build directory, and with the patch a build with nothing changed no longer prepares luci-base.
 
