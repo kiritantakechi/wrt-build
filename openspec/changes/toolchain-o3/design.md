@@ -208,4 +208,5 @@ Firmware only: routers take it with the next release. The first stable release h
 
 ## Open Questions
 
-- Where Oleksandr Natalenko publishes the 6.18 BBRv3 rebase now (repository and branch). It is looked up when the BBRv3 task starts; the approach does not depend on it.
+- ~~Where Oleksandr Natalenko publishes the 6.18 BBRv3 rebase.~~ Resolved: pf-kernel (codeberg.org/pf-kernel/linux), branch `pf-6.18`, as one commit, `a05ea4b4cef3`, on Linux 6.18.0. Rebased onto 6.18.52, it differs from the earlier series in a congestion control flag bit that collides with AccECN there, which 6.18.y backported (patch 0001 explains the rest).
+- google/bbr has since moved BBRv3 into a module of its own, `tcp_bbr3`, named `bbr3`, beside BBRv1 (branch `bbr-v3-2026-09-16-01`, on Linux 7.1), and pf-kernel follows it from 7.3 on. Adopting that form renames the firmware's congestion control (spec firmware/kernel), so it is left to a change of its own, with the kernel bump that brings it.
