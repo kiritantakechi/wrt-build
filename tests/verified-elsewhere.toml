@@ -20,13 +20,13 @@ by = "build.yml host-toolchain restores the toolchain cache; firmware builds on 
 capability = "build/ci"
 requirement = "Cache keyed on actual inputs"
 scenario = "Only the packages feed updated"
-by = "scripts/toolchain-key.sh hashes tools/, toolchain/, lang/golang, lang/rust, the board-neutral configuration composed from the profile's seeds and WRT_BUILD_INPUTS only"
+by = "scripts/toolchain-key.sh hashes tools/, toolchain/, the build files that name the host stamps (include/depends.mk, include/host-build.mk, rules.mk), lang/golang, lang/rust, the board-neutral configuration composed from the profile's seeds, WRT_BUILD_INPUTS and the two scripts that build and pack the archive, and nothing else of the packages feed"
 
 [[scenario]]
 capability = "build/ci"
 requirement = "Cache keyed on actual inputs"
 scenario = "Toolchain inputs change"
-by = "scripts/toolchain-key.sh; build.yml host-toolchain rebuilds on a key miss"
+by = "scripts/toolchain-key.sh; build.yml host-toolchain rebuilds on a key miss: cold in run 37143040755, from its own compiler cache in run 37166467868, whose toolchain-build.sh had changed (docs/ci.md)"
 
 [[scenario]]
 capability = "build/ci"
