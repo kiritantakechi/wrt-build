@@ -54,7 +54,7 @@
 - [ ] 3.1 Make `scripts/build.sh` collect the warnings of the UB-indicative options, as D4 describes. It takes the packages of the board's image from the image's package list, maps them to source packages through `tmp/.packageinfo`, parses their build logs, and writes `out/<board>/<profile>/warnings.json`.
 
   Verify: unit tests for the log parser (`tests/unit/`) cover a warning inside a function, one outside any function, a continuation line and an option with a value (`-Warray-bounds=`). Both boards' builds produce the report.
-- [ ] 3.2 Add the register `tests/reviewed-warnings.toml` and `tests/quality/test_undefined_behavior.py` for the quality/undefined-behavior scenarios "Unreviewed warning" and "Stale review". Both read the build's report and the register, and match on package, option, file and function. Add `docs/undefined-behavior.md`: how a warning is reviewed and recorded.
+- [x] 3.2 Add the register `tests/reviewed-warnings.toml` and `tests/quality/test_undefined_behavior.py` for the quality/undefined-behavior scenarios "Unreviewed warning" and "Stale review". Both read the build's report and the register, and match on package, option, file and function. Add `docs/undefined-behavior.md`: how a warning is reviewed and recorded.
 
   Verify: with a report holding an unreviewed warning, and a register holding an entry nothing matches, each test fails and names it.
 - [ ] 3.3 Triage every UB-indicative warning of both boards' builds. Undefined behavior is fixed by a patch, its status `Pending`; a false positive is reviewed in `tests/reviewed-warnings.toml`, with a reason.

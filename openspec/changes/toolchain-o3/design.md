@@ -96,7 +96,7 @@ A package whose upstream code is correct but cannot be fixed reasonably opts out
 
 **More of them.**
 - Packages that do not enable `-Wall` miss several of these.
-- `CONFIG_TARGET_OPTIMIZATION` therefore enables them explicitly: `-Warray-bounds -Wuninitialized -Wmaybe-uninitialized -Wstrict-aliasing -Wuse-after-free -Wdangling-pointer`. The rest are on by default.
+- `CONFIG_TARGET_OPTIMIZATION` therefore enables them explicitly: `-Warray-bounds -Wuninitialized -Wmaybe-uninitialized -Wstrict-aliasing -Wuse-after-free -Wdangling-pointer` (all in `-Wall`), and `-Wshift-negative-value`, which not even `-Wall` enables. The rest are on by default.
 - That variable reaches the target packages only, never the kernel.
 
 **Collection.**

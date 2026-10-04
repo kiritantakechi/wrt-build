@@ -1,8 +1,25 @@
-"""The UB-indicative warnings of the build logs (scripts/lib.sh, toolchain-o3 D4)."""
+"""The UB-indicative warnings, collected and reviewed (toolchain-o3 D4).
 
+The build collects them from its logs (scripts/lib.sh); the system tests check
+them against the register (wrt_tests.undefined_behavior).
+"""
+
+import json
 import os
 import subprocess
+from datetime import date
 from pathlib import Path
+
+import pytest
+
+from wrt_tests.undefined_behavior import (
+    Diagnostic,
+    Review,
+    load_register,
+    load_report,
+    stale,
+    unreviewed,
+)
 
 LIB = Path(__file__).resolve().parents[2] / "scripts" / "lib.sh"
 BUILD = "/work/openwrt/build_dir/target-aarch64_generic_musl_r4s"
@@ -214,3 +231,91 @@ def test_a_step_that_did_nothing_keeps_the_record(tmp_path: Path) -> None:
     )
     assert record.read_text() == "-Wuninitialized\tidle.c\t\t3\n"
     assert not (records / "package" / "old").exists()
+
+
+PACKED = {
+    "package": "ppp",
+    "option": "-Waddress-of-packed-member",
+    "file": "pptp.c",
+    "function": "pptp_start_client",
+}
+
+
+def _review(**fields: object) -> Review:
+    return Review.model_validate(
+        {
+            **PACKED,
+            "reason": "the member is aligned",
+            "reviewed": date(2026, 10, 5),
+            **fields,
+        }
+    )
+
+
+def test_the_report_is_read_from_the_build(tmp_path: Path) -> None:
+    (tmp_path / "warnings.json").write_text(json.dumps([{**PACKED, "line": 185}]))
+    assert load_report(tmp_path) == [Diagnostic.model_validate({**PACKED, "line": 185})]
+
+
+def test_a_review_covers_its_warning_on_any_line() -> None:
+    # Upstream moving code around moves the line, not the package, option, file or
+    # function; a warning in another function is another warning.
+    moved = Diagnostic.model_validate({**PACKED, "line": 240})
+    other = Diagnostic.model_validate({**PACKED, "function": "pptp_call", "line": 92})
+    register = [_review()]
+    found = unreviewed([moved, other], register, "r4s")
+    assert [str(warning) for warning in found] == [
+        "ppp: -Waddress-of-packed-member at pptp.c:92, function pptp_call"
+    ]
+    assert stale(register, [moved, other], "r4s") == []
+
+
+def test_a_review_that_matches_nothing_is_stale() -> None:
+    gone = _review(file="pppoe.c", function="")
+    assert [str(review) for review in stale([gone], [], "r4s")] == [
+        "ppp: -Waddress-of-packed-member in pppoe.c"
+    ]
+
+
+def test_a_review_for_other_boards_neither_covers_nor_goes_stale() -> None:
+    warning = Diagnostic.model_validate({**PACKED, "line": 185})
+    register = [_review(boards=["r6s"])]
+    assert unreviewed([warning], register, "r4s") == [warning]
+    assert stale(register, [], "r4s") == []
+    assert unreviewed([warning], register, "r6s") == []
+    assert [str(review) for review in stale(register, [], "r6s")] == [
+        "ppp: -Waddress-of-packed-member in pptp.c, function pptp_start_client"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("entries", "error"),
+    [
+        pytest.param([{"boards": ["r5s"]}], "names unknown boards: r5s", id="unknown board"),
+        pytest.param([{}, {"reason": "again"}], "is reviewed twice", id="twice"),
+    ],
+)
+def test_the_register_names_known_boards_and_each_warning_once(
+    entries: list[dict[str, object]], error: str, tmp_path: Path
+) -> None:
+    register = tmp_path / "reviewed-warnings.toml"
+    tables = []
+    for entry in entries:
+        fields: dict[str, object] = {
+            **PACKED,
+            "reason": "the member is aligned",
+            "reviewed": "2026-10-05",
+            **entry,
+        }
+        lines = [
+            f"{name} = {value}" if name == "reviewed" else f"{name} = {json.dumps(value)}"
+            for name, value in fields.items()
+        ]
+        tables.append("[[warning]]\n" + "\n".join(lines) + "\n")
+    register.write_text("\n".join(tables))
+    with pytest.raises(ValueError, match=error):
+        load_register(register)
+
+
+def test_the_register_is_valid() -> None:
+    load_register()

@@ -159,6 +159,12 @@ class Machine:
         }
 
 
+def manifest_flags(build: Path, key: str) -> list[str]:
+    """Return the compiler flags the manifest of ``build`` records under ``key``."""
+    manifest = json.loads((build / MANIFEST_FILE).read_text())
+    return str(manifest[key]).split()
+
+
 def sha256(path: Path) -> str:
     """SHA-256 of a file, read in chunks."""
     digest = hashlib.sha256()

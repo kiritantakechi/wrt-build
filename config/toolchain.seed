@@ -13,11 +13,12 @@ CONFIG_USE_MOLD=y
 # of qosify and cake rely on IEEE semantics (toolchain-o3 D2).
 CONFIG_EXTRA_OPTIMIZATION="-fno-caller-saves -fno-plt -O3"
 # The target's default, plus the UB-indicative warnings that packages without
-# -Wall would miss (docs/undefined-behavior.md). This variable reaches the
+# -Wall would miss, and -Wshift-negative-value, which not even -Wall enables
+# (docs/undefined-behavior.md). This variable reaches the
 # target packages only, never the kernel. TARGET_OPTIONS makes it settable; on
 # aarch64 that menu holds nothing else.
 CONFIG_TARGET_OPTIONS=y
-CONFIG_TARGET_OPTIMIZATION="-Os -pipe -mcpu=generic -Warray-bounds -Wuninitialized -Wmaybe-uninitialized -Wstrict-aliasing -Wuse-after-free -Wdangling-pointer"
+CONFIG_TARGET_OPTIMIZATION="-Os -pipe -mcpu=generic -Warray-bounds -Wuninitialized -Wmaybe-uninitialized -Wstrict-aliasing -Wuse-after-free -Wdangling-pointer -Wshift-negative-value"
 # The kernel and its modules stay at -O2, which is all upstream Linux supports:
 # KCFLAGS are EXTRA_OPTIMIZATION without -fno-plt, then KERNEL_CFLAGS
 # (include/kernel.mk), so this -O2 comes last and wins.

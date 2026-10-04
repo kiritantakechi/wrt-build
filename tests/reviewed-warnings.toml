@@ -1,0 +1,16 @@
+# UB-indicative warnings reviewed as not undefined behavior (spec
+# quality/undefined-behavior). tests/quality/test_undefined_behavior.py checks every
+# build's report (warnings.json) against them; docs/undefined-behavior.md says how
+# a warning is reviewed. Undefined behavior is never reviewed here: a patch fixes it.
+#
+# An entry matches a warning on package, option, file and function (empty outside
+# any function), never on the line. `boards` limits it to those boards' builds,
+# where only they emit the warning. `reviewed` is the date of the review.
+#
+# [[warning]]
+# package = "<source package>"
+# option = "-W<option>"
+# file = "<file, as the report names it>"
+# function = "<function>"
+# reason = "<why it is not undefined behavior>"
+# reviewed = 2026-10-05

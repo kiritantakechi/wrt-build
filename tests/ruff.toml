@@ -30,6 +30,10 @@ ignore = [
 "wrt_tests/boards.py" = ["T201"]
 "wrt_tests/coverage.py" = ["T201"]
 
+[lint.flake8-type-checking]
+# pydantic reads the annotations of its models when it builds them.
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+
 [lint.flake8-pytest-style]
 fixture-parentheses = false
 mark-parentheses = false

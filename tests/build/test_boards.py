@@ -32,8 +32,8 @@ IMAGES = ("*-factory.img.gz", "*-sysupgrade.tar.gz")
 # The board-neutral flags a toolchain records (config/toolchain.seed).
 NEUTRAL_CFLAGS = (
     "-Os -pipe -mcpu=generic -Warray-bounds -Wuninitialized -Wmaybe-uninitialized"
-    " -Wstrict-aliasing -Wuse-after-free -Wdangling-pointer -fno-caller-saves -fno-plt -O3"
-    " -fhonour-copts"
+    " -Wstrict-aliasing -Wuse-after-free -Wdangling-pointer -Wshift-negative-value"
+    " -fno-caller-saves -fno-plt -O3 -fhonour-copts"
 )
 LIBC = b"the toolchain's C library"
 # The stand-in Rust standard library for the target, in staging_dir/hostpkg/lib/rustlib.
