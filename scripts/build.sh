@@ -135,6 +135,12 @@ openwrt_head=$(git -C "${TREE}" rev-parse HEAD)
 kernel_version=$(cat "${staging_dir}/kernel.version" 2>/dev/null || true)
 vermagic=$(cat "${kernel}/.vermagic")
 cflags=$(make -C "${TREE}" -s val.TARGET_CFLAGS)
+# The flags the kernel build adds (KCFLAGS of include/kernel.mk), as the target's
+# makefile evaluates them, without the maps of the build's paths.
+target=$(make -C "${TREE}" -s val.BOARD)
+kernel_cflags=$(make -C "${TREE}/target/linux/${target}" -s TOPDIR="${TREE}" val.KERNEL_MAKE_FLAGS |
+	sed -n 's/^KCFLAGS="\([^"]*\)".*/\1/p' | tr ' ' '\n' | grep -v -e '-prefix-map=' -e '^$' | paste -sd ' ' -)
+[ -n "${kernel_cflags}" ] || die "found no kernel flags in target/linux/${target}'s KERNEL_MAKE_FLAGS"
 files=$(cd "${out}" && find . -type f \( -name '*.gz' -o -name 'packages.adb' -o -name 'u-boot*' -o -name 'kernel.config' \) | sed 's|^\./||' | sort)
 hashes=$(cd "${out}" && printf '%s\n' "${files}" | xargs sha256sum)
 printf '%s\n' "${hashes}" | jq -R -n \
@@ -143,6 +149,7 @@ printf '%s\n' "${hashes}" | jq -R -n \
 	--arg run "${run}" \
 	--arg profile "${profile}" \
 	--arg cflags "${cflags}" \
+	--arg kernel_cflags "${kernel_cflags}" \
 	--arg toolchain_cflags "${toolchain_cflags}" \
 	--arg lock "${lock_sha256%% *}" \
 	--arg patches "${patches_sha256%% *}" \
@@ -155,6 +162,7 @@ printf '%s\n' "${hashes}" | jq -R -n \
 		run: $run,
 		profile: $profile,
 		cflags: $cflags,
+		kernel_cflags: $kernel_cflags,
 		toolchain_cflags: $toolchain_cflags,
 		upstream_lock_sha256: $lock,
 		patches_sha256: $patches,

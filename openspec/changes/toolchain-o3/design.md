@@ -14,7 +14,7 @@ See proposal.md for why. The facts the approach rests on:
 | libgcc and libstdc++ | `TARGET_CFLAGS` with every `-m` flag filtered out (`toolchain/gcc/common.mk`) | `-O2` |
 | BPF objects | clang with a fixed `-O2` (`include/bpf.mk`) | `-O2` |
 
-`CONFIG_TARGET_OPTIMIZATION` and `CONFIG_KERNEL_CFLAGS` are both settable under `CONFIG_DEVEL`, which `config/toolchain.seed` already sets.
+`CONFIG_KERNEL_CFLAGS` is settable under `CONFIG_DEVEL`, which `config/toolchain.seed` already sets, and `CONFIG_TARGET_OPTIMIZATION` under `CONFIG_TARGET_OPTIONS`, a menu of `CONFIG_DEVEL` that holds nothing else on aarch64.
 
 **Seeds and profiles.**
 - A profile is a list of seeds (`config/profiles`).

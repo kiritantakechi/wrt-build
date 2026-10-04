@@ -29,8 +29,12 @@ SEARCHED_FILES = ("justfile", "flake.nix")
 BOARD_CHECK = Path(sys.executable).with_name("board-check")
 BOARD_RECIPES = ("build", "config", "test", "drill-base")
 IMAGES = ("*-factory.img.gz", "*-sysupgrade.tar.gz")
-# The board-neutral flags a toolchain records (config/toolchain.seed after the target's).
-NEUTRAL_CFLAGS = "-Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -O2 -fhonour-copts"
+# The board-neutral flags a toolchain records (config/toolchain.seed).
+NEUTRAL_CFLAGS = (
+    "-Os -pipe -mcpu=generic -Warray-bounds -Wuninitialized -Wmaybe-uninitialized"
+    " -Wstrict-aliasing -Wuse-after-free -Wdangling-pointer -fno-caller-saves -fno-plt -O3"
+    " -fhonour-copts"
+)
 LIBC = b"the toolchain's C library"
 # The stand-in Rust standard library for the target, in staging_dir/hostpkg/lib/rustlib.
 RUST_STD = Path("aarch64-unknown-linux-musl/lib/libstd.rlib")
@@ -411,7 +415,7 @@ class Found:
         ),
         pytest.param(Found(libc=None, rebuilt=True, rust_rebuilt=True), id="none"),
         pytest.param(
-            Found(cflags=f"{NEUTRAL_CFLAGS} -O3", rebuilt=True, rust_rebuilt=True),
+            Found(cflags=f"{NEUTRAL_CFLAGS} -O2", rebuilt=True, rust_rebuilt=True),
             id="other flags",
         ),
         pytest.param(

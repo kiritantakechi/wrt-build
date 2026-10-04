@@ -17,10 +17,10 @@
 
 ## 2. `-O3` for the packages, `-O2` for the kernel (design D1–D3)
 
-- [ ] 2.1 Before anything changes, measure each board's EROFS root and upgrade image (dev profile), for D7.
+- [x] 2.1 Before anything changes, measure each board's EROFS root and upgrade image (dev profile), for D7.
 
   Verify: the four numbers are noted for task 2.5.
-- [ ] 2.2 Set the flags in `config/toolchain.seed`:
+- [x] 2.2 Set the flags in `config/toolchain.seed`:
   - `CONFIG_EXTRA_OPTIMIZATION="-fno-caller-saves -fno-plt -O3"`;
   - `CONFIG_KERNEL_CFLAGS="-O2"`;
   - `CONFIG_TARGET_OPTIMIZATION` with the target's default (`-Os -pipe -mcpu=generic`) and the UB-indicative warning options of D4.
@@ -28,7 +28,7 @@
   Update the seed's comment.
 
   Verify: after `just config r4s dev`, `make -s val.TARGET_CFLAGS` ends with `-O3 -mcpu=cortex-a72.cortex-a53+crypto`. The flags the kernel build adds, the extra flags without `-fno-plt` followed by the kernel's, end with `-O2`.
-- [ ] 2.3 Make `scripts/build.sh` record the flags the kernel build adds (`kernel_cflags`) and the profile in the manifest. Extend `tests/firmware/test_toolchain.py`:
+- [x] 2.3 Make `scripts/build.sh` record the flags the kernel build adds (`kernel_cflags`) and the profile in the manifest. Extend `tests/firmware/test_toolchain.py`:
   - "Check compile command" expects `-O3`;
   - "Check the kernel's flags" (new) expects `-O2` last and the board's `-mcpu`;
   - "Check for relaxed floating point" (new) finds none of the relaxing options in either set of flags.
