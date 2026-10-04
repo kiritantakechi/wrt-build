@@ -203,7 +203,13 @@ def test_esp_is_masqueraded(online: Online) -> None:
 def test_stopping_einat_falls_back_to_masquerade(online: Online, einat_restored: Online) -> None:
     del einat_restored
     online.router.run("/etc/init.d/einat stop")
-    assert "tcx/ingress" not in hooks(online.router, "pppoe-wan")
+    # procd only signals einat: its programs go with it as it exits, which can
+    # be a moment after the init script returns.
+    until(
+        lambda: "tcx/ingress" not in hooks(online.router, "pppoe-wan"),
+        timeout=RECOVERY,
+        what="einat's programs detached",
+    )
     # fw4 reloads without einat's rules a moment later; masquerade then applies.
     until(lambda: not _einat_rules(online), timeout=RECOVERY, what="einat's rules withdrawn")
     seen = online.client().probe("udp", DIRECT_TARGET[0], "--source-port", "41006")
