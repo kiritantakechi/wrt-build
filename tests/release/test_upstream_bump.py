@@ -169,9 +169,12 @@ def test_a_patch_that_does_not_apply_is_named(tmp_path: Path) -> None:
         shutil.copytree(REPO / part, repository / part)
     heads = {name: _git(tmp_path / name, "rev-parse", "HEAD") for name in NAMES}
     _write_lock(tmp_path, repository / "upstream.lock", heads)
+    # A tree as fetch leaves it: the pinned commit checked out.
     work = tmp_path / "work"
-    (work / "openwrt").mkdir(parents=True)
-    (work / "openwrt" / "feeds.conf").touch()
+    tree = work / "openwrt"
+    _git(tmp_path, "clone", "-q", str(openwrt), str(tree))
+    _git(tree, "checkout", "-q", "--detach", heads["openwrt"])
+    (tree / "feeds.conf").touch()
     result = subprocess.run(
         [repository / "scripts" / "patch.sh"],
         capture_output=True,
