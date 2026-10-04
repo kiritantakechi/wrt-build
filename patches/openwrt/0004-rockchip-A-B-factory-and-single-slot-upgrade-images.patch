@@ -14,6 +14,7 @@ sysupgrade writes it to the slot that is not running.
 gen_image_ab.sh writes the disk. Both images build the boot partition
 the same way (ab-boot). Every other device is unchanged.
 
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Inappropriate [wrt-build's A/B slot layout]
 ---
  scripts/gen_image_ab.sh              | 32 ++++++++++++++++++++++++++++

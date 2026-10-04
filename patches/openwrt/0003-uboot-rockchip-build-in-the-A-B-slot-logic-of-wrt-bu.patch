@@ -12,6 +12,7 @@ environment: the board's constants followed by the shared slot logic. The
 stored environment may set only boot_slot, bootcount and
 upgrade_available (ENV_WRITEABLE_LIST). Every other variant is unchanged.
 
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Inappropriate [wrt-build's A/B slot layout]
 ---
  package/boot/uboot-rockchip/Makefile | 4 ++++

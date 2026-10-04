@@ -13,6 +13,7 @@ event behind it for that long.
 Set a NIC's affinity when that NIC itself is added. At boot, each NIC's
 own event still sets it, so the result is the same.
 
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
  .../armv8/base-files/etc/hotplug.d/net/40-net-smp-affinity    | 4 ++++

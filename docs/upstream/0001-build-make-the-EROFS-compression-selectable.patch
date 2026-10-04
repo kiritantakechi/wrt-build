@@ -14,7 +14,7 @@ whenever EROFS is enabled. Add an explicit compression choice instead:
 lz4hc stays the default, so existing builds are unchanged, and LZMA
 becomes available on request (it selects the kernel LZMA support).
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
  config/Config-images.in | 15 +++++++++++++++

@@ -12,6 +12,7 @@ kernel command line names, by PARTUUID or by device, and sysfs gives its
 number, whatever the partition table. Single-slot images keep using
 partition 1.
 
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Inappropriate [wrt-build's A/B slot layout]
 ---
  .../base-files/lib/preinit/79_move_config     | 21 +++++++++++++++++--

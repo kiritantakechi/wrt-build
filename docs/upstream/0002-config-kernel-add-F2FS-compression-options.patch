@@ -12,7 +12,7 @@ LZO-RLE, LZ4, LZ4HC, ZSTD). The kernel defaults all of them to y and
 the build stops on any that is left without a value, so each one needs a
 KERNEL_* counterpart. LZ4 and ZSTD default to y; LZO and LZ4HC are opt-in.
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
  config/Config-kernel.in | 30 ++++++++++++++++++++++++++++++
