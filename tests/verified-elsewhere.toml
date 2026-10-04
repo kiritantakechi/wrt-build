@@ -36,6 +36,12 @@ by = "build.yml's caches job: after run 37143040755 the ref held one compiler ca
 
 [[scenario]]
 capability = "build/ci"
+requirement = "Cache keyed on actual inputs"
+scenario = "Rebuild from warm compiler caches"
+by = "VM, 2026-10-04: the R4S built again from an empty build directory, every cache warm: sccache served all 404 Rust compiles, Go compiled no package anew, and ccache missed 2 of 15,264 calls, both of ncurses's lib_gen.c, which ncurses generates anew in every build, naming a temporary file after its PID. CI run 37181836494, from the caches run 37166467868 left with the same toolchain: ccache missed 6 and 3 of about 23,790 calls, sccache none, and Go compiled one package anew per board (docs/ci.md)"
+
+[[scenario]]
+capability = "build/ci"
 requirement = "Build all kmods"
 scenario = "Repository contains all kmods"
 by = "build.yml firmware: ci profile with CONFIG_ALL_KMODS; artifact firmware-unsigned"

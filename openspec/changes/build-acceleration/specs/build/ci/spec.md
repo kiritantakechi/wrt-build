@@ -32,7 +32,7 @@ Every stage SHALL keep a compiler cache for each language it compiles: C and C++
 
 #### Scenario: Rebuild from warm compiler caches
 - **WHEN** a stage builds sources it has built before, with its compiler cache restored
-- **THEN** the cache serves every cacheable C, C++, Go and Rust compilation, and the build's report of each language's cache shows no miss
+- **THEN** the caches serve every C, C++, Go and Rust compilation of a source the stage has compiled before, and each language's report shows misses only for sources the build generates anew
 
 #### Scenario: One compiler cache per stage
 - **WHEN** a CI run's caches have been pruned

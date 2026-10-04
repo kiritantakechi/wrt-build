@@ -118,7 +118,7 @@
   - the workflow's header comments match.
 
   Verify: actionlint passes, and `just check` is green.
-- [ ] 5.2 Get a first green run, with a cold host stage. Record in `docs/ci.md`:
+- [x] 5.2 Get a first green run, and the timings of a cold host stage (run 37143040755 built it cold and failed only on a test of the patch step, fixed in abb3b89; run 37166467868 is the first green one). Record in `docs/ci.md`:
   - each stage's duration and report;
   - the firmware jobs' durations per board, with their CPU;
   - that no firmware report holds a toolchain stage.
@@ -126,10 +126,10 @@
   Update the build/ci records in `tests/verified-elsewhere.toml` for "Toolchain cache hit", "Only the packages feed updated" and "Toolchain inputs change".
 
   Verify: the run is green, and the records cite it.
-- [ ] 5.3 Dispatch a second run of the same commit (`workflow_dispatch`). From its firmware reports, record that no compiler cache missed and that Go compiled no package anew. Then record the cache budget after the `caches` job (`gh cache list`) against the estimate of D8. Add "Rebuild from warm compiler caches" and "One compiler cache per stage" to `tests/verified-elsewhere.toml`.
+- [x] 5.3 Dispatch a run whose toolchain key is the last run's (`workflow_dispatch`; run 37181836494, after a commit of tests and docs only). From its firmware reports, record what each compiler cache served, and name what a warm rebuild still misses, from ccache's log of one on the VM. Then record the cache budget after the `caches` job (`gh cache list`) against the estimate of D8. Add "Rebuild from warm compiler caches" and "One compiler cache per stage" to `tests/verified-elsewhere.toml`.
 
   Verify: the second run's firmware jobs take under an hour, and the ref holds one compiler cache per stage.
-- [ ] 5.4 Rewrite the stage, cache and timing sections of `docs/ci.md`:
+- [x] 5.4 Rewrite the stage, cache and timing sections of `docs/ci.md`:
   - what the host stage builds;
   - the compiler caches per stage and their trim;
   - the measured budget;
@@ -139,6 +139,6 @@
 
 ## 6. Integration
 
-- [ ] 6.1 On images built after the change, run the full suites of both boards on the VM (`just test r4s dev`, `just test r6s dev`), and the system tests in CI.
+- [x] 6.1 On images built after the change, run the full suites of both boards on the VM (`just test r4s dev`, `just test r6s dev`), and the system tests in CI.
 
   Verify: all pass, and `spec-coverage --change build-acceleration` reports no uncovered scenario.
