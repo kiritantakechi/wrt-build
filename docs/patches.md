@@ -23,7 +23,7 @@ In a patch made by `git format-patch`, the trailer ends the message, before the 
 
 A patch's number is its identity. A dropped patch leaves its number unused, no patch is renumbered, and a new patch takes the next free number, so that a number in a message, a document or a test always means the same patch.
 
-Every `Pending` and `Submitted` patch has a write-up below, which names its file; every write-up names a patch that exists. `tests/build/test_patches.py` checks the trailers and holds the two in step.
+Every `Pending` and `Submitted` patch has a write-up below, which names its file; every write-up names a patch that exists. `tests/build/test_upstream_pinning.py` checks the trailers and holds the two in step.
 
 ## Patches meant for upstream
 

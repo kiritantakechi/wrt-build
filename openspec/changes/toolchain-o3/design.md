@@ -183,7 +183,7 @@ config/profiles
 - In a patch made by `git format-patch` the trailer ends the message, where `git interpret-trailers --parse` reads it. A plain diff, as the feed packages' own patches are, carries it in its header.
 - The status lives with the patch, so no list elsewhere can drift from the files, and a patch moved or dropped takes its status along.
 - `docs/patches.md` replaces `docs/upstream-contributions.md`. It describes the convention, and keeps the write-ups of the `Pending` and `Submitted` patches, with the rule for upstream submissions: none without the maintainer's consent.
-- `tests/build/test_patches.py` reads every patch file's trailer, and holds the write-ups and the `Pending` and `Submitted` patches in step, both ways.
+- `tests/build/test_upstream_pinning.py` reads every patch file's trailer, and holds the write-ups and the `Pending` and `Submitted` patches in step, both ways.
 
 **Alternative considered:** a table of every patch in `docs/patches.md`, checked against the files. It states each patch's status twice, and the second copy is the one that drifts.
 

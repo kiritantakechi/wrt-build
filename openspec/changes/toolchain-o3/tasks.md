@@ -2,16 +2,16 @@
 
 ## 1. Every patch states its upstream status (design D6)
 
-- [ ] 1.1 Give every patch file in the repository its `Upstream-Status` trailer: `patches/openwrt`, `patches/packages`, `patches/qemu`, the feed packages' `patches/` and `docs/upstream`. A `git format-patch` patch carries it at the end of its message, a plain diff in its header. The audit of group 5 refines the statuses; until then, they hold what the patch is today.
+- [x] 1.1 Give every patch file in the repository its `Upstream-Status` trailer: `patches/openwrt`, `patches/packages`, `patches/qemu`, the feed packages' `patches/` and `docs/upstream`. A `git format-patch` patch carries it at the end of its message, a plain diff in its header. The audit of group 5 refines the statuses; until then, they hold what the patch is today.
 
   Verify: `git interpret-trailers --parse` finds the trailer in every format-patch file, and every plain diff's header has it.
-- [ ] 1.2 Turn `docs/upstream-contributions.md` into `docs/patches.md`:
+- [x] 1.2 Turn `docs/upstream-contributions.md` into `docs/patches.md`:
   - the trailer convention: its vocabulary, where the trailer goes in each kind of patch file, and that a patch's number is its identity, never reused or shifted;
   - the write-ups of the `Pending` and `Submitted` patches, as before, with the rule that nothing is submitted without the maintainer's consent;
   - every reference to the old document points to the new one.
 
   Verify: `grep -r upstream-contributions` finds nothing outside the archive.
-- [ ] 1.3 Add `tests/build/test_patches.py` for the build/upstream-pinning scenarios "Patch without a status", "Patch meant for upstream without a write-up" and "Write-up without a patch". It reads every patch file's trailer, and matches the `Pending` and `Submitted` patches against the write-ups, both ways.
+- [x] 1.3 Add `tests/build/test_upstream_pinning.py` for the build/upstream-pinning scenarios "Patch without a status", "Patch meant for upstream without a write-up" and "Write-up without a patch". It reads every patch file's trailer, and matches the `Pending` and `Submitted` patches against the write-ups, both ways.
 
   Verify: the tests pass. With a trailer removed, a status outside the vocabulary, a write-up removed or a stray one added, they fail and name the patch or the write-up.
 

@@ -58,7 +58,7 @@ The switch also rebuilds every package. That makes it the moment to audit every 
   - `tests/firmware/test_toolchain.py`: `-O3`, the kernel's flags and fast-math;
   - new `tests/quality/test_undefined_behavior.py`;
   - the trap check in the router fixture;
-  - new `tests/build/test_patches.py`, over every patch's trailer;
+  - new `tests/build/test_upstream_pinning.py`, over every patch's trailer, and `tests/unit/test_patches.py`;
   - `tests/reviewed-warnings.toml`, the reviewed warnings;
   - `NEUTRAL_CFLAGS` in `tests/build/test_boards.py`.
 - **Docs**:
