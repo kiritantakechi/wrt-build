@@ -1,0 +1,7 @@
+# The ubsan profile (toolchain-o3 D5, docs/undefined-behavior.md): every target
+# package instrumented with UBSan in trap mode, so undefined behavior that runs
+# kills its process with SIGTRAP, and needs no libubsan, which OpenWrt's musl
+# toolchain lacks. A board-only seed: the toolchain, and musl, libgcc and
+# libstdc++ in it, stay the dev profile's, uninstrumented, and so does the kernel,
+# which this option never reaches. config/toolchain.seed's value, then UBSan.
+CONFIG_TARGET_OPTIMIZATION="-Os -pipe -mcpu=generic -Warray-bounds -Wuninitialized -Wmaybe-uninitialized -Wstrict-aliasing -Wuse-after-free -Wdangling-pointer -Wshift-negative-value -fsanitize=undefined -fsanitize-trap=undefined"

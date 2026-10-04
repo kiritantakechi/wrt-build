@@ -1,3 +1,6 @@
-# <profile>: <seed files in config/, applied in order>
+# <profile>: <seed files in config/, applied in order; a later seed's line for an
+# option replaces an earlier one>. Seeds after a "|" apply to a board's
+# configuration only: the toolchain is built without them (toolchain-o3 D5).
 dev: target toolchain kernel rootfs system datapath services release dev
 ci: target toolchain kernel rootfs system datapath services release ci
+ubsan: target toolchain kernel rootfs system datapath services release dev | ubsan

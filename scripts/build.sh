@@ -24,8 +24,9 @@ ensure_fhs build "$@"
 [ -n "${board}" ] || die "usage: build <board> [profile]"
 device=$(board_field "${board}" .device)
 [ -f "${TREE}/.config" ] || die "no .config; run 'just config ${board} ${profile}' first"
-grep -qx "CONFIG_BUILD_SUFFIX=\"${board}\"" "${TREE}/.config" ||
-	die "the tree is not configured for ${board}; run 'just config ${board} ${profile}' first"
+name=$(build_name "${board}" "${profile}")
+grep -qx "CONFIG_BUILD_SUFFIX=\"${name}\"" "${TREE}/.config" ||
+	die "the tree is not configured for ${board} (${profile}); run 'just config ${board} ${profile}' first"
 
 toolchain_dir=$(make -C "${TREE}" -s val.TOOLCHAIN_DIR)
 record="${toolchain_dir}/wrt-toolchain.json"
@@ -67,8 +68,7 @@ mkdir -p "${warnings}"
 touch "${warnings}/.since"
 info "make -j${jobs} (${board}, ${profile}) on ${cpu}"
 # The time log is named after the build directories, as each build keeps its own.
-suffix=$(sed -n 's/^CONFIG_BUILD_SUFFIX="\(.*\)"$/\1/p' "${TREE}/.config")
-log=$(time_log "${suffix}")
+log=$(time_log "${name}")
 status=0
 BUILD_TIME_LOG="${log}" make -C "${TREE}" -j"${jobs}" || status=$?
 # Also after a failure: the next build may rewrite these logs without a compile.

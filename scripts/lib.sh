@@ -418,31 +418,78 @@ image_warnings() (
 	done
 )
 
-# compose_seeds <profile> <board> <output>: the profile's seed files in order
-# (config/profiles), then the board's seed (board-model D2): its device, its
-# -mcpu after the profile's optimization flags, and build and output directories
-# of its own. Without a board (an empty <board>), the configuration is the
-# board-neutral one the host tools and the toolchain are built from: every
-# board's device, none of their CPU tuning, and no other device, which buildbot
-# mode would otherwise add.
-compose_seeds() (
-	seeds=$(awk -v p="$1" -F: '
+# profile_seeds <profile>: the seeds of a profile (config/profiles), in order. Those
+# after a "|" apply to a board's configuration only, never to the board-neutral one
+# the toolchain is built from (toolchain-o3 D5).
+profile_seeds() (
+	awk -v p="$1" -F: '
 		/^[[:space:]]*(#|$)/ { next }
 		$1 == p { print $2; found = 1 }
 		END { if (!found) exit 1 }
-	' "${REPO_DIR}/config/profiles") || die "unknown profile '$1' (see config/profiles)"
+	' "${REPO_DIR}/config/profiles" || die "unknown profile '$1' (see config/profiles)"
+)
+
+# build_name <board> <profile>: the name of a board's build directories and
+# binaries (CONFIG_BUILD_SUFFIX): the board's, and after it the profile's for a
+# profile with board-only seeds, whose objects differ from every other profile's.
+build_name() (
+	seeds=$(profile_seeds "$2") || exit
+	case "${seeds}" in
+		*"|"*) echo "$1_$2" ;;
+		*) echo "$1" ;;
+	esac
+)
+
+# merge_seeds <file>...: the lines of the seed files in order, each option only in
+# the last line that sets it (CONFIG_X=..., or "# CONFIG_X is not set"), where
+# that line stands: a later seed's line replaces an earlier one, and the
+# composition holds one line per option. Comments and blank lines stay.
+merge_seeds() (
+	awk '
+		function option(text) {
+			if (text ~ /^CONFIG_[^= ]+=/) { sub(/=.*/, "", text); return text }
+			if (text ~ /^# CONFIG_[^ ]+ is not set$/) { split(text, word, " "); return word[2] }
+			return ""
+		}
+		{ line[NR] = $0; name = option($0); if (name != "") last[name] = NR }
+		END {
+			for (i = 1; i <= NR; i++) {
+				name = option(line[i])
+				if (name == "" || last[name] == i) print line[i]
+			}
+		}
+	' "$@"
+)
+
+# compose_seeds <profile> <board> <output>: the profile's seed files in order
+# (config/profiles), merged one line per option, then the board's seed
+# (board-model D2): its device, its -mcpu after the profile's optimization flags,
+# and build and output directories of its own (build_name). Without a board (an
+# empty <board>), the configuration is the board-neutral one the host tools and
+# the toolchain are built from: the seeds before any "|", every board's device,
+# none of their CPU tuning, and no other device, which buildbot mode would
+# otherwise add.
+compose_seeds() (
+	profile=$1
 	board=$2
 	output=$3
+	seeds=$(profile_seeds "${profile}") || exit
+	if [ -z "${board}" ]; then
+		seeds=${seeds%%|*}
+	else
+		seeds=$(printf '%s\n' "${seeds}" | tr '|' ' ')
+	fi
 	set --
 	for seed in ${seeds}; do
 		file="${REPO_DIR}/config/${seed}.seed"
 		[ -f "${file}" ] || die "missing seed file config/${seed}.seed"
 		set -- "$@" "${file}"
 	done
+	merged=$(merge_seeds "$@")
 	if [ -z "${board}" ]; then
 		ids=$(board_ids)
 		{
-			cat "$@"
+			printf '%s\n' "${merged}"
 			cat <<-EOF
 				# Every board, with none of their CPU tuning (board-model D2).
 				CONFIG_TARGET_MULTI_PROFILE=y
@@ -458,15 +505,16 @@ compose_seeds() (
 	fi
 	device=$(board_field "${board}" .device)
 	cpu=$(board_field "${board}" .cpu)
-	extra=$(sed -n 's/^CONFIG_EXTRA_OPTIMIZATION="\(.*\)"$/\1/p' "$@" | tail -n 1)
+	name=$(build_name "${board}" "${profile}") || exit
+	extra=$(printf '%s\n' "${merged}" | sed -n 's/^CONFIG_EXTRA_OPTIMIZATION="\(.*\)"$/\1/p')
 	{
-		grep -hv '^CONFIG_EXTRA_OPTIMIZATION=' "$@"
+		printf '%s\n' "${merged}" | grep -v '^CONFIG_EXTRA_OPTIMIZATION='
 		cat <<-EOF
 			# The board: boards/${board}.json (board-model D2).
 			CONFIG_TARGET_rockchip_armv8_DEVICE_${device}=y
 			CONFIG_EXTRA_OPTIMIZATION="${extra:+${extra} }-mcpu=${cpu}"
-			CONFIG_BUILD_SUFFIX="${board}"
-			CONFIG_BINARY_FOLDER="${TREE}/bin/${board}"
+			CONFIG_BUILD_SUFFIX="${name}"
+			CONFIG_BINARY_FOLDER="${TREE}/bin/${name}"
 		EOF
 	} >"${output}"
 )

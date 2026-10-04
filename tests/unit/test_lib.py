@@ -2,10 +2,21 @@
 
 import hashlib
 import os
+import re
 import subprocess
 from pathlib import Path
 
-LIB = Path(__file__).resolve().parents[2] / "scripts" / "lib.sh"
+import pytest
+
+from wrt_tests.boards import load_all
+
+REPO = Path(__file__).resolve().parents[2]
+LIB = REPO / "scripts" / "lib.sh"
+PROFILES = [
+    line.split(":")[0]
+    for line in (REPO / "config" / "profiles").read_text().splitlines()
+    if line and not line.startswith("#")
+]
 
 
 def _missing_lines(tmp_path: Path, wanted: str, actual: str) -> list[str]:
@@ -225,3 +236,89 @@ def test_go_cache_counts_what_go_compiled(tmp_path: Path) -> None:
         check=True,
     )
     assert result.stdout.strip() == "1"
+
+
+def _compose(profile: str, board: str, tmp_path: Path) -> str:
+    """Return the seed compose_seeds composes for ``profile`` and ``board`` (none: "")."""
+    output = tmp_path / f"{profile}-{board or 'neutral'}.config"
+    # lib.sh finds the repository from $0, here its own path.
+    subprocess.run(
+        [
+            "sh",
+            "-c",
+            f'. "{LIB}" && TREE=/work/openwrt && compose_seeds "$@"',
+            str(LIB),
+            profile,
+            board,
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return output.read_text()
+
+
+def _options(seed: str) -> list[str]:
+    """Return the option each line of ``seed`` sets, in order."""
+    return [
+        match.group(1) or match.group(2)
+        for line in seed.splitlines()
+        if (match := re.fullmatch(r"(CONFIG_[^= ]+)=.*|# (CONFIG_[^ ]+) is not set", line))
+    ]
+
+
+def test_a_later_seed_replaces_an_earlier_line(tmp_path: Path) -> None:
+    # The later seed's line stands where it stands; comments stay.
+    (tmp_path / "a.seed").write_text(
+        '# a\nCONFIG_A=y\n# CONFIG_B is not set\nCONFIG_C="-O2"\nCONFIG_D=m\n'
+    )
+    (tmp_path / "b.seed").write_text('# b\nCONFIG_B=y\nCONFIG_C="-O3"\n')
+    result = subprocess.run(
+        ["sh", "-c", f'. "{LIB}" && merge_seeds a.seed b.seed'],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout == '# a\nCONFIG_A=y\nCONFIG_D=m\n# b\nCONFIG_B=y\nCONFIG_C="-O3"\n'
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+def test_a_composed_seed_holds_one_line_per_option(profile: str, tmp_path: Path) -> None:
+    # configure_tree checks every line of it against the configuration, which can
+    # hold only one value per option.
+    for board in ("", *(board.id for board in load_all())):
+        options = _options(_compose(profile, board, tmp_path))
+        assert len(options) == len(set(options)), (profile, board)
+
+
+def test_board_only_seeds_leave_the_toolchain_alone(tmp_path: Path) -> None:
+    # The toolchain is built from the board-neutral composition, which its key
+    # hashes: the ubsan profile's is the dev profile's, so is its toolchain.
+    assert _compose("ubsan", "", tmp_path) == _compose("dev", "", tmp_path)
+
+
+def test_board_only_seeds_build_apart(tmp_path: Path) -> None:
+    # The ubsan seed's flags replace the toolchain seed's, the board's -mcpu still
+    # comes last, and the build has directories of its own.
+    seed = _compose("ubsan", "r4s", tmp_path).splitlines()
+    ubsan = (REPO / "config" / "ubsan.seed").read_text().splitlines()
+    assert [line for line in seed if line.startswith("CONFIG_TARGET_OPTIMIZATION=")] == [
+        line for line in ubsan if line.startswith("CONFIG_TARGET_OPTIMIZATION=")
+    ]
+    assert 'CONFIG_EXTRA_OPTIMIZATION="-fno-caller-saves -fno-plt -O3 -mcpu=' in "\n".join(seed)
+    assert 'CONFIG_BUILD_SUFFIX="r4s_ubsan"' in seed
+    assert 'CONFIG_BINARY_FOLDER="/work/openwrt/bin/r4s_ubsan"' in seed
+    assert 'CONFIG_BUILD_SUFFIX="r4s"' in _compose("dev", "r4s", tmp_path).splitlines()
+
+
+def test_the_ubsan_seed_extends_the_toolchain_seed() -> None:
+    # It replaces the option's value whole: what the toolchain seed holds, then UBSan.
+    def value(seed: str) -> str:
+        text = (REPO / "config" / f"{seed}.seed").read_text()
+        found = re.search(r'^CONFIG_TARGET_OPTIMIZATION="(.*)"$', text, re.MULTILINE)
+        assert found
+        return str(found[1])
+
+    assert value("ubsan") == f"{value('toolchain')} -fsanitize=undefined -fsanitize-trap=undefined"

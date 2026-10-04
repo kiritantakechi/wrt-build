@@ -66,15 +66,15 @@
 
 ## 4. The `ubsan` profile (design D5)
 
-- [ ] 4.1 Extend `compose_seeds` in `scripts/lib.sh`:
+- [x] 4.1 Extend `compose_seeds` in `scripts/lib.sh`:
   - seeds after a `|` in `config/profiles` apply to boards only;
   - a later seed's line for a symbol replaces an earlier one, which generalizes today's merge of `CONFIG_EXTRA_OPTIMIZATION`.
 
-  Verify: tests in `tests/build/test_boards.py`:
+  Verify: tests in `tests/unit/test_lib.py`, beside the other tests of `scripts/lib.sh` (no build/boards scenario covers the composition):
   - the toolchain composition of a profile with board-only seeds equals that of the profile without them, so their toolchain keys are equal;
   - a composed board seed holds one line per symbol, the later seed's;
   - `just config r4s dev` still passes its seed check.
-- [ ] 4.2 Add the `ubsan` profile and `config/ubsan.seed` (`CONFIG_TARGET_OPTIMIZATION` plus `-fsanitize=undefined -fsanitize-trap=undefined`). `scripts/config.sh` suffixes the build directories of a profile with board-only seeds with the profile (`r4s_ubsan`), and its outputs go to `out/<board>/ubsan`.
+- [x] 4.2 Add the `ubsan` profile and `config/ubsan.seed` (`CONFIG_TARGET_OPTIMIZATION` plus `-fsanitize=undefined -fsanitize-trap=undefined`). `scripts/config.sh` suffixes the build directories of a profile with board-only seeds with the profile (`r4s_ubsan`), and its outputs go to `out/<board>/ubsan`.
 
   Verify: after `just config r4s ubsan`, `TARGET_CFLAGS` holds the sanitizer flags while the kernel's flags do not, `BUILD_SUFFIX` is `r4s_ubsan`, and the toolchain key equals the dev profile's.
 - [ ] 4.3 Add the feed package `wrt-ubsan-probe`, which overflows a signed integer on purpose; only `config/ubsan.seed` selects it.
