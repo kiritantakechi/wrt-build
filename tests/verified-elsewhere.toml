@@ -94,7 +94,7 @@ by = "local VM, 2026-10-04: just build r4s dev with nothing changed took 5 min 3
 capability = "build/environment"
 requirement = "Rebuild only what changed"
 scenario = "Change the compiler flags"
-by = "local VM, 2026-10-04: dropping -fno-plt from config/toolchain.seed built the toolchains anew, recorded the flags without it, and prepared all 132 target packages of the R4S again; restoring it did the same (docs/upstream-contributions.md, patch 0011)"
+by = "local VM, 2026-10-04: dropping -fno-plt from config/toolchain.seed built the toolchains anew, recorded the flags without it, and prepared all 132 target packages of the R4S again; restoring it did the same (docs/patches.md, patch 0011)"
 
 [[scenario]]
 capability = "build/environment"

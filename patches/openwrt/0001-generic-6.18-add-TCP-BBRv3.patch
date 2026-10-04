@@ -14,6 +14,7 @@ branch and Oleksandr Natalenko's rebases. All 20 patches are required:
 net/ipv4/bpf_tcp_ca.c for the changed tcp_congestion_ops members.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Upstream-Status: Backport [sbwml/r4s_build_script openwrt/patch/kernel-6.18/bbr3, from google/bbr v3]
 ---
  ...den-app-limited-rate-sample-detectio.patch |   52 +
  ...hrink-delivered_mstamp-first_tx_msta.patch |   74 +

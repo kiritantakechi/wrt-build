@@ -11,6 +11,8 @@ partition instead of partition 1. The root partition is the one the
 kernel command line names, by PARTUUID or by device, and sysfs gives its
 number, whatever the partition table. Single-slot images keep using
 partition 1.
+
+Upstream-Status: Inappropriate [wrt-build's A/B slot layout]
 ---
  .../base-files/lib/preinit/79_move_config     | 21 +++++++++++++++++--
  1 file changed, 19 insertions(+), 2 deletions(-)

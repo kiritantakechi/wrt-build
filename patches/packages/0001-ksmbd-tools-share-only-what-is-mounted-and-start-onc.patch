@@ -12,6 +12,7 @@ service when it is (a mount trigger per share), and do not start at all
 while every share waits for its mount.
 
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
 ---
  net/ksmbd-tools/Makefile         |  2 +-
  net/ksmbd-tools/files/ksmbd.init | 28 ++++++++++++++++++++++++++++

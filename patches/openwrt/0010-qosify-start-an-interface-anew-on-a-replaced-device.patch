@@ -12,6 +12,7 @@ Carry the qosify patch that remembers the device an interface was set
 up on, and starts the interface anew on any other.
 
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
 ---
  package/network/config/qosify/Makefile        |  2 +-
  ...-interface-anew-on-a-replaced-device.patch | 92 +++++++++++++++++++

@@ -13,6 +13,7 @@ Leave the file out whenever the mount point is not mounted; its mount
 trigger starts it once the mount point is mounted, as at boot.
 
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
 ---
  package/system/ubox/Makefile       | 2 +-
  package/system/ubox/files/log.init | 5 +++--

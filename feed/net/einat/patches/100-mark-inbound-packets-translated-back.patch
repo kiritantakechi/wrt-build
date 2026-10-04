@@ -11,6 +11,8 @@ the internal networks.
 
 The mark is a read-only global of the BPF object, 0 by default, which
 marks nothing; the behaviour without the option is unchanged.
+
+Upstream-Status: Pending
 ---
  config.sample.toml      |  5 +++++
  src/bpf/einat.bpf.c     |  8 ++++++++

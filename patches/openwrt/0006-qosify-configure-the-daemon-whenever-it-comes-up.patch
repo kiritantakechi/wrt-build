@@ -13,6 +13,7 @@ Wait in the background instead, so that the boot does not wait along,
 and for as long as procd runs the daemon; then configure it.
 
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
 ---
  package/network/config/qosify/Makefile          |  2 +-
  package/network/config/qosify/files/qosify.init | 11 +++++++++--

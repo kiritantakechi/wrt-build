@@ -13,6 +13,7 @@ the build stops on any that is left without a value, so each one needs a
 KERNEL_* counterpart. LZ4 and ZSTD default to y; LZO and LZ4HC are opt-in.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Upstream-Status: Pending
 ---
  config/Config-kernel.in | 30 ++++++++++++++++++++++++++++++
  1 file changed, 30 insertions(+)

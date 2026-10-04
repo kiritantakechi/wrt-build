@@ -19,6 +19,7 @@ Keep the version in a shell variable instead, so that concurrent checks
 share no file.
 
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
 ---
  toolchain/Makefile | 6 +++---
  1 file changed, 3 insertions(+), 3 deletions(-)
