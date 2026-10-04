@@ -59,12 +59,20 @@ info "make download"
 make -C "${TREE}" -j"${jobs}" download
 # Statistics of this build alone: the caches carry them from earlier builds.
 start=$(compiler_cache_start)
+# The UB-indicative warnings of each package's last build (toolchain-o3 D4), kept
+# with the board's build directories, which live as long as what they record.
+build_dir=$(make -C "${TREE}" -s val.BUILD_DIR)
+warnings="${build_dir}/wrt-warnings"
+mkdir -p "${warnings}"
+touch "${warnings}/.since"
 info "make -j${jobs} (${board}, ${profile}) on ${cpu}"
 # The time log is named after the build directories, as each build keeps its own.
 suffix=$(sed -n 's/^CONFIG_BUILD_SUFFIX="\(.*\)"$/\1/p' "${TREE}/.config")
 log=$(time_log "${suffix}")
 status=0
 BUILD_TIME_LOG="${log}" make -C "${TREE}" -j"${jobs}" || status=$?
+# Also after a failure: the next build may rewrite these logs without a compile.
+warnings_harvest "${TREE}/logs" "${warnings}" "${warnings}/.since"
 compiler_cache_report "${start}"
 time_report "${log}"
 [ "${status}" -eq 0 ] ||
@@ -89,7 +97,6 @@ compiled=$(toolchain_stages "${log}" | paste -sd ',' -)
 
 # The kernel configuration overlay must reach the kernel unchanged: a line that
 # kconfig dropped (unmet dependency, renamed symbol) would silently lose a feature.
-build_dir=$(make -C "${TREE}" -s val.BUILD_DIR)
 kernel=$(kernel_dir "${build_dir}")
 missing=$(missing_config_lines "${REPO_DIR}/config/kernel.config" "${kernel}/.config")
 if [ -n "${missing}" ]; then
@@ -109,6 +116,15 @@ mkdir -p "${out}/targets" "${out}/packages"
 cp -a "${bin_dir}/." "${out}/targets/"
 cp -a "${output_dir}/packages/." "${out}/packages/"
 cp "${WRT_WORKDIR}/out/${board}/diffconfig-${profile}" "${out}/diffconfig"
+
+# warnings.json: the UB-indicative warnings of the packages in the board's image,
+# for the system tests' register check (quality/undefined-behavior).
+found=$(image_warnings "${bin_dir}/"*"-${device}.manifest" "${TREE}/tmp/.packageinfo" "${warnings}")
+printf '%s' "${found}" | jq -R -n '[inputs | split("\t")
+		| {package: .[0], option: .[1], file: .[2], function: .[3], line: (.[4] | tonumber)}]' \
+	>"${out}/warnings.json"
+count=$(jq 'length' "${out}/warnings.json")
+info "${count} UB-indicative warnings in the image's packages"
 
 # The configuration of what only the board's SoC runs, for the tests that check it
 # statically, and the emulator's U-Boot (r4s-ab-rollback design D7).

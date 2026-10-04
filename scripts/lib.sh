@@ -291,6 +291,133 @@ time_report() (
 	perl "${TREE}/scripts/build-time-report.pl" -n 15 "$1"
 )
 
+# The UB-indicative warning options, without their -W (spec quality/undefined-behavior).
+UB_WARNINGS='aggressive-loop-optimizations array-bounds stringop-overflow
+stringop-overread use-after-free dangling-pointer free-nonheap-object uninitialized
+maybe-uninitialized shift-count-overflow shift-count-negative shift-negative-value
+strict-aliasing address-of-packed-member'
+
+# ub_warnings <log>: the UB-indicative warnings in a build log, one per line:
+# option, file, function and line, tab-separated (toolchain-o3 D4). A warning falls
+# in the function GCC names before it, if in the same file, else in none ("At top
+# level" or another compilation). Inlined code is placed where GCC says it was
+# inlined last: the outermost function and its call. Paths lose the build's
+# directories (a build variant's also the versioned one inside), so the warnings
+# of every board, checkout and version read alike.
+ub_warnings() (
+	# Bytes in every awk: GCC quotes in UTF-8 in a UTF-8 locale.
+	LC_ALL=C UB_WARNINGS="${UB_WARNINGS}" awk '
+		function strip(path) {
+			if (sub(/^.*\/build_dir\/[^\/]+\/[^\/]+\//, "", path))
+				sub(/^[^\/]*-[0-9][^\/]*\//, "", path)
+			sub(/^.*\/staging_dir\/[^\/]+\//, "", path)
+			while (sub(/^\.\.?\//, "", path)) {}
+			return path
+		}
+		function quoted(text) {
+			text = substr(text, index(text, "'\''") + 1)
+			return substr(text, 1, index(text, "'\''") - 1)
+		}
+		BEGIN {
+			n = split(ENVIRON["UB_WARNINGS"], list)
+			for (i = 1; i <= n; i++) ub[list[i]] = 1
+		}
+		{ gsub(/\342\200\230|\342\200\231/, "'\''") }
+		/^[^ :]+: (In|At) .*:$/ {
+			context = substr($0, 1, index($0, ": ") - 1)
+			if (index($0, "'\''")) function_ = quoted($0)
+			else if ($0 ~ /: At /) function_ = ""
+			else { function_ = substr($0, index($0, ": In ") + 5); sub(/:$/, "", function_) }
+			next
+		}
+		/^([^ :]+: )?In [^'\'']*'\''.*'\'',$/ { inlined = quoted($0); at = ""; next }
+		/^ +inlined from '\''.*'\'' at [^ ]+[,:]$/ {
+			inlined = quoted($0)
+			at = substr($0, index($0, "'\'' at ") + 5)
+			next
+		}
+		/^[^ :]+:[0-9]+(:[0-9]+)?: (warning|error): / {
+			chain = inlined; call = at; inlined = ""; at = ""
+			if ($0 !~ /: warning: / || !match($0, /\[-W[a-z0-9-]+=?\]$/)) next
+			option = substr($0, RSTART + 3, RLENGTH - 4)
+			sub(/=$/, "", option)
+			if (!(option in ub)) next
+			split(call != "" ? call : $0, location, ":")
+			if (chain != "") { context = location[1]; function_ = chain }
+			print "-W" option "\t" strip(location[1]) "\t" \
+				(location[1] == context ? function_ : "") "\t" location[2] | "LC_ALL=C sort -u"
+		}
+		END { close("LC_ALL=C sort -u") }
+	' "$1"
+)
+
+# image_logs <manifest> <packageinfo>: the source package and the build log
+# directory (under logs/) of every package of an image's manifest, from OpenWrt's
+# package metadata (tmp/.packageinfo): the directory of the package's Makefile, and
+# below it its build variant's. A package of no variant is built in every variant
+# build of its source, that is in those of the image's other packages from it. The
+# kernel is the target's, built with flags of its own, and has no package metadata.
+image_logs() (
+	awk '
+		FNR == NR { if ($2 == "-" && $1 != "kernel") wanted[$1] = 1; next }
+		function found() {
+			if ((name abi) in wanted) {
+				shipped[name abi] = dir
+				if (variant != "") { variants[dir] = variants[dir] " " variant; of[name abi] = variant }
+			}
+			name = ""
+		}
+		/^Source-Makefile: / { found(); dir = $2; sub(/\/Makefile$/, "", dir); next }
+		/^Package: / { found(); name = $2; abi = ""; variant = ""; next }
+		/^ABI-Version: / { abi = $2; next }
+		/^Build-Variant: / { variant = $2; next }
+		END {
+			found()
+			for (package in wanted) {
+				if (!(package in shipped)) {
+					print "no package metadata for " package > "/dev/stderr"
+					failed = 1
+					continue
+				}
+				dir = shipped[package]
+				source = dir
+				sub(/.*\//, "", source)
+				n = split(package in of ? of[package] : variants[dir], list)
+				if (n == 0) print source "\t" dir | "LC_ALL=C sort -u"
+				for (i = 1; i <= n; i++) print source "\t" dir "/" list[i] | "LC_ALL=C sort -u"
+			}
+			close("LC_ALL=C sort -u")
+			exit failed
+		}
+	' "$1" "$2"
+)
+
+# warnings_harvest <logs> <records> <since>: record the UB-indicative warnings of
+# every package's build log written since the file <since>, in <records> under the
+# log's path. OpenWrt rewrites the logs of all packages whenever it runs their
+# compile steps, also of those it finds up to date: such a log holds nothing but
+# make's time line, and leaves the package's record of its last build standing.
+warnings_harvest() (
+	find "$1/package" -name compile.txt -newer "$3" | while IFS= read -r log; do
+		grep -qv '^time: ' "${log}" || continue
+		record="$2/${log#"$1"/}"
+		mkdir -p "${record%/*}"
+		ub_warnings "${log}" >"${record%.txt}.tsv"
+	done
+)
+
+# image_warnings <manifest> <packageinfo> <records>: the recorded UB-indicative
+# warnings of an image's packages, each led by its source package.
+image_warnings() (
+	logs=$(image_logs "$1" "$2") || exit
+	printf '%s\n' "${logs}" | while IFS="$(printf '\t')" read -r source dir; do
+		record="$3/${dir}/compile.tsv"
+		[ -f "${record}" ] ||
+			die "no record of ${dir}'s warnings; build it again: make ${dir}/{clean,compile}"
+		awk -v source="${source}" '{ print source "\t" $0 }' "${record}"
+	done
+)
+
 # compose_seeds <profile> <board> <output>: the profile's seed files in order
 # (config/profiles), then the board's seed (board-model D2): its device, its
 # -mcpu after the profile's optimization flags, and build and output directories

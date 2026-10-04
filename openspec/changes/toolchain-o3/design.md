@@ -102,7 +102,8 @@ A package whose upstream code is correct but cannot be fixed reasonably opts out
 **Collection.**
 - `build.sh` takes the packages of the board's image from the image's package list, and maps each to its source package through OpenWrt's package metadata (`tmp/.packageinfo`).
 - From each source package's build log it parses GCC's `file:line:col: warning: ... [-Woption]` lines, with the function each falls in.
-- It writes `out/<board>/<profile>/warnings.json`, one record per warning: package, option, file, function, line.
+- OpenWrt rewrites the logs of every package whose compile step it runs, also of one it finds up to date, which then holds only make's time line. So after every make, a failed one included, `build.sh` records the warnings of each log that make wrote with more than that line. The records sit in the board's build directory (`wrt-warnings/`), which lives as long as the objects they describe, and keep each package's warnings from its last real compile.
+- It writes `out/<board>/<profile>/warnings.json` from the records of the image's packages, one entry per warning: package, option, file, function, line.
 - The warnings travel with the build's outputs, so CI's system tests see them as well.
 
 **The register.**
