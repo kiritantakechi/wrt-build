@@ -79,8 +79,20 @@ The report is in every build's log, CI's included. Timings measured since the bu
 | 2026-10-04 | 37166467868 | firmware (r6s) job total | 73 min | Build: 64 min on an AMD EPYC 9V45. The new toolchain is a new compiler to ccache, which identifies it by its content, so C and C++ hit little (17%); sccache served every Rust compile (404 hits, no miss), and Go compiled anew only its 48 packages that use cgo |
 | 2026-10-04 | 37166467868 | firmware (r4s) job total | 120 min | Build: 110 min on an AMD EPYC 7763, likewise (ccache 17%, sccache no miss, Go 66 packages anew) |
 | 2026-10-04 | 37166467868 | system-test jobs | 28 to 118 min | All passed, the upgrade drill of both boards included: the first green run of build-acceleration. R4S: network 31, services 39, release 54, system 118 min. R6S: network 28, services 36, release 40, system 97 min. 5 h 9 min from the host stage to the last test |
+| 2026-10-04 | 37181836494 | host-toolchain job total | 4 min | The key of run 37166467868: the toolchains were restored, and nothing was built |
+| 2026-10-04 | 37181836494 | firmware (r4s) job total | 30 min | Build: 20 min on an Intel Xeon 6973P-C, from the compiler cache run 37166467868 made with the same toolchain: ccache served 23,782 of 23,788 cacheable calls (99.97%), sccache every Rust compile, and Go compiled one package anew. The kernel took 2 min |
+| 2026-10-04 | 37181836494 | firmware (r6s) job total | 40 min | Build: 31 min on an AMD EPYC 7763, likewise: ccache 23,783 of 23,786 (99.99%), sccache no miss, Go one package anew |
+| 2026-10-04 | 37181836494 | system-test jobs | 20 to 117 min | All passed. R4S: network 20, services 43, release 81, system 117 min. R6S: network 20, services 38, release 54, system 76 min. 2 h 41 min from the host stage to the last test |
 
-From empty caches, run 36848242349 took 7 hours 47 minutes from the host toolchain to the last system test. Every firmware job compiles the Rust host toolchain from source, LLVM included, which the compiler cache does not cover, so a warm cache shortens it little: the firmware jobs took 3.5 to 4.75 hours depending on the runner's CPU, within their 330-minute limit and the 5-hour target.
+From empty caches, run 36848242349 took 7 hours 47 minutes from the host toolchain to the last system test: every firmware job compiled Rust's host toolchain, LLVM included, which no compiler cache covered, and took 3.5 to 4.75 hours. Since build-acceleration, the host stage builds every toolchain once for all boards, and each firmware job builds the board's target code alone, on a compiler cache of its own:
+
+| Case | Run | Host stage | Firmware jobs | Host stage to last test |
+|---|---|---|---|---|
+| Every cache empty, the host stage's key new | 37143040755 | 208 min | 82 and 99 min | 6 h 44 min |
+| The host stage's key changed, its compiler cache warm | 37166467868 | 71 min | 73 and 120 min: a new toolchain is a new compiler to ccache | 5 h 9 min |
+| The toolchains restored, the board caches warm | 37181836494 | 4 min | 30 and 40 min | 2 h 41 min |
+
+Every job stays well within its limit (330 minutes for the build jobs), and the slowest, a cold host stage, within the 5-hour target. The system tests are now the longest part of a run: the R4S's `system` suite alone takes up to two hours under TCG.
 
 ### Compiler cache
 
@@ -99,10 +111,14 @@ Since build-acceleration, each stage's compiler cache holds every language: ccac
 
 The total cache quota for a GitHub repository is 10 GB.
 
-| Date | Toolchain archive | ccache | dl | Nix installer | Total |
+| Date | Toolchain archive | Compiler caches (ccache until 2026-10-01) | dl | Nix installer | Total |
 |---|---|---|---|---|---|
 | 2026-09-28 | 776 MiB | 1243 MiB | 1456 MiB | 45 MiB | 3521 MiB |
 | 2026-09-30 | 775 MiB | 1370 MiB per board, two boards | 2685 MiB | 45 MiB | 6245 MiB |
 | 2026-10-01 | 775 MiB | 1363 and 1358 MiB, each one build's worth | 2685 MiB | 45 MiB | 6226 MiB on main, after run 36848242349's `caches` job; the merged board-model branch still held 2756 MiB, the least recently used |
+| 2026-10-03 | 1159 MiB, Go and Rust included | 2081 and 2041 MiB for the boards, 568 MiB for the host stage | 2698 MiB | 46 MiB | 8547 MiB on build-acceleration's branch after run 37143040755's `caches` job, and main's Nix installer |
+| 2026-10-04 | 1159 MiB | 2008 and 2009 MiB for the boards; the host stage's, evicted | 2698 MiB | 46 MiB | 7920 MiB after run 37181836494's `caches` job |
 
-Each run saves a new ccache per board (its key includes the run ID), and a new download cache or toolchain whenever their inputs change (a feed's Makefile, the toolchain's key). One set takes about 6.2 GB of the 10 GB with two boards. Beyond the quota GitHub evicts the least recently used cache, and the firmware jobs used to restore their toolchain first: on 2026-09-30 two download caches and four ccaches pushed out the toolchain the same run's second attempt needed. The firmware jobs now restore the toolchain last, so that a download cache or ccache the run supersedes goes before it, and the `caches` job keeps one set per ref, the current toolchain and the newest download cache and ccache of each board. At that usage the toolchain can stay in the cache, and there is no need to store it as a Release asset instead (the fallback in design D11). Run 36904810397 found main's set as run 36848242349 had left it: both firmware jobs restored that run's toolchain, download cache and compiler caches, and the toolchain, restored last, was the most recently used of them.
+Each run saves a new compiler cache per board, and one for the host stage when it builds (their keys include the run ID), and a new download cache or toolchain whenever their inputs change (a feed's Makefile, the toolchain's key). One set takes about 8.5 GB of the 10 GB with two boards, as design D8 of build-acceleration estimated (8.3 GB); before, with ccache alone and no Go or Rust in the archive, it took 6.2 GB. Beyond the quota GitHub evicts the least recently used cache, and the firmware jobs used to restore their toolchain first: on 2026-09-30 two download caches and four ccaches pushed out the toolchain the same run's second attempt needed. The firmware jobs now restore the toolchain last, so that a download cache or ccache the run supersedes goes before it, and the `caches` job keeps one set per ref, the current toolchain and the newest download cache and compiler cache of each stage. At that usage the toolchain can stay in the cache, and there is no need to store it as a Release asset instead (the fallback in design D11). Run 36904810397 found main's set as run 36848242349 had left it: both firmware jobs restored that run's toolchain, download cache and compiler caches, and the toolchain, restored last, was the most recently used of them.
+
+While a run saves its set beside the one it supersedes, the total passes the quota for a while, and GitHub evicts the least recently used cache. In run 37166467868 that was the host stage's compiler cache, saved early in the run and not used since. It is the one cache whose loss costs only time, as design D8 expected: the next host stage that has to build starts from an empty compiler cache, 3.5 hours instead of 1.2.

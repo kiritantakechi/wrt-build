@@ -8,13 +8,13 @@
 capability = "build/ci"
 requirement = "Staged build within job time limits"
 scenario = "Cold-cache build"
-by = "build.yml host-toolchain + firmware on a cold cache; timings in docs/ci.md"
+by = "build.yml host-toolchain + firmware on a cold cache: run 37143040755, its host stage 208 min and its firmware jobs 82 and 99 min, from empty caches under new keys (docs/ci.md)"
 
 [[scenario]]
 capability = "build/ci"
 requirement = "Staged build within job time limits"
 scenario = "Toolchain cache hit"
-by = "build.yml host-toolchain restores the toolchain cache; firmware builds on it"
+by = "build.yml host-toolchain restores the toolchain cache; firmware builds on it: run 37181836494, its host stage 4 min, and neither firmware job's report holds a toolchain stage, which scripts/build.sh fails on (docs/ci.md)"
 
 [[scenario]]
 capability = "build/ci"
@@ -27,6 +27,12 @@ capability = "build/ci"
 requirement = "Cache keyed on actual inputs"
 scenario = "Toolchain inputs change"
 by = "scripts/toolchain-key.sh; build.yml host-toolchain rebuilds on a key miss: cold in run 37143040755, from its own compiler cache in run 37166467868, whose toolchain-build.sh had changed (docs/ci.md)"
+
+[[scenario]]
+capability = "build/ci"
+requirement = "Cache keyed on actual inputs"
+scenario = "One compiler cache per stage"
+by = "build.yml's caches job: after run 37143040755 the ref held one compiler cache for the host stage and one for each board, each trimmed to what its build used (WRT_COMPILER_CACHE_TRIM); later runs keep the newest of each (docs/ci.md, Cache usage)"
 
 [[scenario]]
 capability = "build/ci"
