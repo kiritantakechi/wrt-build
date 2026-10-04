@@ -67,4 +67,4 @@ The switch also rebuilds every package. That makes it the moment to audit every 
   - `docs/lto-optouts.md` becomes `docs/optimization.md`: the flags, the LTO and `-O3` opt-outs, and the image sizes.
 - **CI**: the toolchain key changes. On `build-acceleration`'s pipeline, the first run builds the host stage anew, its compiler cache serving what the flags do not touch (tools, the compilers, LLVM), and every firmware job compiles its packages cold; later runs hit again. The `ubsan` profile is not run in CI: it doubles a build, and CI has no time to spare.
 - **Disk**: the `ubsan` profile adds one board's build directories, about 45 GB, for as long as it is kept.
-- **Order**: the second of three changes, after the archived `board-model`: `build-acceleration`, then `toolchain-o3`, then `device-modernization`.
+- **Order**: the second of four changes, after the archived `board-model`: `build-acceleration`, then `toolchain-o3`, then `module-boundaries`, then `device-modernization`.

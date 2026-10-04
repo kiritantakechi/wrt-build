@@ -63,4 +63,4 @@ None.
   - `tests/wrt_tests/keys.py`;
   - the code-standards check and its test.
 - **Docs**: `docs/release-flow.md`, `docs/ops.md`, `docs/patches.md`.
-- **Order**: the third of three changes, after the archived `board-model`: `build-acceleration`, then `toolchain-o3`, then `device-modernization`. It takes `toolchain-o3`'s patch convention and the audit of qosify's earlier patches as given.
+- **Order**: the fourth of four changes, after the archived `board-model`: `build-acceleration`, then `toolchain-o3`, then `module-boundaries`, then `device-modernization`. It takes `toolchain-o3`'s patch convention and the audit of qosify's earlier patches as given, and puts its scripts and tests in `module-boundaries`' structure: the shell library's modules and the test harness's layers.

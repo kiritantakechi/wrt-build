@@ -70,4 +70,4 @@ None.
   - `tests/unit/` gains the tests of the module check, of the awk programs and of the schemas.
 - **Docs**: `docs/conventions.md` describes the shell modules and the harness's layers.
 - **Unchanged**: the composed seeds, the configuration and each image's packages, which the same comparison before and after the change shows. CI's workflow stays as it is; its check job runs tach through `just check`.
-- **Order**: after `toolchain-o3`, before `device-modernization`, whose proposal names its new scripts and tests in the new structure.
+- **Order**: the third of four changes, after the archived `board-model`: `build-acceleration`, then `toolchain-o3`, then `module-boundaries`, then `device-modernization`. `device-modernization`'s new scripts and tests land in its structure.
