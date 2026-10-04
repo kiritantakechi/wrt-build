@@ -40,6 +40,8 @@ from wrt_tests.oci import IMAGE, TAG, extract_root, image_layout, push
 from wrt_tests.poll import until
 from wrt_tests.router import Router
 from wrt_tests.storage import Disk, initialize, wait_mounted
+from wrt_tests.ubsan import PROFILE as UBSAN
+from wrt_tests.ubsan import Traps, report
 
 UPGRADE_IMAGE = "targets/*-sysupgrade.tar.gz"
 SIGNED_ENV = "WRT_SIGNED"
@@ -115,19 +117,51 @@ def booted_router(
     return router
 
 
+@pytest.fixture(scope="session")
+def ubsan_traps(booted_router: Router, profile: str) -> Traps | None:
+    """Return the watch on the traps of undefined behavior in a ubsan build, else None.
+
+    A trap while the router booted fails every test that uses the router.
+    """
+    if profile != UBSAN:
+        return None
+    traps = Traps(booted_router)
+    report(traps.new(), "while the router booted")
+    return traps
+
+
 @pytest.fixture
-def router(booted_router: Router) -> Iterator[Router]:
-    """Provide the router in its post-boot state; the emulator returns to it afterwards."""
+def router(booted_router: Router, ubsan_traps: Traps | None) -> Iterator[Router]:
+    """Provide the router in its post-boot state; the emulator returns to it afterwards.
+
+    In a ubsan build, a trap during the test fails it: the kernel log is read
+    before the snapshot erases it.
+    """
     yield booted_router
-    booted_router.reset()
+    try:
+        if ubsan_traps is not None:
+            report(ubsan_traps.new(), "during the test")
+    finally:
+        booted_router.reset()
 
 
 @pytest.fixture(scope="module")
-def module_router(booted_router: Router) -> Iterator[Router]:
+def module_router(booted_router: Router, ubsan_traps: Traps | None) -> Iterator[Router]:
     """Provide the router from its post-boot state for a whole module; return to it after."""
+    del ubsan_traps  # set up for check_module_traps, which reads it after each test
     booted_router.reset()
     yield booted_router
     booted_router.reset()
+
+
+@pytest.fixture(autouse=True)
+def check_module_traps(request: pytest.FixtureRequest) -> Iterator[None]:
+    """In a ubsan build, fail a test of a module that keeps the router if anything trapped."""
+    yield
+    if "module_router" in request.fixturenames:
+        traps = cast("Traps | None", request.getfixturevalue("ubsan_traps"))
+        if traps is not None:
+            report(traps.new(), "during the test")
 
 
 @pytest.fixture(scope="module")
@@ -228,6 +262,13 @@ def board(build_output: Path) -> boards.Board:
     """Return the board the build under test was built for, as its manifest names it."""
     manifest = json.loads((build_output / MANIFEST_FILE).read_text())
     return boards.load(manifest["board"])
+
+
+@pytest.fixture(scope="session")
+def profile(build_output: Path) -> str:
+    """Return the profile the build under test was built in, as its manifest names it."""
+    manifest = json.loads((build_output / MANIFEST_FILE).read_text())
+    return str(manifest["profile"])
 
 
 @pytest.fixture(scope="session")

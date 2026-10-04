@@ -135,7 +135,7 @@ config/profiles
 - `config/ubsan.seed` sets `CONFIG_TARGET_OPTIMIZATION` to the base value plus `-fsanitize=undefined -fsanitize-trap=undefined`.
 - That variable reaches the packages only, so the kernel stays uninstrumented with no further flag.
 
-**Trap mode.** Every check compiles to a trap instruction (`brk #0x3e8` on arm64) instead of a call into libubsan. OpenWrt's musl toolchain has no libubsan, and a trap needs none. The process dies with `SIGTRAP`, and the kernel reports the unhandled exception with the process name and address. `show_unhandled_signals` is on by default on arm64.
+**Trap mode.** Every check compiles to a trap instruction (`brk #0x3e8` on arm64) instead of a call into libubsan. OpenWrt's musl toolchain has no libubsan, and a trap needs none. The process dies with `SIGTRAP`, and the kernel reports the unhandled exception with the process name and address, if `debug.exception-trace` (`show_unhandled_signals`) is on. arm64 leaves it off by default, so the probe package (below) turns it on from early boot, through `/etc/sysctl.d`.
 
 **Separate directories.**
 - `config.sh` names a build after the board and, for a profile with board-only seeds, after the profile too (`CONFIG_BUILD_SUFFIX=r4s_ubsan`), so instrumented objects never mix with the dev build's.
@@ -143,11 +143,11 @@ config/profiles
 
 **Detection.**
 - The manifest names the profile.
-- In a `ubsan` build, the router fixture reads the kernel log for user-space traps before it restores the snapshot, which would erase them.
-- A trap fails the test that was running, with the process name and address.
+- In a `ubsan` build, the router fixture reads the kernel log for user-space traps before it restores the snapshot, which would erase them. A test of a module that keeps the router (`module_router`) is checked after it runs, and the boot before the first test.
+- A trap fails the test that was running, with the process name and address; a trap while booting fails every test that uses the router.
 
 **The probe.**
-- A feed package, `wrt-ubsan-probe`, which only `ubsan.seed` selects, overflows a signed integer on purpose.
+- A feed package, `wrt-ubsan-probe`, which only `ubsan.seed` selects, overflows a signed integer on purpose, and turns on the kernel's report of unhandled signals.
 - The scenario's test runs it on the router and expects the harness to report its trap.
 - This proves the instrumentation, trap mode and detection together. Otherwise a clean run could just mean the instrumentation never happened.
 

@@ -5,3 +5,5 @@
 # libstdc++ in it, stay the dev profile's, uninstrumented, and so does the kernel,
 # which this option never reaches. config/toolchain.seed's value, then UBSan.
 CONFIG_TARGET_OPTIMIZATION="-Os -pipe -mcpu=generic -Warray-bounds -Wuninitialized -Wmaybe-uninitialized -Wstrict-aliasing -Wuse-after-free -Wdangling-pointer -Wshift-negative-value -fsanitize=undefined -fsanitize-trap=undefined"
+# The probe whose trap the profile's system test expects (feed/utils/wrt-ubsan-probe).
+CONFIG_PACKAGE_wrt-ubsan-probe=y
