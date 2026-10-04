@@ -62,7 +62,7 @@
   - a second run's report holds no compile stage;
   - after the Rust library is changed by hand, the next run builds Rust again;
   - after a flag in `config/toolchain.seed` changes, the next run builds the toolchains anew and records the flags, and the board's next build prepares every target package again (2.1).
-- [ ] 3.3 Make `scripts/toolchain-pack.sh` pack `staging_dir/hostpkg` and the stamps of `build_dir/hostpkg` (the empty dot files), and `scripts/toolchain-unpack.sh` touch them with the rest.
+- [x] 3.3 Make `scripts/toolchain-pack.sh` pack `staging_dir/hostpkg` and the stamps of `build_dir/hostpkg` (the empty dot files), and `scripts/toolchain-unpack.sh` touch them with the rest.
 
   Verify, on the VM:
   1. pack the archive;
