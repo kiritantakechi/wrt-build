@@ -413,12 +413,15 @@ image_logs() (
 # log's path. OpenWrt rewrites the logs of all packages whenever it runs their
 # compile steps, also of those it finds up to date: such a log holds nothing but
 # make's time line, and leaves the package's record of its last build standing.
+# A package that compiles without a word (base-files) writes the same log the
+# first time, and gets an empty record.
 warnings_harvest() (
 	find "$1/package" -name compile.txt -newer "$3" | while IFS= read -r log; do
-		grep -qv '^time: ' "${log}" || continue
 		record="$2/${log#"$1"/}"
+		record=${record%.txt}.tsv
+		grep -qv '^time: ' "${log}" || [ ! -f "${record}" ] || continue
 		mkdir -p "${record%/*}"
-		ub_warnings "${log}" >"${record%.txt}.tsv"
+		ub_warnings "${log}" >"${record}"
 	done
 )
 

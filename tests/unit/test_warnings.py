@@ -281,6 +281,23 @@ def test_a_step_that_did_nothing_keeps_the_record(tmp_path: Path) -> None:
     assert not (records / "package" / "old").exists()
 
 
+def test_a_package_that_compiles_without_a_word_gets_an_empty_record(tmp_path: Path) -> None:
+    # base-files compiles silently: its first log holds only make's time line too,
+    # and the image's report needs a record of every package it ships.
+    logs, records = tmp_path / "logs", tmp_path / "records"
+    since = tmp_path / "since"
+    since.touch()
+    os.utime(since, (1_700_000_000, 1_700_000_000))
+    log = logs / "package" / "base-files" / "compile.txt"
+    log.parent.mkdir(parents=True)
+    log.write_text("time: package/base-files/compile#0.61#0.39#1.19\n")
+
+    result = _lib("warnings_harvest", str(logs), str(records), str(since), cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert (records / "package" / "base-files" / "compile.tsv").read_text() == ""
+
+
 PACKED = {
     "package": "ppp",
     "option": "-Waddress-of-packed-member",
