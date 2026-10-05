@@ -5,5 +5,10 @@
 # libstdc++ in it, stay the dev profile's, uninstrumented, and so does the kernel,
 # which this option never reaches. config/toolchain.seed's value, then UBSan.
 CONFIG_TARGET_OPTIMIZATION="-Os -pipe -mcpu=generic -Warray-bounds -Wuninitialized -Wmaybe-uninitialized -Wstrict-aliasing -Wuse-after-free -Wdangling-pointer -Wshift-negative-value -fsanitize=undefined -fsanitize-trap=undefined"
+# Without LTO: GCC expands UBSan's checks where it generates the code, which under
+# LTO is the link, with the link's flags. libtool passes -fsanitize=undefined to a
+# link but drops -fsanitize-trap=undefined, so a library's checks would become
+# calls into the runtime. Without LTO, every object carries its traps.
+# CONFIG_USE_LTO is not set
 # The probe whose trap the profile's system test expects (feed/utils/wrt-ubsan-probe).
 CONFIG_PACKAGE_wrt-ubsan-probe=y

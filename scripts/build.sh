@@ -66,6 +66,18 @@ build_dir=$(make -C "${TREE}" -s val.BUILD_DIR)
 warnings="${build_dir}/wrt-warnings"
 mkdir -p "${warnings}"
 touch "${warnings}/.since"
+# A UBSan build in trap mode needs no runtime, and OpenWrt's musl toolchain has
+# none; but a link that names -fsanitize=undefined without -fsanitize-trap, as
+# libtool's links do, asks for -lubsan. An empty archive in the staging directory
+# answers it with nothing: a file that calls into the runtime fails the check
+# after the build (toolchain-o3 D5).
+staging_dir=$(make -C "${TREE}" -s val.STAGING_DIR)
+trap_mode=0
+if grep -q '^CONFIG_TARGET_OPTIMIZATION=".*-fsanitize-trap=' "${TREE}/.config"; then
+	trap_mode=1
+	mkdir -p "${staging_dir}/usr/lib"
+	printf '!<arch>\n' >"${staging_dir}/usr/lib/libubsan.a"
+fi
 info "make -j${jobs} (${board}, ${profile}) on ${cpu}"
 # The time log is named after the build directories, as each build keeps its own.
 log=$(time_log "${name}")
@@ -95,6 +107,26 @@ compiled=$(toolchain_stages "${log}" | paste -sd ',' -)
 [ -z "${compiled}" ] ||
 	die "the build compiled part of the toolchain, which only 'just toolchain-build' builds: ${compiled}"
 
+# Every UBSan check of a trap build is a trap: no file of the root filesystem may
+# call into the runtime the empty archive stands for.
+if [ "${trap_mode}" -eq 1 ]; then
+	nm="${toolchain_dir}/bin/$(make -C "${TREE}" -s val.TARGET_CROSS)nm"
+	root=$(make -C "${TREE}" -s val.TARGET_DIR)
+	calls=$(find "${root}" -type f -exec sh -c '
+		nm=$1
+		shift
+		for file; do
+			"${nm}" -D --undefined-only "${file}" 2>/dev/null | grep -q " __ubsan_" &&
+				printf "%s\n" "${file}"
+		done
+		exit 0' sh "${nm}" {} +)
+	if [ -n "${calls}" ]; then
+		printf 'error: these files call into a UBSan runtime the toolchain lacks:\n%s\n' "${calls}" >&2
+		exit 1
+	fi
+	info "no file calls into a UBSan runtime"
+fi
+
 # The kernel configuration overlay must reach the kernel unchanged: a line that
 # kconfig dropped (unmet dependency, renamed symbol) would silently lose a feature.
 kernel=$(kernel_dir "${build_dir}")
@@ -109,7 +141,6 @@ info "kernel configuration overlay applied"
 # directories (BUILD_SUFFIX).
 bin_dir=$(make -C "${TREE}" -s val.BIN_DIR)
 output_dir=$(make -C "${TREE}" -s val.OUTPUT_DIR)
-staging_dir=$(make -C "${TREE}" -s val.STAGING_DIR)
 out="${WRT_WORKDIR}/out/${board}/${profile}"
 rm -rf "${out}"
 mkdir -p "${out}/targets" "${out}/packages"

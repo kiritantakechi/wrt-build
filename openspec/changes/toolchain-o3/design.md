@@ -137,6 +137,11 @@ config/profiles
 
 **Trap mode.** Every check compiles to a trap instruction (`brk #0x3e8` on arm64) instead of a call into libubsan. OpenWrt's musl toolchain has no libubsan, and a trap needs none. The process dies with `SIGTRAP`, and the kernel reports the unhandled exception with the process name and address, if `debug.exception-trace` (`show_unhandled_signals`) is on. arm64 leaves it off by default, so the probe package (below) turns it on from early boot, through `/etc/sysctl.d`.
 
+**Without LTO, and no runtime.** GCC expands UBSan's checks where it generates the code, which under LTO is the link, under the link's flags. libtool passes `-fsanitize=undefined` to a link but drops `-fsanitize-trap=undefined`, so the first ubsan build's libraries called `__ubsan_handle_*`, and failed to link for want of `-lubsan`. This was found during the implementation.
+- `config/ubsan.seed` turns LTO off: every object is compiled with its traps in place.
+- A link that names `-fsanitize=undefined` alone still asks for `-lubsan`. `build.sh` puts an empty `libubsan.a` in the board's staging directory, which answers it and provides nothing.
+- After the build, `build.sh` fails if any file of the root filesystem has an undefined `__ubsan_*` symbol, so a check that became a call cannot pass unseen.
+
 **Separate directories.**
 - `config.sh` names a build after the board and, for a profile with board-only seeds, after the profile too (`CONFIG_BUILD_SUFFIX=r4s_ubsan`), so instrumented objects never mix with the dev build's.
 - Outputs go to `out/<board>/ubsan`.
