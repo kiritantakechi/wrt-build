@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 5 Oct 2026 08:41:45 +0800
+Subject: [PATCH] ppp: pppoe: check a service name's length before truncating
+ it
+
+Add a package patch for pppd's PPPoE plugin: sendPADI and sendPADR
+truncate the service name's length to the 16 bits of its tag before
+they check the room the tag takes in the packet. A name of 65532 bytes
+or more passes the check and overflows the 1528-byte packet on the
+stack. Check the untruncated length, and copy as many bytes as the tag
+states.
+
+Found reviewing the -O3 build's warnings of discovery.c (sendPADI's tag
+header, -Warray-bounds), next to the lines GCC flagged.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/network/services/ppp/Makefile         |  2 +-
+ ...e-name-s-length-before-truncating-it.patch | 54 +++++++++++++++++++
+ 2 files changed, 55 insertions(+), 1 deletion(-)
+ create mode 100644 package/network/services/ppp/patches/209-pppoe-check-a-service-name-s-length-before-truncating-it.patch
+
+diff --git a/package/network/services/ppp/Makefile b/package/network/services/ppp/Makefile
+index ad5f32a..c0da96a 100644
+--- a/package/network/services/ppp/Makefile
++++ b/package/network/services/ppp/Makefile
+@@ -10,7 +10,7 @@ include $(INCLUDE_DIR)/kernel.mk
+ 
+ PKG_NAME:=ppp
+ PKG_VERSION:=2.5.3
+-PKG_RELEASE:=2
++PKG_RELEASE:=3
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+ PKG_SOURCE_URL:=https://download.samba.org/pub/ppp
+diff --git a/package/network/services/ppp/patches/209-pppoe-check-a-service-name-s-length-before-truncating-it.patch b/package/network/services/ppp/patches/209-pppoe-check-a-service-name-s-length-before-truncating-it.patch
+new file mode 100644
+index 0000000..0ce2552
+--- /dev/null
++++ b/package/network/services/ppp/patches/209-pppoe-check-a-service-name-s-length-before-truncating-it.patch
+@@ -0,0 +1,54 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] pppoe: check a service name's length before truncating it
++
++sendPADI and sendPADR store the service name's length in the 16-bit
++length of its tag, and check the room the tag takes in the packet after
++that truncation. With a name of 65532 bytes or more, the tag's length
++wraps, the check passes, and the name is copied into the 1528-byte
++packet on the stack: in full by sendPADI, up to 65535 bytes by sendPADR.
++The name comes from the rp_pppoe_service option, which takes a string of
++any length.
++
++Check the room with the untruncated length, so that a name that does not
++fit fails discovery with "Would create too-long packet", as any other
++tag that does not fit does, and copy as many bytes as the tag states.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/pppd/plugins/pppoe/discovery.c
+++++ b/pppd/plugins/pppoe/discovery.c
++@@ -312,7 +312,11 @@
++     int omit_service_name = 0;
++ 
++     if (conn->serviceName) {
++-	namelen = (UINT16_t) strlen(conn->serviceName);
+++	size_t len = strlen(conn->serviceName);
+++
+++	/* Before the length is truncated to the tag's 16 bits */
+++	CHECK_ROOM(cursor, packet.payload, len + TAG_HDR_SIZE);
+++	namelen = (UINT16_t) len;
++ 	if (!strcmp(conn->serviceName, "NO-SERVICE-NAME-NON-RFC-COMPLIANT")) {
++ 	    omit_service_name = 1;
++ 	}
++@@ -335,7 +339,7 @@
++ 	svc->length = htons(namelen);
++ 
++ 	if (conn->serviceName) {
++-	    memcpy(svc->payload, conn->serviceName, strlen(conn->serviceName));
+++	    memcpy(svc->payload, conn->serviceName, namelen);
++ 	}
++ 	cursor += namelen + TAG_HDR_SIZE;
++     } else {
++@@ -504,7 +508,11 @@
++     UINT16_t plen;
++ 
++     if (conn->serviceName) {
++-	namelen = (UINT16_t) strlen(conn->serviceName);
+++	size_t len = strlen(conn->serviceName);
+++
+++	/* Before the length is truncated to the tag's 16 bits */
+++	CHECK_ROOM(cursor, packet.payload, len + TAG_HDR_SIZE);
+++	namelen = (UINT16_t) len;
++     }
++     plen = TAG_HDR_SIZE + namelen;
++     CHECK_ROOM(cursor, packet.payload, plen);

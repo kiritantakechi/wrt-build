@@ -1,0 +1,113 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 5 Oct 2026 08:45:15 +0800
+Subject: [PATCH] libbpf, bpftool: check the BTF's raw data before cloning it
+
+Add a package patch to libbpf and to bpftool, whose source carries its
+own libbpf: bpf_object__sanitize_and_load_btf passes the result of
+btf__raw_data to btf__new unchecked, and when the raw data cannot be
+allocated, btf__new copies an indeterminate number of bytes from NULL.
+Return -ENOMEM instead, as libbpf has done since its commit
+fd04b4eae1a3, which no release carries yet.
+
+Found reviewing the -O3 build's warnings of bpftool: 'sz' may be used
+uninitialized (-Wmaybe-uninitialized), where libbpf's own package, whose
+functions are not inlined into each other, has no warning.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Backport [libbpf fd04b4eae1a3, part of "libbpf: Support sanitization of BTF layout for older kernels"]
+---
+ package/libs/libbpf/Makefile                  |  2 +-
+ ...the-BTF-s-raw-data-before-cloning-it.patch | 24 +++++++++++++++++++
+ package/network/utils/bpftool/Makefile        |  2 +-
+ ...the-BTF-s-raw-data-before-cloning-it.patch | 24 +++++++++++++++++++
+ 4 files changed, 50 insertions(+), 2 deletions(-)
+ create mode 100644 package/libs/libbpf/patches/010-libbpf-check-the-BTF-s-raw-data-before-cloning-it.patch
+ create mode 100644 package/network/utils/bpftool/patches/010-libbpf-check-the-BTF-s-raw-data-before-cloning-it.patch
+
+diff --git a/package/libs/libbpf/Makefile b/package/libs/libbpf/Makefile
+index c5cb4e1..d67c7c4 100644
+--- a/package/libs/libbpf/Makefile
++++ b/package/libs/libbpf/Makefile
+@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=libbpf
+ PKG_VERSION:=1.7.0
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_SOURCE_URL:=https://github.com/libbpf/libbpf
+ PKG_MIRROR_HASH:=30fbb65adcb4ce7e5eac797edbb81ede5e00969f8eb6a871b9e7913eda4e8ba4
+diff --git a/package/libs/libbpf/patches/010-libbpf-check-the-BTF-s-raw-data-before-cloning-it.patch b/package/libs/libbpf/patches/010-libbpf-check-the-BTF-s-raw-data-before-cloning-it.patch
+new file mode 100644
+index 0000000..818f82d
+--- /dev/null
++++ b/package/libs/libbpf/patches/010-libbpf-check-the-BTF-s-raw-data-before-cloning-it.patch
+@@ -0,0 +1,24 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] libbpf: check the BTF's raw data before cloning it
++
++bpf_object__sanitize_and_load_btf clones the object's BTF before it
++sanitizes it, and passes the result of btf__raw_data to btf__new
++unchecked. When btf__raw_data cannot allocate the raw data, it returns
++NULL and leaves the size unset, and btf__new copies an indeterminate
++number of bytes from NULL. Return -ENOMEM instead, as libbpf's commit
++fd04b4eae1a3 ("libbpf: Support sanitization of BTF layout for older
++kernels") does where it moved the clone.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/src/libbpf.c
+++++ b/src/libbpf.c
++@@ -3605,6 +3605,8 @@ static int bpf_object__sanitize_and_load_btf(struct bpf_object *obj)
++ 
++ 		/* clone BTF to sanitize a copy and leave the original intact */
++ 		raw_data = btf__raw_data(obj->btf, &sz);
+++		if (!raw_data)
+++			return -ENOMEM;
++ 		kern_btf = btf__new(raw_data, sz);
++ 		err = libbpf_get_error(kern_btf);
++ 		if (err)
+diff --git a/package/network/utils/bpftool/Makefile b/package/network/utils/bpftool/Makefile
+index 9f13ea0..3900790 100644
+--- a/package/network/utils/bpftool/Makefile
++++ b/package/network/utils/bpftool/Makefile
+@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=bpftool
+ PKG_VERSION:=7.7.0
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_SOURCE_URL:=https://github.com/libbpf/bpftool
+ PKG_MIRROR_HASH:=67402950366f03853edb9a8702e1701b206f5f6685d887e9873264b14894f062
+diff --git a/package/network/utils/bpftool/patches/010-libbpf-check-the-BTF-s-raw-data-before-cloning-it.patch b/package/network/utils/bpftool/patches/010-libbpf-check-the-BTF-s-raw-data-before-cloning-it.patch
+new file mode 100644
+index 0000000..1d03774
+--- /dev/null
++++ b/package/network/utils/bpftool/patches/010-libbpf-check-the-BTF-s-raw-data-before-cloning-it.patch
+@@ -0,0 +1,24 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] libbpf: check the BTF's raw data before cloning it
++
++bpf_object__sanitize_and_load_btf clones the object's BTF before it
++sanitizes it, and passes the result of btf__raw_data to btf__new
++unchecked. When btf__raw_data cannot allocate the raw data, it returns
++NULL and leaves the size unset, and btf__new copies an indeterminate
++number of bytes from NULL. Return -ENOMEM instead, as libbpf's commit
++fd04b4eae1a3 ("libbpf: Support sanitization of BTF layout for older
++kernels") does where it moved the clone.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/libbpf/src/libbpf.c
+++++ b/libbpf/src/libbpf.c
++@@ -3605,6 +3605,8 @@ static int bpf_object__sanitize_and_load_btf(struct bpf_object *obj)
++ 
++ 		/* clone BTF to sanitize a copy and leave the original intact */
++ 		raw_data = btf__raw_data(obj->btf, &sz);
+++		if (!raw_data)
+++			return -ENOMEM;
++ 		kern_btf = btf__new(raw_data, sz);
++ 		err = libbpf_get_error(kern_btf);
++ 		if (err)

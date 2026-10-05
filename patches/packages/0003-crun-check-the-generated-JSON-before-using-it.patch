@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 5 Oct 2026 08:46:27 +0800
+Subject: [PATCH] crun: check the generated JSON before using it
+
+Add a package patch for crun's update: libcrun_container_update_from_values
+ignores the status of json_gen_get_buf, which leaves the buffer unset
+when json-c cannot allocate the document, and the indeterminate pointer
+is parsed as the update's JSON. Fail the update instead, as crun's other
+callers of json_gen_get_buf do.
+
+Found reviewing the -O3 build's warnings of crun: 'buf' may be used
+uninitialized (-Wmaybe-uninitialized).
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ utils/crun/Makefile                           |  2 +-
+ ...k-the-generated-JSON-before-using-it.patch | 26 +++++++++++++++++++
+ 2 files changed, 27 insertions(+), 1 deletion(-)
+ create mode 100644 utils/crun/patches/100-update-check-the-generated-JSON-before-using-it.patch
+
+diff --git a/utils/crun/Makefile b/utils/crun/Makefile
+index 8ff34ec..62d41fa 100644
+--- a/utils/crun/Makefile
++++ b/utils/crun/Makefile
+@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=crun
+ PKG_VERSION:=1.28
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+ PKG_SOURCE_URL:=https://codeload.github.com/containers/crun/tar.gz/$(PKG_VERSION)?
+diff --git a/utils/crun/patches/100-update-check-the-generated-JSON-before-using-it.patch b/utils/crun/patches/100-update-check-the-generated-JSON-before-using-it.patch
+new file mode 100644
+index 0000000..06fe970
+--- /dev/null
++++ b/utils/crun/patches/100-update-check-the-generated-JSON-before-using-it.patch
+@@ -0,0 +1,26 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] update: check the generated JSON before using it
++
++libcrun_container_update_from_values ignores the status of
++json_gen_get_buf, which leaves buf unset when json-c cannot allocate the
++document or its text. The indeterminate pointer then goes on to
++libcrun_container_update and parse_json_file. Fail the update instead,
++as the other callers of json_gen_get_buf do.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/src/libcrun/container.c
+++++ b/src/libcrun/container.c
++@@ -4296,7 +4296,11 @@ libcrun_container_update_from_values (li
++ 
++   json_gen_map_close (gen);
++ 
++-  json_gen_get_buf (gen, &buf, &buf_len);
+++  if (UNLIKELY (json_gen_get_buf (gen, &buf, &buf_len) != json_gen_status_ok))
+++    {
+++      json_gen_free (gen);
+++      return crun_make_error (err, 0, "json_gen_get_buf failed");
+++    }
++ 
++   ret = libcrun_container_update (context, id, buf, buf_len, err);
++ 

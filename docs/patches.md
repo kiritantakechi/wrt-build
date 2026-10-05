@@ -177,6 +177,26 @@ What the patch does: the download becomes an order-only prerequisite of the stam
 
 Verification log: 2026-10-05, on the VM. With Go's source made newer than its host build's prepared stamp, Go's host build was prepared and built again without the patch (382 s), and was up to date with it (8 s).
 
+### ppp: a PPPoE service name's length checked before it is truncated
+
+Patch: `patches/openwrt/0014-ppp-pppoe-check-a-service-name-s-length-before-trunc.patch` (adds the package patch `209-pppoe-check-a-service-name-s-length-before-truncating-it.patch`), for github.com/ppp-project/ppp.
+
+Problem: pppd's PPPoE plugin truncates the service name's length to the 16 bits of its tag before `sendPADI` and `sendPADR` check the room the tag takes in the packet. A name of 65532 bytes or more makes the tag's length wrap and passes the check, and the name overflows the 1528-byte packet on the stack: `sendPADI` copies all of it, `sendPADR` up to 65535 bytes. The name comes from the `rp_pppoe_service` option (UCI's `service`), which takes a string of any length. ppp's master and 2.5.4 have the same code.
+
+Why it matters here: `pppoe.so` dials the WAN of every image. Only root sets the name, but an overflow of a stack buffer is undefined behavior that `-O3` is free to exploit, and the review of the build's warnings (docs/undefined-behavior.md) found it next to the lines GCC flagged.
+
+What the patch does: both functions check the room with the untruncated length, so a name that does not fit fails discovery with "Would create too-long packet", as any other tag that does not fit does; `sendPADI` copies as many bytes as the tag states.
+
+### crun: an update's JSON checked before it is used
+
+Patch: `patches/packages/0003-crun-check-the-generated-JSON-before-using-it.patch` (adds the package patch `100-update-check-the-generated-JSON-before-using-it.patch`), for github.com/containers/crun.
+
+Problem: `libcrun_container_update_from_values`, which `crun update` runs, ignores the status of `json_gen_get_buf`. When json-c cannot allocate the document or its text, the buffer stays unset, and the indeterminate pointer is parsed as the update's JSON. crun's other callers of `json_gen_get_buf` check the status; crun's main has the same code (2026-10-05).
+
+Why it matters here: `podman update` runs `crun update` for the containers of wrt-containers, and a router runs out of memory more readily than a server. The review of the build's warnings found it (`'buf' may be used uninitialized`).
+
+What the patch does: the update fails with an error, after freeing the generator, as the other callers do.
+
 ### luci-base: the host tools built in the host build directory
 
 Patch: `patches/luci/0001-luci-base-build-po2lmo-and-jsmin-in-the-host-build-d.patch`, for openwrt/luci.
