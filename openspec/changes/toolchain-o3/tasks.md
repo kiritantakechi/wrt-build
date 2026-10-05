@@ -36,10 +36,10 @@
   Update `NEUTRAL_CFLAGS` in `tests/build/test_boards.py`.
 
   Verify: `spec-coverage --change toolchain-o3` lists the three scenarios as covered.
-- [ ] 2.4 Build both boards in the existing tree: `build-acceleration`'s stamps rebuild the toolchains and every package with the new flags. Fix every package that fails under `-O3` in its source, with a patch stating its upstream status. If upstream's code is right and no reasonable fix exists, opt the package out (`TARGET_CFLAGS += -O2` in its Makefile, by patch) and record the opt-out in `docs/optimization.md`.
+- [x] 2.4 Build both boards in the existing tree: `build-acceleration`'s stamps rebuild the toolchains and every package with the new flags. Fix every package that fails under `-O3` in its source, with a patch stating its upstream status. If upstream's code is right and no reasonable fix exists, opt the package out (`TARGET_CFLAGS += -O2` in its Makefile, by patch) and record the opt-out in `docs/optimization.md`.
 
   Verify: both boards build, and every fix and opt-out has its row.
-- [ ] 2.5 Replace `docs/lto-optouts.md` with `docs/optimization.md`:
+- [x] 2.5 Replace `docs/lto-optouts.md` with `docs/optimization.md`:
   - the flags of D1, and why the kernel stays at `-O2`;
   - the LTO and `-O3` opt-out registers;
   - the sizes before and after (task 2.1 and now) against the 1 GiB root partition.
@@ -51,16 +51,16 @@
 
 ## 3. UB-indicative warnings (design D4)
 
-- [ ] 3.1 Make `scripts/build.sh` collect the warnings of the UB-indicative options, as D4 describes. It takes the packages of the board's image from the image's package list, maps them to source packages through `tmp/.packageinfo`, parses their build logs, and writes `out/<board>/<profile>/warnings.json`.
+- [x] 3.1 Make `scripts/build.sh` collect the warnings of the UB-indicative options, as D4 describes. It takes the packages of the board's image from the image's package list, maps them to source packages through `tmp/.packageinfo`, parses their build logs, and writes `out/<board>/<profile>/warnings.json`.
 
   Verify: unit tests for the log parser (`tests/unit/`) cover a warning inside a function, one outside any function, a continuation line and an option with a value (`-Warray-bounds=`). Both boards' builds produce the report.
 - [x] 3.2 Add the register `tests/reviewed-warnings.toml` and `tests/quality/test_undefined_behavior.py` for the quality/undefined-behavior scenarios "Unreviewed warning" and "Stale review". Both read the build's report and the register, and match on package, option, file and function. Add `docs/undefined-behavior.md`: how a warning is reviewed and recorded.
 
   Verify: with a report holding an unreviewed warning, and a register holding an entry nothing matches, each test fails and names it.
-- [ ] 3.3 Triage every UB-indicative warning of both boards' builds. Undefined behavior is fixed by a patch, its status `Pending`; a false positive is reviewed in `tests/reviewed-warnings.toml`, with a reason.
+- [x] 3.3 Triage every UB-indicative warning of both boards' builds. Undefined behavior is fixed by a patch, its status `Pending`; a false positive is reviewed in `tests/reviewed-warnings.toml`, with a reason.
 
   Verify: the two tests pass on both boards' builds.
-- [ ] 3.4 Add the test for the scenario "Check the shared flags": the manifest's package flags and kernel flags hold none of the masking options.
+- [x] 3.4 Add the test for the scenario "Check the shared flags": the manifest's package flags and kernel flags hold none of the masking options.
 
   Verify: it passes on both boards' builds.
 

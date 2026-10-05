@@ -152,7 +152,7 @@ by = "build.yml firmware: staging_dir/toolchain-aarch64_generic_gcc-15.*_musl"
 capability = "firmware/toolchain"
 requirement = "LTO, mold, and gc-sections by default"
 scenario = "Package incompatible with LTO"
-by = "docs/lto-optouts.md lists every no-lto opt-out with its patch in patches/packages"
+by = "docs/optimization.md lists every no-lto opt-out with its patch in patches/packages"
 
 # testing/harness: a property of CI.
 
