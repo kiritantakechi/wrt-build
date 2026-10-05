@@ -237,6 +237,18 @@ What the patch does: `include/package.mk` leaves LTO out when `TARGET_CFLAGS` as
 
 Verification log: 2026-10-05, on the VM, in the R4S's `ubsan` tree: with LTO, mtd's link failed on undefined `__ubsan_handle_add_overflow` and `__ubsan_handle_sub_overflow`, and `libnftnl.so` linked with five undefined `__ubsan_handle_*`; with the patch, neither has any, and they hold 227 and 4,727 trap instructions.
 
+### build: LTO links with mold on one thread
+
+Patch: `patches/openwrt/0018-build-link-LTO-with-mold-on-one-thread.patch`, for openwrt/openwrt.
+
+Problem: mold calls the LTO plugin for its input files from several threads, so the order in which GCC's whole-program optimization gets them changes from one link to the next, and with it what LTO decides. An LTO package linked with mold is not reproducible, and the warnings GCC gives while it links come and go.
+
+Why it matters here: the build's report of UB-indicative warnings is checked against the register (`docs/undefined-behavior.md`): jansson's three warnings appeared in some builds of a board and not in others, locally and in CI (runs 37293958173 and 37324813891), so its reviews were now unmatched, now missing. `CONFIG_USE_MOLD` and `CONFIG_USE_LTO` are both on (`config/toolchain.seed`).
+
+What the patch does: when a package uses LTO and mold links it, the link runs on one thread (`-Wl,--threads=1`). The link of an LTO package is GCC's work almost entirely; other links keep mold's threads.
+
+Verification log: 2026-10-06, on the VM, mold 2.42.0: linking jansson's library six times from the same objects gave six different libraries, and the overflow warnings in some links only; with `--threads=1` or with ld.bfd, ten links gave the same library and the warnings every time. Through OpenWrt with the patch, four builds of jansson gave the same library and the same three warnings.
+
 ### luci-base: the host tools built in the host build directory
 
 Patch: `patches/luci/0001-luci-base-build-po2lmo-and-jsmin-in-the-host-build-d.patch`, for openwrt/luci.
