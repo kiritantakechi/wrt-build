@@ -85,6 +85,8 @@ What the patch does: `service_running` waits in the background, so the boot does
 
 Verification log: 2026-09-29, in the emulator qosify now attaches cake and its classifiers to pppoe-wan at boot (`tests/network/test_qos.py`, `test_tc_hook_order.py`). 2026-10-01, with every CPU of the VM kept busy, the daemon took up to three minutes to come up after a restart, and was configured every time, over eight rounds of restarts and redials.
 
+2026-10-05, with `service_running` returning whether procd runs the daemon: `tests/network/test_qos.py` and `test_tc_hook_order.py` pass on both boards' `-O3` builds.
+
 ### rockchip: IRQ affinity for every net device
 
 Patch: `patches/openwrt/0007-rockchip-wait-for-a-NIC-s-IRQ-only-on-that-NIC-s-own.patch`, for openwrt/openwrt.
@@ -120,6 +122,8 @@ What the patch does: the log file is left out whenever its mount point is not mo
 How this project uses it: the persistent log is `/mnt/data/logs/messages`, on the data disk (r4s-services D2).
 
 Verification log: 2026-09-29, in the emulator the log service restarted while the data disk is absent writes nothing to the SD card, and starts writing to the disk when it is plugged in (`tests/storage/test_data_disk.py`).
+
+2026-10-05, without `boot()`: `tests/storage/test_data_disk.py` passes on both boards' `-O3` builds.
 
 ### toolchain: the buildbot version check races under make -j
 

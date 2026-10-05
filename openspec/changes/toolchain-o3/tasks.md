@@ -45,7 +45,7 @@
   - the sizes before and after (task 2.1 and now) against the 1 GiB root partition.
 
   Verify: every reference points to the new document, and the sizes are recorded.
-- [ ] 2.6 Run the full system tests on both boards with the `-O3` builds. Trace every failure to its cause and fix it in the code that is wrong, with a patch stating its upstream status.
+- [x] 2.6 Run the full system tests on both boards with the `-O3` builds. Trace every failure to its cause and fix it in the code that is wrong, with a patch stating its upstream status.
 
   Verify: `just test r4s dev` and `just test r6s dev` pass, and the firmware/toolchain tests pass on both boards.
 
@@ -89,10 +89,10 @@
 
 ## 5. Patch audit (design D6)
 
-- [ ] 5.1 Drop patch 0002: the A/B boot environment (`uboot/wrt-ab.env`) passes `fstools_overlay_compression_type=zstd` already.
+- [x] 5.1 Drop patch 0002: the A/B boot environment (`uboot/wrt-ab.env`) passes `fstools_overlay_compression_type=zstd` already.
 
   Verify: the firmware/rootfs test "First boot creates the overlay" passes on both boards, and no patch takes the number 0002.
-- [ ] 5.2 Re-derive BBRv3 from its primary source: the google/bbr v3 branch as Oleksandr Natalenko rebases it onto 6.18. Compare it with the current series, and explain or remove every difference. Its trailer names the source (`Backport [...]`), and its message the comparison.
+- [x] 5.2 Re-derive BBRv3 from its primary source: the google/bbr v3 branch as Oleksandr Natalenko rebases it onto 6.18. Compare it with the current series, and explain or remove every difference. Its trailer names the source (`Backport [...]`), and its message the comparison.
 
   Verify: the kernel builds on both boards, and the firmware/kernel scenario "BBRv3 as default congestion control" passes on both.
 - [ ] 5.3 Review every other patch against the current pins: the series from 0003 on (`build-acceleration`'s 0011 and 0012 included), the packages patches, einat's patch, QEMU's patch, and the two prepared upstream patches. For each, check:
@@ -107,7 +107,7 @@
 
 ## 6. Integration
 
-- [ ] 6.1 With everything in place, run the full system tests on both boards (dev profile).
+- [x] 6.1 With everything in place, run the full system tests on both boards (dev profile).
 
   Verify: all tests pass on both boards, and `spec-coverage --change toolchain-o3` reports no uncovered scenario.
 - [x] 6.2 Keep a restored toolchain up to date when the download cache misses: main's run 37220393208 rebuilt Go's and Rust's host toolchains in both firmware jobs, as `make download` fetched their sources after the toolchain's stamps were restored. Patch 0013 makes a download an order-only prerequisite of the prepared stamps, with its write-up in `docs/patches.md`, and the run is recorded in `docs/ci.md`. The same run compiled cold under new compiler cache keys, as an edit of `config/ccache.conf`'s comments changed them: the keys now hash its settings only (`scripts/compiler-cache-key.sh`).
