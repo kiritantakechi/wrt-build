@@ -12,12 +12,15 @@ which on a busy boot can take far longer than that.
 Wait in the background instead, so that the boot does not wait along,
 and for as long as procd runs the daemon; then configure it.
 
+service_running still tells whether procd runs the daemon, as the
+running action expects.
+
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
  package/network/config/qosify/Makefile          |  2 +-
- package/network/config/qosify/files/qosify.init | 11 +++++++++--
- 2 files changed, 10 insertions(+), 3 deletions(-)
+ package/network/config/qosify/files/qosify.init | 12 ++++++++++--
+ 2 files changed, 11 insertions(+), 3 deletions(-)
 
 diff --git a/package/network/config/qosify/Makefile b/package/network/config/qosify/Makefile
 index 31a69b3..68e234a 100644
@@ -33,10 +36,10 @@ index 31a69b3..68e234a 100644
  PKG_LICENSE:=GPL-2.0
  PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
 diff --git a/package/network/config/qosify/files/qosify.init b/package/network/config/qosify/files/qosify.init
-index 8c1ca7d..8de8577 100644
+index 8c1ca7d..170ee27 100644
 --- a/package/network/config/qosify/files/qosify.init
 +++ b/package/network/config/qosify/files/qosify.init
-@@ -166,6 +166,13 @@ start_service() {
+@@ -166,6 +166,14 @@ start_service() {
  }
  
  service_running() {
@@ -51,4 +54,5 @@ index 8c1ca7d..8de8577 100644
 +		done
 +		reload_service
 +	) >/dev/null 2>&1 &
++	procd_running qosify
  }

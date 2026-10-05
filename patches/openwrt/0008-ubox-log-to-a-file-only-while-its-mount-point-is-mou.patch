@@ -12,12 +12,14 @@ disk mounts.
 Leave the file out whenever the mount point is not mounted; its mount
 trigger starts it once the mount point is mounted, as at boot.
 
+boot() set _BOOT for that check only, and goes with it.
+
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
  package/system/ubox/Makefile       | 2 +-
- package/system/ubox/files/log.init | 5 +++--
- 2 files changed, 4 insertions(+), 3 deletions(-)
+ package/system/ubox/files/log.init | 9 +++------
+ 2 files changed, 4 insertions(+), 7 deletions(-)
 
 diff --git a/package/system/ubox/Makefile b/package/system/ubox/Makefile
 index 0ba418c..cccbf33 100644
@@ -33,7 +35,7 @@ index 0ba418c..cccbf33 100644
  PKG_SOURCE_PROTO:=git
  PKG_SOURCE_URL=$(PROJECT_GIT)/project/ubox.git
 diff --git a/package/system/ubox/files/log.init b/package/system/ubox/files/log.init
-index e02cc27..83e0ea2 100644
+index e02cc27..71966c0 100644
 --- a/package/system/ubox/files/log.init
 +++ b/package/system/ubox/files/log.init
 @@ -52,10 +52,11 @@ start_service_file()
@@ -50,3 +52,11 @@ index e02cc27..83e0ea2 100644
  		! grep -q ".* $mountpoint " /proc/mounts &&
  		return 0
  
+@@ -110,7 +111,3 @@ start_service()
+ 	config_foreach validate_log_section system start_service_file
+ 	config_foreach validate_log_section system start_service_remote
+ }
+-
+-boot() {
+-	_BOOT=1 start
+-}

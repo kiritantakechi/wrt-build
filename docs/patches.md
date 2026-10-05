@@ -43,11 +43,13 @@ Patch: `docs/upstream/0002-config-kernel-add-F2FS-compression-options.patch`, fo
 
 Problem: fstools can format the overlay as compressed f2fs via `fstools_overlay_compression_type=`, but `config/Config-kernel.in` has no matching `KERNEL_F2FS_*` options, so the build configuration cannot select them.
 
-What the patch does: it adds `KERNEL_F2FS_FS_COMPRESSION` and each algorithm option beneath it (LZO, LZO-RLE, LZ4, LZ4HC, ZSTD). The kernel defaults all of these options to y, and if any of them has no value the build stops, so each one needs a matching `KERNEL_*`.
+What the patch does: it adds `KERNEL_F2FS_FS_COMPRESSION` and each algorithm option beneath it (LZO, LZO-RLE, LZ4, LZ4HC, ZSTD). The kernel defaults all of these options to y, and if any of them has no value the build stops, so each one needs a matching `KERNEL_*`. F2FS selects the libraries of the algorithms it compresses with, which are modules when f2fs is one, so `kmod-fs-f2fs` depends on the kmods that hold them (`kmod-lib-lzo`, `kmod-lib-lz4`, `kmod-lib-lz4hc`, `kmod-lib-zstd`), each under its option.
 
 How this project handles it: it does not depend on this patch; instead, the upstream-native kernel config overlay (`config/kernel.config` → `env/kernel-config`) provides the same options. Once upstream accepts the patch, we can switch back to `CONFIG_KERNEL_F2FS_*` in the seed.
 
 Verification log: 2026-09-28, this patch and the EROFS one above apply cleanly with `git am` onto openwrt `1019293`, as pinned by the lock.
+
+2026-10-05: on `1019293`, `make defconfig` for the NanoPi R4S with `kmod-fs-f2fs` as a module and `KERNEL_F2FS_FS_COMPRESSION` selects `kmod-lib-lz4` and `kmod-lib-zstd`, the algorithms on by default, and neither LZO's nor LZ4HC's kmod. Before submitting: build f2fs as a module with every algorithm on and check that `f2fs.ko` loads with the selected kmods (this project builds F2FS into the kernel).
 
 ### sdhci-pci loses its card on loadvm (QEMU)
 
@@ -57,7 +59,7 @@ Problem: `sdhci-pci` takes the migration description of the sysbus SDHCI variant
 
 Why it matters here: since r4s-ab-rollback, the emulator boots the factory image from its boot disk, an SD card or an eMMC on `sdhci-pci`, and the tests return the machine to a `savevm` snapshot between every two tests.
 
-What the patch does: it gives `sdhci-pci` a description of its own: the PCI device state first, then the shared controller state. `flake.nix` builds the emulator's QEMU (aarch64 guests only) with it, and with every other patch in `patches/qemu/`.
+What the patch does: it gives `sdhci-pci` a description of its own: the PCI device state first, then the shared controller state. Its migration section is then named `sdhci-pci` rather than `sdhci`, so a stream from an earlier QEMU no longer loads into `sdhci-pci`; such a stream holds no PCI state, and its guest lost the card anyway. `flake.nix` builds the emulator's QEMU (aarch64 guests only) with it, and with every other patch in `patches/qemu/`.
 
 Verification log: 2026-09-29, QEMU 11.1.1 builds with the patch, and the emulation tests, which restore a snapshot between every two tests, pass with the SD card.
 
@@ -79,27 +81,29 @@ Patch: `patches/openwrt/0006-qosify-configure-the-daemon-whenever-it-comes-up.pa
 
 Problem: qosify's init script waits 10 seconds for the daemon's ubus object and, if it has not appeared by then, gives up on configuring it: no shaping and no classification until the next reload, with only "Command failed: Request timed out" in the log. The daemon registers once its BPF programs are loaded, which on a busy boot takes longer; the emulator hit it on every boot.
 
-What the patch does: `service_running` waits in the background, so the boot does not wait along, for as long as procd runs the daemon, and configures it once it appears. A first version waited two minutes; with every CPU of the test VM kept busy the daemon took longer, and stayed unconfigured. `PKG_RELEASE` goes to 2.
+What the patch does: `service_running` waits in the background, so the boot does not wait along, for as long as procd runs the daemon, and configures it once it appears; it then returns whether procd runs the daemon, as the `running` action expects. A first version waited two minutes; with every CPU of the test VM kept busy the daemon took longer, and stayed unconfigured. `PKG_RELEASE` goes to 2.
 
 Verification log: 2026-09-29, in the emulator qosify now attaches cake and its classifiers to pppoe-wan at boot (`tests/network/test_qos.py`, `test_tc_hook_order.py`). 2026-10-01, with every CPU of the VM kept busy, the daemon took up to three minutes to come up after a restart, and was configured every time, over eight rounds of restarts and redials.
 
 ### rockchip: IRQ affinity for every net device
 
-Patch: `patches/openwrt/0007-rockchip-set-a-NIC-s-IRQ-affinity-only-when-that-NIC.patch`, for openwrt/openwrt.
+Patch: `patches/openwrt/0007-rockchip-wait-for-a-NIC-s-IRQ-only-on-that-NIC-s-own.patch`, for openwrt/openwrt.
 
 Problem: `40-net-smp-affinity` runs its whole body on every net `add` event, whatever the device: each bridge, veth or tunnel sets every NIC's IRQ affinity again and waits up to ten seconds per NIC for the IRQ to show in `/proc/interrupts`. procd runs hotplug scripts one after another, so a NIC whose IRQ carries another name (the emulator's virtio NICs) holds up every later net event: dae's own veths and a container bridge were bound minutes late.
 
-What the patch does: `set_interface_core` returns unless the event is for that interface. At boot each NIC's own event still sets its affinity, so the result on the device is the same.
+What the patch does: `set_interface_core` waits for a NIC's IRQ only on that NIC's own event. Any other net event still sets the affinity of every NIC whose IRQ is listed already, and skips the others without waiting. A NIC's driver may request its IRQ only when the NIC is brought up, as r8169 and stmmac do, so the IRQ can appear after the NIC's own event stopped waiting: the next net device to appear then sets it, as before the patch.
 
 Verification log: 2026-09-29, a bridge created after dae is bound within the spec's 60 seconds (`tests/network/test_transparent_proxy.py`).
+
+2026-10-05: the script run with stand-ins for `/proc/interrupts` and `/proc/irq` (the emulator's virtio IRQs never match): a bridge's event set eth0, whose IRQ was listed, and skipped eth1, whose IRQ was not, at once; the next event set both. On the devices, the IRQs of the NICs are not checked by a test.
 
 ### ksmbd-tools: shares on a disk that is not mounted
 
 Patch: `patches/packages/0001-ksmbd-tools-share-only-what-is-mounted-and-start-onc.patch`, for openwrt/packages.
 
-Problem: ksmbd's init script shares every configured path whether or not the disk it belongs on is mounted. A share on a USB disk that is late, absent or pulled out then shares the empty directory underneath, on the router's flash: what clients write there fills the flash, and disappears from view once the disk is mounted over it. Nothing starts the service again when the disk arrives.
+Problem: ksmbd's init script shares every configured path whether or not the disk it belongs on is mounted. A share on a USB disk that is late or absent then shares the empty directory underneath, on the router's flash: what clients write there fills the flash, and disappears from view once the disk is mounted over it. Nothing starts the service again when the disk arrives.
 
-What the patch does: `smb_add_share` asks `procd_get_mountpoints` for the fstab mount point a share's path lies on and leaves the share out while that mount point is not mounted; the service does not start while every share waits; `service_triggers` adds a restart mount trigger per share path, so the mount brings the share. Shares on no fstab mount point are unaffected. `PKG_RELEASE` goes to 2.
+What the patch does: `smb_add_share` asks `procd_get_mountpoints` for the fstab mount point a share's path lies on and leaves the share out while that mount point is not mounted; the service does not start while every share waits; `service_triggers` adds a restart mount trigger per share path, so the mount brings the share. Shares on no fstab mount point are unaffected. `PKG_RELEASE` goes to 2. A disk unmounted while the service runs keeps its shares until the service restarts: procd's mount triggers fire when a mount point is mounted, not when it is unmounted.
 
 How this project uses it: the share `shares` lies on the data disk, whose fstab entry exists from the first boot (r4s-services D2).
 
@@ -145,11 +149,11 @@ Verification log: 2026-10-01, with every CPU of the VM kept busy, the second red
 
 Patch: `patches/openwrt/0011-build-name-prepared-stamps-after-content-and-the-tar.patch`, for openwrt/openwrt.
 
-Problem: the prepared stamps of packages and of the kernel are named after a hash of their files, which covers the files' modification times unless `CONFIG_AUTOREMOVE` is set. A checkout that gives a file a new time and the same content makes its stamps stale: a build made in one checkout never holds in another, and re-applying a patch series prepares the kernel and every patched package again. And no stamp names the flags the packages are compiled with: changing `CONFIG_TARGET_OPTIMIZATION` or `CONFIG_EXTRA_OPTIMIZATION` rebuilds nothing, and every package keeps its objects of the old flags.
+Problem: the prepared stamps of packages and of the kernel are named after a hash of their files, which covers the files' modification times unless `CONFIG_AUTOREMOVE` is set. Another checkout of the same sources gives every file a new time, and with it every stamp a new name: a host package built in one checkout is prepared and built again in the other. And no stamp names the flags the packages are compiled with: changing `CONFIG_TARGET_OPTIMIZATION` or `CONFIG_EXTRA_OPTIMIZATION` rebuilds nothing, and every package keeps its objects of the old flags.
 
-Why it matters here: `just patch` applied the series anew before every build, so a build with nothing changed took 28 minutes, 13.5 of them preparing and compiling the kernel again (`docs/dev-setup.md`). And toolchain-o3 changes the target's flags, which the packages of a tree's earlier builds would otherwise keep.
+Why it matters here: CI's host job packs Go's and Rust's host builds with their stamps, and each firmware job unpacks them into a fresh checkout (build-acceleration D4); with times in the stamps' names, every firmware job would build Rust again, for hours. And toolchain-o3 changes the target's flags, which the packages of a tree's earlier builds would otherwise keep.
 
-What the patch does: the prepared stamps of packages (`PKG_FILES_MD5`) and of the kernel always hash content, as `CONFIG_AUTOREMOVE` builds already do; `rdep` still compares modification times, so an edit, or a touch to force a rebuild, still rebuilds. Each target package's prepared stamp also hashes the symbols `TARGET_CFLAGS` is made of (`TARGET_FLAGS_DEPENDS` in `rules.mk`), so a package prepared with other flags is prepared, and so built, anew. A configured stamp would not do: configuring again keeps the build directory, and with it most of a package's objects. The kernel needs no such stamp, as Kbuild compares every object's command line.
+What the patch does: the prepared stamps of packages (`PKG_FILES_MD5`) and of the kernel always hash content, as `CONFIG_AUTOREMOVE` builds already do. A host build's `rdep` looks only for files newer than its stamp, so an edit, or a touch to force a rebuild, still rebuilds, and a checkout of the same content does not. A target package and the kernel still prepare again when a file's time changes, as their `rdep` under `CONFIG_AUTOREBUILD` also compares a list of the files' times (`.dep_files`); the patch leaves that as it is, and a build with nothing changed keeps their times instead (`scripts/patch.sh` moves the tree in one checkout). Each target package's prepared stamp also hashes the symbols of the optimization flags `TARGET_CFLAGS` starts with (`TARGET_FLAGS_DEPENDS` in `rules.mk`: `CONFIG_TARGET_OPTIMIZATION`, `CONFIG_DEBUG`, `CONFIG_EXTRA_OPTIMIZATION`), so a package prepared with other flags is prepared, and so built, anew. A configured stamp would not do: configuring again keeps the build directory, and with it most of a package's objects. The kernel needs no such stamp, as Kbuild compares every object's command line.
 
 Verification log: 2026-10-04, on the VM. With every file of the packages feed's `lang/golang` set to 2020, Go's host build prepared nothing again: its prepared stamp kept the name of its files' content, where the former name, of their paths and times, changed. Dropping `-fno-plt` from `config/toolchain.seed` prepared all 132 target packages of the R4S again, and neither the kernel nor the host builds; restoring it, the same 132. A first try with `-g0` failed in the kernel, which takes `CONFIG_EXTRA_OPTIMIZATION`, all but `-fno-plt`, as its `KCFLAGS`: without debug information, its modules' BTF could not be made.
 
@@ -161,9 +165,11 @@ Problem: `Kernel/Make` skips kbuild when its command line is the one of its last
 
 Why it matters here: a build with nothing changed linked the kernel again in 6.5 of its minutes (5:45 for the modules pass, 0:43 for the image pass, on the VM; build-acceleration, task 2.4).
 
-What the patch does: once the image pass has run, it refreshes the modules pass's stamp. The image pass builds on what the modules pass built and changes none of its inputs, so that pass is still up to date.
+What the patch does: once the image pass has run, it refreshes the modules pass's stamp, if that pass was up to date before it. The image pass builds on what the modules pass built and changes none of its inputs, so that pass is still up to date. Whether it was is the scan that `Kernel/Make` skips by, now `Kernel/Newer`: a file of the kernel tree, the toolchain or the pass's inputs newer than the stamp, such as a module's source edited before only the image is built (`make target/linux/install`), leaves the stamp as it is, for the next modules pass to build.
 
 Verification log: 2026-10-04, on the VM: the first build with the patch ran the modules pass once more; every later build with nothing changed skipped kbuild in both passes, in 2.5 s.
+
+2026-10-05, on the VM, with the stamp refreshed only if it was up to date: a build of the R4S with nothing changed in the kernel skipped kbuild in both passes, and refreshed the modules pass's stamp. With `net/sched/act_csum.c` touched, `make target/linux/install` linked the kernel again and left that stamp as it was; `make target/linux/compile` then built `act_csum.ko` again.
 
 ### download: a package's source only has to be there
 

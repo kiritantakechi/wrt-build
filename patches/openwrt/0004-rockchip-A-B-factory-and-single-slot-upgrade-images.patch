@@ -17,20 +17,18 @@ the same way (ab-boot). Every other device is unchanged.
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Inappropriate [wrt-build's A/B slot layout]
 ---
- scripts/gen_image_ab.sh              | 32 ++++++++++++++++++++++++++++
- target/linux/rockchip/image/Makefile | 29 +++++++++++++++++++++++++
- 2 files changed, 61 insertions(+)
+ scripts/gen_image_ab.sh              | 30 ++++++++++++++++++++++++++++
+ target/linux/rockchip/image/Makefile | 29 +++++++++++++++++++++++++++
+ 2 files changed, 59 insertions(+)
  create mode 100755 scripts/gen_image_ab.sh
 
 diff --git a/scripts/gen_image_ab.sh b/scripts/gen_image_ab.sh
 new file mode 100755
-index 0000000..3010fb9
+index 0000000..1ba16bc
 --- /dev/null
 +++ b/scripts/gen_image_ab.sh
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,30 @@
 +#!/bin/sh
-+# Copyright (C) 2026 OpenWrt.org
-+#
 +# A/B disk image: boot-A, root-A, boot-B, root-B on an MBR, with the same boot
 +# filesystem and root image in both slots. Everything not written reads as
 +# zeros, so no slot carries an old overlay after its root image.

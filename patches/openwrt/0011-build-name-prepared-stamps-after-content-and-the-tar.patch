@@ -5,13 +5,16 @@ Subject: [PATCH] build: name prepared stamps after content and the target's
  flags
 
 A package's prepared stamp is named after a hash of its files. Unless
-CONFIG_AUTOREMOVE is set, that hash covers their modification times. A
-build made in one checkout therefore never matches the stamps of
-another, where every file is new, and re-applying a patch series of the
-same content prepares the kernel and every patched package again. Hash
-the content always, as CONFIG_AUTOREMOVE builds already do. rdep still
-compares modification times, so an edit, or a touch to force a rebuild,
-still rebuilds.
+CONFIG_AUTOREMOVE is set, that hash covers their modification times, so
+a file given another time with the same content, as another checkout of
+the same sources gives every file, changes the stamp's name and prepares
+the package again. Hash the content always, for packages and the
+kernel, as CONFIG_AUTOREMOVE builds already do. A host build then stays
+up to date across checkouts: its rdep looks only for files newer than
+its stamp, so an edit, or a touch to force a rebuild, still rebuilds. A
+target package or the kernel still prepares again when a file's time
+changes, as CONFIG_AUTOREBUILD's rdep also compares a list of their
+files' times (.dep_files); this patch leaves that as it is.
 
 The flags a package is compiled with are inputs of its build too, but
 no stamp named them: changing CONFIG_TARGET_OPTIMIZATION or
@@ -19,9 +22,10 @@ CONFIG_EXTRA_OPTIMIZATION rebuilt nothing, and kept every package
 compiled with the old flags. Naming the configured stamps after them
 would not do, as configuring again keeps the build directory, and with
 it the objects of most packages. Name the prepared stamps after the
-symbols TARGET_CFLAGS is made of, so that a package prepared with other
-flags is prepared, and so built, anew. The kernel needs no such stamp:
-Kbuild compares each object's command line on every build.
+symbols of the optimization flags TARGET_CFLAGS starts with, so that a
+package prepared with other flags is prepared, and so built, anew. The
+kernel needs no such stamp: Kbuild compares each object's command line
+on every build.
 
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
@@ -75,19 +79,16 @@ index 4e70baf..823a055 100644
  STAMP_CONFIGURED=$(PKG_BUILD_DIR)/.configured$(if $(DUMP),,_$(call confvar,$(PKG_CONFIG_DEPENDS)))
  STAMP_CONFIGURED_WILDCARD=$(PKG_BUILD_DIR)/.configured_*
 diff --git a/rules.mk b/rules.mk
-index 82b83dc..6b3cc0d 100644
+index 82b83dc..d2f56ad 100644
 --- a/rules.mk
 +++ b/rules.mk
 @@ -254,6 +254,9 @@ TARGET_PATH:=$(subst $(space),:,$(filter-out .,$(filter-out ./,$(subst :,$(space
  TARGET_INIT_PATH:=$(call qstrip,$(CONFIG_TARGET_INIT_PATH))
  TARGET_INIT_PATH:=$(if $(TARGET_INIT_PATH),$(TARGET_INIT_PATH),/usr/sbin:/sbin:/usr/bin:/bin)
  TARGET_CFLAGS:=$(TARGET_OPTIMIZATION)$(if $(CONFIG_DEBUG), -g3) $(call qstrip,$(CONFIG_EXTRA_OPTIMIZATION))
-+# The configuration symbols TARGET_CFLAGS is made of: a package prepared with
-+# other values is prepared, and so built, anew (include/package.mk).
++# The configuration symbols of the optimization flags TARGET_CFLAGS starts
++# with: a package prepared with other values is prepared anew (package.mk).
 +TARGET_FLAGS_DEPENDS:=CONFIG_TARGET_OPTIMIZATION CONFIG_DEBUG CONFIG_EXTRA_OPTIMIZATION
  TARGET_CXXFLAGS = $(TARGET_CFLAGS)
  TARGET_ASFLAGS_DEFAULT = $(TARGET_CFLAGS)
  TARGET_ASFLAGS = $(TARGET_ASFLAGS_DEFAULT)
--- 
-2.51.2
-

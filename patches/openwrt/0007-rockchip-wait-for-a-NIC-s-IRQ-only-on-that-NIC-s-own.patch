@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 29 Sep 2026 08:40:00 +0800
+Subject: [PATCH] rockchip: wait for a NIC's IRQ only on that NIC's own event
+
+40-net-smp-affinity ran its whole body on every net "add" event, for
+whatever device appeared: each bridge, veth or tunnel waited up to ten
+seconds per NIC for that NIC's IRQ to show up in /proc/interrupts. As
+procd runs hotplug scripts one after another, a NIC whose IRQ carries
+another name held up every other net event behind it for that long.
+
+Wait for a NIC's IRQ only when that NIC itself is added. Any other net
+event still sets the affinity of every NIC whose IRQ is there already,
+without waiting: a NIC's driver may request its IRQ only when the NIC
+is brought up, as r8169 and stmmac do, which can be after the NIC's own
+event stopped waiting, and the next net device to appear then sets it,
+as before.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ .../armv8/base-files/etc/hotplug.d/net/40-net-smp-affinity  | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/target/linux/rockchip/armv8/base-files/etc/hotplug.d/net/40-net-smp-affinity b/target/linux/rockchip/armv8/base-files/etc/hotplug.d/net/40-net-smp-affinity
+index 4d734e5..fd46068 100644
+--- a/target/linux/rockchip/armv8/base-files/etc/hotplug.d/net/40-net-smp-affinity
++++ b/target/linux/rockchip/armv8/base-files/etc/hotplug.d/net/40-net-smp-affinity
+@@ -23,6 +23,12 @@ set_interface_core() {
+ 
+ 	[ -z "${device}" ] && device="$interface"
+ 
++	# Wait for the IRQ only when this interface itself appears. Any other
++	# net device (a bridge, a veth, a tunnel) sets the affinity only if the
++	# IRQ is there already.
++	[ "${INTERFACE}" = "${interface}" ] ||
++		grep -q -E "${device}\$" /proc/interrupts || return 0
++
+ 	local irq=$(get_device_irq "$device")
+ 
+ 	echo "${core_mask}" > /proc/irq/${irq}/smp_affinity

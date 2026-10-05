@@ -11,6 +11,10 @@ loses its card ("Controller never released inhibit bit(s)").
 Give sdhci-pci a description of its own: the PCI device state, then the
 shared controller state.
 
+The device's migration section is now named sdhci-pci rather than
+sdhci, so a stream from an earlier QEMU no longer loads into sdhci-pci.
+Such a stream holds no PCI state, and its guest lost the card anyway.
+
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
