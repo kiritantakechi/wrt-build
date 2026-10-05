@@ -301,9 +301,10 @@ strict-aliasing address-of-packed-member'
 # option, file, function and line, tab-separated (toolchain-o3 D4). A warning falls
 # in the function GCC names before it, if in the same file, else in none ("At top
 # level" or another compilation). Inlined code is placed where GCC says it was
-# inlined last: the outermost function and its call. Paths lose the build's
-# directories (a build variant's also the versioned one inside), so the warnings
-# of every board, checkout and version read alike.
+# inlined last: the outermost function and its call, named as in the source,
+# without the suffixes of GCC's clones. Paths lose the build's directories (a
+# build variant's also the versioned one inside) and their ./ parts, so the
+# warnings of every board, checkout, version and optimization read alike.
 ub_warnings() (
 	# Bytes in every awk: GCC quotes in UTF-8 in a UTF-8 locale.
 	LC_ALL=C UB_WARNINGS="${UB_WARNINGS}" awk '
@@ -312,7 +313,14 @@ ub_warnings() (
 				sub(/^[^\/]*-[0-9][^\/]*\//, "", path)
 			sub(/^.*\/staging_dir\/[^\/]+\//, "", path)
 			while (sub(/^\.\.?\//, "", path)) {}
+			while (sub(/\/\.\//, "/", path)) {}
 			return path
+		}
+		# The function of the source: GCC names its clones after it, with suffixes
+		# such as .isra, .part.0 or .constprop.0 that follow the optimization.
+		function source(name) {
+			if (name ~ /^[A-Za-z_][A-Za-z0-9_]*\./) sub(/\..*$/, "", name)
+			return name
 		}
 		function quoted(text) {
 			text = substr(text, index(text, "'\''") + 1)
@@ -345,7 +353,7 @@ ub_warnings() (
 			split(call != "" ? call : $0, location, ":")
 			if (chain != "") { context = location[1]; function_ = chain }
 			print "-W" option "\t" strip(location[1]) "\t" \
-				(location[1] == context ? function_ : "") "\t" location[2] | "LC_ALL=C sort -u"
+				(location[1] == context ? source(function_) : "") "\t" location[2] | "LC_ALL=C sort -u"
 		}
 		END { close("LC_ALL=C sort -u") }
 	' "$1"

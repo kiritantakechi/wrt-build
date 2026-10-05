@@ -98,8 +98,8 @@ In function 'btf_add_type',
 ../libbpf/src/libbpf.c:8970:5: warning: 'fd' may be used uninitialized [-Wmaybe-uninitialized]
 """
     assert _warnings(tmp_path, log) == [
-        ("-Wmaybe-uninitialized", "libbpf/src/libbpf.c", "bpf_object_load.constprop", "8960"),
-        ("-Wmaybe-uninitialized", "libbpf/src/libbpf.c", "bpf_object_load.constprop", "8970"),
+        ("-Wmaybe-uninitialized", "libbpf/src/libbpf.c", "bpf_object_load", "8960"),
+        ("-Wmaybe-uninitialized", "libbpf/src/libbpf.c", "bpf_object_load", "8970"),
     ]
 
 
@@ -126,18 +126,35 @@ main.c:5:3: warning: 'v' may be used uninitialized [-Wmaybe-uninitialized]
     assert _warnings(tmp_path, log) == [("-Wmaybe-uninitialized", "main.c", "main", "5")]
 
 
+def test_a_clone_is_named_after_its_function(tmp_path: Path) -> None:
+    # GCC names the clones it makes (.isra, .part, .constprop) after the source's
+    # function, with suffixes that follow the optimization, and the board's -mcpu.
+    log = """\
+src/load.c: In function 'lex_scan.isra':
+src/load.c:573:9: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+segment.c: In function 'f2fs_build_file.constprop.isra':
+segment.c:495:3: warning: 'blk' may be used uninitialized [-Wmaybe-uninitialized]
+"""
+    assert _warnings(tmp_path, log) == [
+        ("-Wmaybe-uninitialized", "segment.c", "f2fs_build_file", "495"),
+        ("-Wstringop-overflow", "src/load.c", "lex_scan", "573"),
+    ]
+
+
 def test_paths_lose_the_build_directories(tmp_path: Path) -> None:
     # The package's build directory (a build variant's with the versioned one inside
-    # it) and the staging directory: both boards, every checkout and every version
-    # name the same file alike.
+    # it), the staging directory and ./ parts: both boards, every checkout and every
+    # version name the same file alike.
     cache = f"{BUILD}/dnsmasq-nodhcpv6/dnsmasq-2.93/src/cache.c"
     log = f"""\
 {cache}: In function 'cache_insert':
 {cache}:88:7: warning: writing 8 bytes into a region of size 4 [-Wstringop-overflow=]
 {BUILD}/ubus-2026.06.28/libubus.c:12:3: warning: 'r' is used uninitialized [-Wuninitialized]
 {TOOLCHAIN}/include/fortify/string.h:40:10: warning: reading 9 bytes [-Wstringop-overread]
+ncurses/./base/lib_getch.c:477:5: warning: 'buf' may be used uninitialized [-Wmaybe-uninitialized]
 """
     assert _warnings(tmp_path, log) == [
+        ("-Wmaybe-uninitialized", "ncurses/base/lib_getch.c", "", "477"),
         ("-Wstringop-overflow", "src/cache.c", "cache_insert", "88"),
         ("-Wstringop-overread", "include/fortify/string.h", "", "40"),
         ("-Wuninitialized", "libubus.c", "", "12"),
