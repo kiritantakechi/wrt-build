@@ -14,3 +14,356 @@
 # function = "<function>"
 # reason = "<why it is not undefined behavior>"
 # reviewed = 2026-10-05
+
+# bash 5.3.20
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "/usr/local/src/chet/src/bash/src/parse.y"
+function = "parse_comsub"
+reason = "parse_comsub is static and its four callers pass '(' or '{' as open; for '{' it sets dolbrace_spec from FUNSUB_CHAR or returns early, and dolbrace_spec is read only when open is '{'."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "execute_cmd.c"
+function = "execute_command_internal"
+reason = "ofifo_list is assigned exactly where saved_fifo becomes 1, saved_fifo never changes after, and the only read is under if (saved_fifo); the function has no setjmp."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "redir.c"
+function = "do_redirection_internal"
+reason = "Inside if (TRANSLATE_REDIRECT (ri)), ri is one of the four *_word instructions, each a case of the switch that assigns new_redirect or returns, so its default is unreachable."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "bashline.c"
+function = "attempt_shell_completion"
+reason = "find_cmd_start returns at most rl_end, so the first iteration takes no break that reads e1 (the s > e case assigns it), and find_cmd_name sets e1 on every later iteration."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "braces.c"
+function = "brace_expand"
+reason = "In expand_seqterm, rhs_t is ST_INT only in the branch that assigns tr, and the integer branch that reads it requires lhs_t == rhs_t == ST_INT."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "builtins/declare.def"
+function = "declare_internal"
+reason = "declare_invalid_opts reads optchar only under a condition that requires att_nameref, att_integer, att_assoc or att_array, and its if-chain assigns optchar for exactly those four."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "builtins/enable.def"
+function = "enable_builtin"
+reason = "FFLAG is set only in case 'f', together with filename = list_optarg, and flags starts at 0."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "builtins/history.def"
+function = "history_builtin"
+reason = "DFLAG is set only in case 'd', together with delete_arg = list_optarg, which internal_getopt guarantees for d:."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "builtins/pushd.def"
+function = "pushd_builtin"
+reason = "ROTATE is set only after valid_number (..., &num) succeeds, and valid_number always stores into num."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "jobs.c"
+function = "make_child"
+reason = "oterm is written under if (interactive_shell) and read in the parent under the same test; nothing between changes interactive_shell, set at startup and cleared only in children."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "lib/glob/glob.c"
+function = "skipname"
+reason = "In extglob_skipname, pe is where glob_patscan found the closing ')': the loop's first glob_patscan (pp, pe, '|') rescans the same characters and returns non-NULL, so the body that sets r runs before return r."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "lib/readline/complete.c"
+function = "print_filename"
+reason = "printed_len is set at the top unless _rl_colored_stats && rl_filename_completion_desired, and then by both inner branches; _rl_colored_stats changes only through bind or readline's init."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "lib/readline/complete.c"
+function = "rl_complete_internal"
+reason = "tlen is set when what_to_do is '!' or '@', and read in their case after the TAB-only branch; what_to_do is a parameter never reassigned."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "lib/readline/display.c"
+function = "rl_redisplay"
+reason = "physpos is written and read under the same guard, mb_cur_max == 1 || rl_byte_oriented: mb_cur_max is a local set once, and _rl_move_vert in between only writes to the terminal."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "alias.c"
+function = "all_aliases"
+reason = "map_over_aliases (NULL) runs only when nentries > 0 and has no filter, so it stores all nentries items and a NULL terminator before strvec_len reads them."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "pathexp.c"
+function = "sh_sortglob"
+reason = "setup_globsort sets glob_sorttype only to 0, SORT_NAME|r or 1-8 combined with r; sh_sortglob handles 0, 1, 129, 8 and 136 itself, and each of 2-7 has a case that sets sortfunc."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "subst.c"
+function = "parameter_brace_expand"
+reason = "want_casemod starts at 0 and is set to 1 only where modspec is assigned."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "subst.c"
+function = "parameter_brace_expand_length"
+reason = "CSPECVAR marks only @*#?-$!, '@' and '*' are taken by the branch before, so the switch matches one of its five cases, each of which assigns t."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "subst.c"
+function = "parameter_brace_find_indir"
+reason = "oldex is saved and restored under the same parameter, var_is_special, which the function never modifies."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "subst.c"
+function = "parameter_brace_substring"
+reason = "verify_substring_values assigns h or a in the VT_ARRAYVAR case by assoc_p (v), and reads it under the same vtype and assoc_p (v); nothing between changes v."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "bash"
+option = "-Wmaybe-uninitialized"
+file = "subst.c"
+function = "read_comsub"
+reason = "bufn starts at 0, so the first iteration refills the buffer and sets bufp, which is used afterwards only while bufn > 0, inside the last successful read."
+reviewed = 2026-10-05
+
+# ppp 2.5.3
+[[warning]]
+package = "ppp"
+option = "-Waddress-of-packed-member"
+file = "pptp.c"
+function = "pptp_start_client"
+reason = "dst_addr is a stack aggregate that GCC aligns to 8 bytes on aarch64, so call_id at offset 6 is 2-byte aligned and the u16 store through the pointer is aligned; pptp.so is not in the image."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "ppp"
+option = "-Warray-bounds"
+file = "discovery.c"
+function = "sendPADI"
+reason = "Only the 4-byte tag header (packet bytes 20-23) is stored through svc; the payload of PPPoETag is never written past CHECK_ROOM's limit, so every access stays inside the 1528-byte packet."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "ppp"
+option = "-Wmaybe-uninitialized"
+file = "ipcp.c"
+function = "setnetmask"
+reason = "mask is indeterminate only when parse_dotted_ip fails (n == 0), and the n == 0 check then discards the swapped value; mask's address is taken and uint32_t has no non-value representations, so the read is unspecified, not undefined."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "ppp"
+option = "-Wmaybe-uninitialized"
+file = "options.c"
+function = "ppp_get_filepath"
+reason = "The switch covers every ppp_path_t enumerator (PPP_WITH_PLUGINS is 1), and every caller passes an enumerator constant, so path is always assigned."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "ppp"
+option = "-Wmaybe-uninitialized"
+file = "options.c"
+function = "ppp_get_path"
+reason = "The switch covers every ppp_path_t enumerator (PPP_WITH_PLUGINS is 1), and every caller passes an enumerator constant, so path is always assigned."
+reviewed = 2026-10-05
+
+# iproute2 6.18.0
+[[warning]]
+package = "iproute2"
+option = "-Wstringop-overflow"
+file = "lib/libnetlink.c"
+function = "mdb_flush"
+reason = "n is req's first member, so &req.n is &req, and addattr_l bounds every write by maxlen == sizeof (req); bridge, the only program with mdb_*, is not in the image."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "iproute2"
+option = "-Wstringop-overflow"
+file = "lib/libnetlink.c"
+function = "mdb_get"
+reason = "n is req's first member, so &req.n is &req, and addattr_l bounds every write by maxlen == sizeof (req); bridge, the only program with mdb_*, is not in the image."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "iproute2"
+option = "-Wstringop-overflow"
+file = "lib/libnetlink.c"
+function = "mdb_modify"
+reason = "n is req's first member, so &req.n is &req, and addattr_l bounds every write by maxlen == sizeof (req); bridge, the only program with mdb_*, is not in the image."
+reviewed = 2026-10-05
+
+# jansson 2.15.0
+[[warning]]
+package = "jansson"
+option = "-Wstringop-overflow"
+file = "src/load.c"
+function = "lex_get_save"
+boards = ["r6s"]
+reason = "count = utf8_check_first (c) is 2 to 4 for any lead byte that reaches the loop (0 leaves through goto out), so stores stop at buffer[3] and the terminator at buffer[4] of buffer[5]."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "jansson"
+option = "-Wstringop-overflow"
+file = "src/load.c"
+function = "lex_scan"
+boards = ["r6s"]
+reason = "count = utf8_check_first (c) is 2 to 4 for any lead byte that reaches the loop (0 leaves through goto out), so stores stop at buffer[3] and the terminator at buffer[4] of buffer[5]."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "jansson"
+option = "-Wstringop-overflow"
+file = "src/load.c"
+function = "stream_get"
+boards = ["r6s"]
+reason = "count = utf8_check_first (c) is 2 to 4 for any lead byte that reaches the loop (0 leaves through goto out), so stores stop at buffer[3] and the terminator at buffer[4] of buffer[5]."
+reviewed = 2026-10-05
+
+# libgcrypt 1.12.2
+[[warning]]
+package = "libgcrypt"
+option = "-Wstringop-overflow"
+file = "basic.c"
+function = "check_one_cipher_ctr_reset"
+reason = "ivlen is at most 16, the largest block size of libgcrypt's ciphers, so iv[ivlen-(i+1)] stays in iv[16]; tests/basic is a build-time test, not in the image."
+reviewed = 2026-10-05
+
+# libseccomp 2.5.5
+[[warning]]
+package = "libseccomp"
+option = "-Wdangling-pointer"
+file = "gen_bpf.c"
+function = "_gen_bpf_build_bpf"
+reason = "state->arch is scratch state: nothing reads it after _gen_bpf_build_bpf returns, and _state_release clears it, so the dangling value is never used (libseccomp 2.6.0 sets it to NULL)."
+reviewed = 2026-10-05
+
+# pcre2 10.47
+[[warning]]
+package = "pcre2"
+option = "-Wstringop-overflow"
+file = "src/pcre2_jit_compile.c"
+function = "fast_forward_first_n_chars"
+reason = "cvalue is the Unicode other case of a code point of a UTF-validated pattern, so it is at most 0x10FFFF and ord2utf writes at most 4 bytes, which othercase[4] holds."
+reviewed = 2026-10-05
+
+# f2fs-tools 1.16.0
+[[warning]]
+package = "f2fs-tools"
+option = "-Wmaybe-uninitialized"
+file = "segment.c"
+function = "f2fs_build_file"
+reason = "update_largest_extent keeps ext.len > 0 implying fofs and blk are set: cur_ext's fields are set together when len goes from 0 to 1, largest_ext is only a copy of such a cur_ext, and every read of fofs or blk is under len > 0."
+reviewed = 2026-10-05
+
+# ncurses 6.6
+[[warning]]
+package = "ncurses"
+option = "-Wmaybe-uninitialized"
+file = "ncurses/base/lib_getch.c"
+function = "_nc_wgetch"
+reason = "_nc_wgetch has returned ERR if win or its screen is NULL, so recur_wgetnstr reaches wgetnstr, which NUL-terminates buf on every return after its (!win || !str) guard, within MAXCOLUMNS-1 characters."
+reviewed = 2026-10-05
+
+# podman 5.8.4, its vendored SQLite 3.50.4
+[[warning]]
+package = "podman"
+option = "-Wstringop-overread"
+file = "vendor/github.com/mattn/go-sqlite3/sqlite3-binding.c"
+function = "sqlite3ColumnSetColl"
+reason = "COLFLAG_HASTYPE is set only together with a non-NULL zCnName that holds \"name\\0type\\0\", so the second sqlite3Strlen30 never sees a NULL name; a NULL name arises only after an allocation failure, where the parser stops."
+reviewed = 2026-10-05
+
+# procd 2026.09.26
+[[warning]]
+package = "procd"
+option = "-Wmaybe-uninitialized"
+file = "uxc.c"
+function = "uxc_list"
+reason = "arr is assigned and used under the same if (json_output); json_output is a file-static set only by main's option parsing before uxc_list runs, and never address-taken."
+reviewed = 2026-10-05
+
+# util-linux 2.42.2
+[[warning]]
+package = "util-linux"
+option = "-Wstringop-overread"
+file = "lib/sha1.c"
+function = "ul_SHA1Final"
+reason = "In ul_SHA1Final's one-byte updates, the bulk loop of ul_SHA1Update does not run (i = 64 - j >= 1 makes i + 63 < len false for len == 1), so ul_SHA1Transform only reads context->buffer."
+reviewed = 2026-10-05
+
+# zsh 5.9.2
+[[warning]]
+package = "zsh"
+option = "-Wfree-nonheap-object"
+file = "hashtable.c"
+function = "emptyhisttable"
+reason = "freehistnode is never given &curline: curline's flags stay 0 and it is never hashed into histtab, the only place HIST_DUP is set."
+reviewed = 2026-10-05
+
+[[warning]]
+package = "zsh"
+option = "-Wfree-nonheap-object"
+file = "hist.c"
+function = "histremovedups"
+reason = "histremovedups frees only ring entries flagged HIST_DUP; curline's flags are never written (static zero) and it is never hashed into histtab, the only place HIST_DUP is set."
+reviewed = 2026-10-05
+
