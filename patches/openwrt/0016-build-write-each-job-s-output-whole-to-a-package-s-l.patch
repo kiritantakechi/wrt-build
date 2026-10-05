@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 5 Oct 2026 10:29:55 +0800
+Subject: [PATCH] build: write each job's output whole to a package's log
+
+A package built in parallel runs make with the build's jobserver, and
+GCC's LTO joins that jobserver too, whatever the number after -flto: the
+LTRANS jobs of a link run beside the package's other jobs, and all of
+them write to the package's log line by line. A warning can then follow
+another job's chain of inlined calls and be placed in the wrong
+function, or lose its function, so the warnings of one build differ
+from the next.
+
+Run a parallel package's make with --output-sync=target. Make writes
+each job's output once the job ends, and passes the option through
+MAKEFLAGS to the make that GCC runs for a link's LTRANS jobs, so each of
+those comes out whole as well.
+
+A package built with -j1 has no jobserver, and with -flto=auto GCC would
+start one LTRANS job per CPU with make's flags cleared. Link with
+-flto=1, so that GCC runs those jobs one after another. The partitions
+stay the same either way, as their number follows GCC's parameters, not
+the number of jobs.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Inappropriate [wrt-build reads GCC's warnings from each package's build log]
+---
+ include/package.mk | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/include/package.mk b/include/package.mk
+index 823a055..f0e622a 100644
+--- a/include/package.mk
++++ b/include/package.mk
+@@ -24,7 +24,7 @@ PKG_SOURCE_DATE_EPOCH = $(if $(DUMP),,$(call source_date_epoch,$(if \
+ ifeq ($(strip $(PKG_BUILD_PARALLEL)),0)
+ PKG_JOBS?=-j1
+ else
+-PKG_JOBS?=$(if $(PKG_BUILD_PARALLEL),$(MAKE_J),-j1)
++PKG_JOBS?=$(if $(PKG_BUILD_PARALLEL),$(MAKE_J) --output-sync=target,-j1)
+ endif
+ 
+ PKG_BUILD_FLAGS?=
+@@ -55,9 +55,9 @@ ifeq ($(call pkg_build_flag,gc-sections,$(if $(CONFIG_USE_GC_SECTIONS),1,0)),1)
+   TARGET_LDFLAGS+= -Wl,--gc-sections
+ endif
+ ifeq ($(call pkg_build_flag,lto,$(if $(CONFIG_USE_LTO),1,0)),1)
+-  TARGET_CFLAGS+= -flto=auto -fno-fat-lto-objects
+-  TARGET_CXXFLAGS+= -flto=auto -fno-fat-lto-objects
+-  TARGET_LDFLAGS+= -flto=auto -fuse-linker-plugin
++  TARGET_CFLAGS+= -flto=1 -fno-fat-lto-objects
++  TARGET_CXXFLAGS+= -flto=1 -fno-fat-lto-objects
++  TARGET_LDFLAGS+= -flto=1 -fuse-linker-plugin
+ endif
+ ifdef CONFIG_USE_MOLD
+   ifeq ($(call pkg_build_flag,mold,1),1)

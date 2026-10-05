@@ -332,8 +332,8 @@ ub_warnings() (
 		}
 		{ gsub(/\342\200\230|\342\200\231/, "'\''") }
 		# A chain of inlined calls leads straight to its diagnostic. Any other line
-		# after it comes from another job of a parallel link (LTRANS), whose output
-		# interleaves, and the chain belongs to no diagnostic after it.
+		# after it comes from another job that wrote to the log at the same time,
+		# and the chain belongs to no diagnostic after it.
 		$0 !~ /^([^ :]+: )?In [^'\'']*'\''.*'\'',$|^ +inlined from |^[^ :]+:[0-9]+(:[0-9]+)?: (warning|error|note): / {
 			inlined = ""
 			at = ""

@@ -118,8 +118,9 @@ execute_cmd.c:1197:7: warning: 'ofifo_list' may be used uninitialized [-Wmaybe-u
 
 
 def test_an_interleaved_chain_is_dropped(tmp_path: Path) -> None:
-    # The jobs of a parallel link (LTRANS) write to the log at once: bash's R4S
-    # build put another job's chain and context lines before redir.c's warning.
+    # Jobs that write to the log at the same time interleave: before patch 0016
+    # synced a package's jobs, bash's R4S build put another LTRANS job's chain
+    # and context lines before redir.c's warning.
     log = """\
 In function 'make_command',
     inlined from 'make_group_command' at make_cmd.c:321:11,
