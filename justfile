@@ -118,6 +118,11 @@ runner-prepare:
 toolchain-key profile="dev":
     scripts/toolchain-key.sh {{ profile }}
 
+# Print the compiler cache key of a stage (host, or a board)
+[group('ci')]
+compiler-cache-key stage:
+    scripts/compiler-cache-key.sh {{ stage }}
+
 # Build the host tools and the board-neutral cross toolchain
 [group('ci')]
 toolchain-build profile="dev":

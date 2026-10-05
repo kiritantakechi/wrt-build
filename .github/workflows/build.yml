@@ -95,13 +95,18 @@ jobs:
 
       # The host stage's own compiler cache (build-acceleration D6): what an
       # earlier host build compiled, LLVM's C++ included, for one that only some
-      # of its inputs changed.
+      # of its inputs changed (scripts/compiler-cache-key.sh).
+      - name: Compiler cache key
+        id: compiler-cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: nix develop .#build -c just compiler-cache-key host >> "$GITHUB_OUTPUT"
+
       - name: Restore compiler cache
         if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v6
         with:
-          key: compiler-cache-host-${{ hashFiles('config/ccache.conf') }}-${{ github.run_id }}
-          restore-keys: compiler-cache-host-${{ hashFiles('config/ccache.conf') }}-
+          key: ${{ steps.compiler-cache.outputs.key }}
+          restore-keys: ${{ steps.compiler-cache.outputs.prefix }}
           path: ${{ env.WRT_WORKDIR }}/compiler-cache
 
       - name: Build tools and toolchains
@@ -123,7 +128,7 @@ jobs:
         if: always() && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
-          key: compiler-cache-host-${{ hashFiles('config/ccache.conf') }}-${{ github.run_id }}
+          key: ${{ steps.compiler-cache.outputs.key }}
           path: ${{ env.WRT_WORKDIR }}/compiler-cache
 
   firmware:
@@ -156,16 +161,17 @@ jobs:
           restore-keys: dl-
           path: ${{ env.WRT_WORKDIR }}/dl
 
-      # Every language's compiler cache in one (build-acceleration D6), keyed by
-      # the board, whose packages no other board's build compiles alike, by
-      # config/ccache.conf, which decides whether a ccache entry can hit (it
-      # identifies the compiler by its content), then by run. Go's and sccache's
-      # entries name their compiler themselves.
+      # Every language's compiler cache in one (build-acceleration D6), the
+      # board's own (scripts/compiler-cache-key.sh).
+      - name: Compiler cache key
+        id: compiler-cache
+        run: nix develop .#build -c just compiler-cache-key "$BOARD" >> "$GITHUB_OUTPUT"
+
       - name: Restore compiler cache
         uses: actions/cache/restore@v6
         with:
-          key: compiler-cache-${{ matrix.board }}-${{ hashFiles('config/ccache.conf') }}-${{ github.run_id }}
-          restore-keys: compiler-cache-${{ matrix.board }}-${{ hashFiles('config/ccache.conf') }}-
+          key: ${{ steps.compiler-cache.outputs.key }}
+          restore-keys: ${{ steps.compiler-cache.outputs.prefix }}
           path: ${{ env.WRT_WORKDIR }}/compiler-cache
 
       # Restored last, so that the toolchain is the most recently used of the
@@ -199,7 +205,7 @@ jobs:
         if: always()
         uses: actions/cache/save@v6
         with:
-          key: compiler-cache-${{ matrix.board }}-${{ hashFiles('config/ccache.conf') }}-${{ github.run_id }}
+          key: ${{ steps.compiler-cache.outputs.key }}
           path: ${{ env.WRT_WORKDIR }}/compiler-cache
 
       - name: Build logs
