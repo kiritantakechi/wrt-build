@@ -117,6 +117,22 @@ execute_cmd.c:1197:7: warning: 'ofifo_list' may be used uninitialized [-Wmaybe-u
     ]
 
 
+def test_an_interleaved_chain_is_dropped(tmp_path: Path) -> None:
+    # The jobs of a parallel link (LTRANS) write to the log at once: bash's R4S
+    # build put another job's chain and context lines before redir.c's warning.
+    log = """\
+In function 'make_command',
+    inlined from 'make_group_command' at make_cmd.c:321:11,
+    inlined from 'yyparse' at parse.y:1198:24:
+execute_cmd.c: In function 'execute_command_internal':
+redir.c: In function 'do_redirection_internal.constprop':
+redir.c:872:23: warning: 'new_redirect' may be used uninitialized [-Wmaybe-uninitialized]
+"""
+    assert _warnings(tmp_path, log) == [
+        ("-Wmaybe-uninitialized", "redir.c", "do_redirection_internal", "872"),
+    ]
+
+
 def test_an_option_with_a_value_is_named_without_it(tmp_path: Path) -> None:
     # GCC names an option that takes a level with a trailing "=".
     log = """\

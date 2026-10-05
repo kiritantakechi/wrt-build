@@ -331,6 +331,13 @@ ub_warnings() (
 			for (i = 1; i <= n; i++) ub[list[i]] = 1
 		}
 		{ gsub(/\342\200\230|\342\200\231/, "'\''") }
+		# A chain of inlined calls leads straight to its diagnostic. Any other line
+		# after it comes from another job of a parallel link (LTRANS), whose output
+		# interleaves, and the chain belongs to no diagnostic after it.
+		$0 !~ /^([^ :]+: )?In [^'\'']*'\''.*'\'',$|^ +inlined from |^[^ :]+:[0-9]+(:[0-9]+)?: (warning|error|note): / {
+			inlined = ""
+			at = ""
+		}
 		/^[^ :]+: (In|At) .*:$/ {
 			context = substr($0, 1, index($0, ": ") - 1)
 			if (index($0, "'\''")) function_ = quoted($0)
@@ -339,7 +346,7 @@ ub_warnings() (
 			next
 		}
 		/^([^ :]+: )?In [^'\'']*'\''.*'\'',$/ { inlined = quoted($0); at = ""; next }
-		/^ +inlined from '\''.*'\'' at [^ ]+[,:]$/ {
+		/^ +inlined from '\''.*'\'' at [^ ]+[,:]$/ && inlined != "" {
 			inlined = quoted($0)
 			at = substr($0, index($0, "'\'' at ") + 5)
 			next
