@@ -27,6 +27,8 @@ The rpcd plugin, also on that list, turned out to be a ucode plugin already.
   - wrt-sync and the release scripts follow, and the image has no `/etc/opkg` at all.
   - No release has been published, so no router holds keys in the old place.
 - **A code-standards check** keeps jshn, jsonfilter and `/etc/opkg` out of this project's device code.
+- **What a step replaces goes in the same step**: the shell tools ucode replaces, `ifb-dns` and its filters, the old key directory in this project's code. No compatibility path stays behind, except where an upstream component must keep serving upstream's images (`fwtool`'s fallback).
+- **Patches fix the cause where it lies, without trading generality away** (`docs/patches.md`): qosify's patch keeps the kernels without tcx working, and base-files' patch keeps upstream's key directory working.
 
 ## Capabilities
 
@@ -55,7 +57,7 @@ None.
   - `scripts/release-sign.sh` and `scripts/release-keys.sh`.
 - **Patches**, carried by the series under the next free numbers, each stating its upstream status in its trailer (`toolchain-o3`'s convention):
   - base-files: `fwtool`'s key directory, `Pending`, with a write-up in `docs/patches.md`;
-  - qosify: tcx, DNS capture and ingress redirect, building on patch 0010's device tracking. Its status is `Inappropriate`, until it has the `clsact` fallback upstream would need.
+  - qosify: tcx, DNS capture and ingress redirect, building on patch 0010's device tracking, with a `clsact` fallback for kernels without tcx, so that it serves every kernel upstream's qosify does: `Pending`, with a write-up in `docs/patches.md`.
 - **Tests**:
   - `tests/network/test_tc_hook_order.py`;
   - `tests/network/test_qos.py`: DNS name, ingress shaping;

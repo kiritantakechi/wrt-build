@@ -53,7 +53,7 @@ See proposal.md for why. The current state:
 **Non-Goals:**
 - Rewriting init scripts, uci-defaults or the sysupgrade hook in ucode: procd and sysupgrade call shell, and these scripts mostly start processes.
 - Upstream's own scripts that use jsonfilter (`network.sh` and others).
-- Moving qosify to a new upstream version, or submitting the qosify patch. Upstream would want a fallback to `clsact` for kernels without tcx, and submitting anything needs the maintainer's consent.
+- Moving qosify to a new upstream version, or submitting the qosify patch: submitting anything needs the maintainer's consent.
 - Migrating keys on routers: none run a release yet.
 
 ## Decisions
@@ -107,6 +107,10 @@ DNS learning:       AF_PACKET (SOCK_DGRAM) on each managed WAN device, filtered 
 - einat asks to run first. The order thus holds whichever starts first, and after any restart.
 - The kernel keeps it, and the test "After restarting components" checks it.
 
+**Kernels without tcx.**
+- When the kernel refuses a tcx link (`EINVAL` or `EOPNOTSUPP`), qosify attaches as it does today: `cls_bpf` under `clsact`, at a priority after einat's. The patch keeps every kernel upstream's qosify supports working.
+- A setting, `qosify.global.tcx` (`auto`, the default, or `off`), forces the fallback, so that a test can exercise it on a kernel that has tcx.
+
 **Lifetime.**
 - The links belong to the daemon's process.
 - A stop, a crash or a `SIGKILL` detaches them, and nothing stale stays on the port.
@@ -127,7 +131,7 @@ DNS learning:       AF_PACKET (SOCK_DGRAM) on each managed WAN device, filtered 
 
 **The patch.**
 - One patch to qosify (interface, loader, DNS and BPF sources), carried by the patch series beside 0006 and 0010.
-- Its trailer says `Upstream-Status: Inappropriate [needs a clsact fallback for kernels without tcx]`. With that fallback it would be meant for upstream, and would get a write-up in `docs/patches.md`.
+- It is meant for upstream as it is: its trailer says `Upstream-Status: Pending`, and its write-up goes into `docs/patches.md`.
 
 **Alternatives considered:**
 - `bpf_clone_redirect()` of DNS replies to `ifb-dns` would keep the device, and rely on how an ifb treats clones it did not get from mirred. The packet socket needs neither.
@@ -151,7 +155,7 @@ DNS learning:       AF_PACKET (SOCK_DGRAM) on each managed WAN device, filtered 
 
 - [ucode code paths fail silently where the shell ones failed loudly, for example a missing module or a misread file] → Every script runs `'use strict'`, and checks the result of each call that can fail. Each snippet is first tried with the host ucode. The existing tests hold the behavior: health check, slot status, device sync and config push.
 - [qosify's DNS learning sees replies before einat's reverse translation] → DNS learning reads only the DNS payload, which address translation does not change. The new "Classify by DNS name" test checks it.
-- [qosify on tcx diverges from upstream qosify] → One patch, whose trailer states why it is not meant for upstream as it is: its upstream form would add a `clsact` fallback.
+- [qosify on tcx diverges from upstream qosify] → One patch, meant for upstream: it keeps the `clsact` path for kernels without tcx, which a test exercises through `qosify.global.tcx=off`.
 - [The ingress shaping path is new code that the image's configuration never uses] → The "Enable ingress shaping" test exercises it in the emulator.
 - [Two implementations of the slot facts drift apart] → They are small, and the A/B suites test both. A comment in each names the other.
 

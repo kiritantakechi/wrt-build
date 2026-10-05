@@ -30,3 +30,14 @@ The test harness's modules SHALL form four layers, from the bottom up: the repos
 #### Scenario: Harness module imports from a higher layer
 - **WHEN** a module of the harness imports from a layer above its own
 - **THEN** `just check` fails and names the module and the import
+
+### Requirement: No dead code in the host-side code
+Every function of the shell library SHALL be called by a script, another library module or a test, and every module of the test harness SHALL be imported by the harness or a test. Code that a change replaces SHALL be removed by that change, without an alias for its old name.
+
+#### Scenario: Library function that nothing calls
+- **WHEN** a library module defines a function that no script, other module or test calls
+- **THEN** `just check` fails and names the module and the function
+
+#### Scenario: Harness module that nothing imports
+- **WHEN** a module of the test harness is imported neither by the harness nor by a test, nor named as an entry point
+- **THEN** `just check` fails and names the module

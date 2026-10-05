@@ -40,6 +40,14 @@ Each new change pays for this: it reads more than it touches, and a mistake in o
     - a release's `release.json` and per-device manifest.
   - Loading fails with the file, the entry and the field.
   - The tests read typed fields instead of dictionary keys.
+- **No dead code, and nothing left behind**:
+  - the module check also fails on a library function that no script, module or test calls, and the harness check on a harness module that nothing imports;
+  - what the change replaces goes in the same step, without an alias for the old name: `lib.sh`, `require_workdir` and `TREE`, the raw reads of the data files;
+  - functions and modules found unused are deleted, not kept for later.
+- **One order and one naming**:
+  - every shell module and harness module reads top-down in the same order: what it is for, what it depends on, its constants, then its functions, each helper before its first caller;
+  - operations that come in pairs are named and placed alike, as `toolchain-pack` and `toolchain-unpack`, or `read_json` and `read_toml`, are;
+  - `docs/conventions.md` states both.
 - **No behavior of the firmware or of the build changes.** The composed seeds, the configuration and the packages of each image stay the same; only the code that builds and tests them moves.
 
 ## Capabilities
@@ -51,7 +59,7 @@ None.
 ### Modified Capabilities
 - `quality/code-standards`:
   - the script skeleton loads library modules by name, instead of sourcing one library;
-  - two new requirements, both checked by `just check`: scripts load what they call, and the test harness is layered, each module importing only from its own layer and below.
+  - three new requirements, all checked by `just check`: scripts load what they call; the test harness is layered, each module importing only from its own layer and below; and the host-side code has no dead code.
 - `testing/harness`, two new requirements:
   - fixtures by layer, with a root configuration that only composes them;
   - one schema per data file, whose violations name the file, the entry and the field.
@@ -67,7 +75,8 @@ None.
   - `tests/conftest.py` composes them;
   - `tests/tach.toml` is new, and tach joins the dev dependencies (`tests/pyproject.toml`, `uv.lock`);
   - every test's imports follow the new paths, and its data reads go through the models;
-  - `tests/unit/` gains the tests of the module check, of the awk programs and of the schemas.
-- **Docs**: `docs/conventions.md` describes the shell modules and the harness's layers.
+  - `tests/unit/` gains the tests of the module check, of the awk programs and of the schemas;
+  - what the dead-code checks find is deleted.
+- **Docs**: `docs/conventions.md` describes the shell modules, the harness's layers, and the order and naming every module follows.
 - **Unchanged**: the composed seeds, the configuration and each image's packages, which the same comparison before and after the change shows. CI's workflow stays as it is; its check job runs tach through `just check`.
 - **Order**: the third of four changes, after the archived `board-model`: `build-acceleration`, then `toolchain-o3`, then `module-boundaries`, then `device-modernization`. `device-modernization`'s new scripts and tests land in its structure.

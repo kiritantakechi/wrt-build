@@ -98,6 +98,8 @@ A check named `modules` in `just check`:
 
 A call is a library function's name as a word outside comments. Every library function has a distinct name, so a word match is enough.
 
+**Dead functions.** The same reading finds every library function that no script, other module or unit test calls, and the check fails on it, naming the module and the function. A function is called when its name appears as a word outside comments in another function's body, in a script, or in a test under `tests/`.
+
 The skeleton check expects core's line where it expected `lib.sh`'s, and a `use` line after it when the script loads more than core.
 
 **Alternative considered:** shellcheck's `source=` directives. They tell shellcheck where a file is, but nothing fails when a script calls a function from a module it never loads.
@@ -131,6 +133,8 @@ tests/wrt_tests/
 - type-checking imports count (`ignore_type_checking_imports = false`), because a type names a dependency as much as a call does.
 
 The package root re-exports only `spec`, which every test imports. The tests themselves are no module of tach's: a test may use every layer.
+
+**Unused modules.** `spec-coverage`'s structure check also reads the harness's imports: a harness module that neither another harness module nor a test imports, and that `tests/pyproject.toml` does not name as an entry point, fails it.
 
 **Alternatives considered:**
 - import-linter expresses the same contract. tach is the tool chosen with the maintainer; it is maintained (0.35.2, 2026-10-01) and runs from the uv environment like ruff and ty.
@@ -185,9 +189,24 @@ The models are strict, with `extra="forbid"`:
 
 The skeleton change alters the two scripts anyway, so the key changes once with this change either way.
 
+### D9. One order, one naming, nothing left behind
+
+**Order.** Every shell module and harness module reads top-down:
+1. what it is for, in its header or docstring;
+2. what it depends on: `use` lines, or imports;
+3. its constants;
+4. its functions, each helper before the first function that calls it, so that a reader meets nothing undefined.
+
+Every script keeps the skeleton of quality/code-standards. The order is stated in `docs/conventions.md`, and the modules are written in it when they are split (task 5.1) and moved (task 3.1).
+
+**Naming.** Operations that come in pairs are named and placed alike: `toolchain-pack` and `toolchain-unpack`, `workdir-mount` and `workdir-unmount`, `read_json` and `read_toml`, `getenv` and `setenv`. A name says what the function returns or does, in the domain's words, as the existing ones mostly do (`board_field`, `compose_seeds`).
+
+**Nothing left behind.** What this change replaces goes in the step that replaces it: `lib.sh`, `require_workdir` and the global `TREE`, the raw reads of the data files. No alias keeps an old name alive. What the dead-code checks find is deleted, after checking that nothing outside the repository (CI's workflow, `justfile`) calls it.
+
 ## Risks / Trade-offs
 
 - [Moving 29 modules breaks an import a grep misses] → The module moves come first, in commits of their own. ty and `just check` fail on any import left behind, and the full suite runs on the emulator before the change is done.
+- [The dead-code check flags a function only CI's workflow or the justfile calls] → The check reads `.github/workflows/*.yml` and `justfile` as callers too.
 - [tach reports what the layering must allow] → Its config is the layering of D5, nothing more. A report means a module in the wrong layer, and is fixed by moving code, never by an exception in `tach.toml`.
 - [The toolchain key changes, so CI's next host stage rebuilds] → Once, from its compiler cache: about 71 minutes (docs/ci.md). It is recorded with the change's CI run.
 - [A function's new tree argument is missed in a caller] → The module check finds a function a script does not load, not a missing argument. So each function's first line checks its arguments, `[ -d "$1" ] || die ...`, and the unit tests and a full build of both boards exercise every caller.

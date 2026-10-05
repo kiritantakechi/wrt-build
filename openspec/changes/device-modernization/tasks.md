@@ -46,17 +46,19 @@
   - the classifiers attach with `bpf_program__attach_tcx` and `BPF_F_AFTER`, as links the daemon owns;
   - DNS learning reads replies from a packet socket on each managed WAN device, filtered to source port 53, and no longer creates `ifb-dns` and its filters;
   - ingress shaping redirects with `bpf_redirect()` to the interface's ifb, whose index the daemon keeps in a map entry per interface;
-  - patch 0010's re-attach on a replaced device carries over to the links.
+  - patch 0010's re-attach on a replaced device carries over to the links;
+  - a kernel that refuses a tcx link, or `qosify.global.tcx=off`, gets today's `cls_bpf` under `clsact`, after einat's.
 
-  Carry the patch in the series under the next free number, with the trailer `Upstream-Status: Inappropriate [needs a clsact fallback for kernels without tcx]`.
+  Carry the patch in the series under the next free number, with the trailer `Upstream-Status: Pending` and its write-up in `docs/patches.md`.
 
-  Verify: qosify builds for both boards, with no UB-indicative warning that `tests/reviewed-warnings.toml` does not review, and `tests/build/test_patches.py` passes.
+  Verify: qosify builds for both boards, with no UB-indicative warning that `tests/reviewed-warnings.toml` does not review, and `tests/build/test_upstream_pinning.py` passes.
 - [ ] 4.2 Update and add the tests:
   - network/tc-hook-order "Check the WAN port": tcx ingress and egress hold einat's program, then qosify's, and no legacy filter;
   - "After restarting components" stays as it is;
   - network/qos "Inspect queueing disciplines": no ifb device;
   - "Classify by DNS name" (new): a `dns:` rule to the voice class, a name resolved through the router from a LAN client, and a flow to the address it got;
   - "Enable ingress shaping" (new): cake on the interface's ifb counts a download while it is enabled, and the ifb is gone after the restore.
+  - network/tc-hook-order "Kernel without tcx" (new): with `qosify.global.tcx=off`, einat's tcx programs run first and qosify's classifiers on `clsact` after them, and a `dns:` rule still classifies.
 
   Verify: the network suites pass on both boards. The board-model redial stress, with every CPU of the VM kept busy, keeps einat and qosify on pppoe-wan for eight rounds.
 
@@ -67,6 +69,10 @@
   Verify: `just check` passes, and the test, which runs the check on a copy of the repository with one offending line, sees it fail with that file and line.
 
 ## 6. Integration
+
+- [ ] 6.0 Remove what the change replaced: `git grep` finds no `jsonfilter`, `jshn`, `ifb-dns`, `uclient-fetch` or `/etc/opkg` in this project's device code, scripts, tests or docs, except `fwtool`'s fallback in the base-files patch and the docs that explain it.
+
+  Verify: the code-standards check of task 5.1 passes, and the grep finds only those.
 
 - [ ] 6.1 Run the full system tests on both boards (dev profile).
 

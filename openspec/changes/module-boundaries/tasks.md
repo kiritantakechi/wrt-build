@@ -32,9 +32,12 @@
 - [ ] 3.2 Add tach to the dev dependencies (`tests/pyproject.toml`, `uv.lock`) and `tests/tach.toml` with the four layers. `just check` runs it as the check `tach`. Add the test of the quality/code-standards scenario "Harness module imports from a higher layer" (`tests/quality/test_code_standards.py`), on a scratch copy of the repository with a model module that imports from the device layer.
 
   Verify: `just check` passes on the tree; the test passes, and its failure output names the module and the import.
-- [ ] 3.3 Describe the layers in `docs/conventions.md`: what each holds, what it may import, and where a new module goes.
+- [ ] 3.3 Describe the layers in `docs/conventions.md`: what each holds, what it may import, and where a new module goes; and the order and naming of D9, which every moved module follows.
 
-  Verify: the document names the four layers and tach's config, and `just check` (editorconfig, links) passes.
+  Verify: the document names the four layers, tach's config and D9's order, and `just check` (editorconfig, links) passes.
+- [ ] 3.4 Extend `spec-coverage`'s structure check with D5's unused modules, and add the test of the quality/code-standards scenario "Harness module that nothing imports" (`tests/quality/test_code_standards.py`). Delete the harness modules and functions it finds unused.
+
+  Verify: the test passes and names the module; the check passes on the tree.
 
 ## 4. Fixtures by layer (design D6)
 
@@ -47,7 +50,7 @@
 
 ## 5. Shell modules (design D1–D4, D8)
 
-- [ ] 5.1 Split `scripts/lib.sh` into `scripts/lib/*.sh` as D1 lays out, with `use` in core and each module's dependencies at its top. Every script loads core by path and its other modules with one `use` line. The unit tests (`test_lib.py`, `test_warnings.py`) load the modules they test by name.
+- [ ] 5.1 Split `scripts/lib.sh` into `scripts/lib/*.sh` as D1 lays out, each module in D9's order, with `use` in core and each module's dependencies at its top. Every script loads core by path and its other modules with one `use` line. The unit tests (`test_lib.py`, `test_warnings.py`) load the modules they test by name.
 
   Verify: shellcheck and shfmt pass, the unit tests pass, and `scripts/lib.sh` is gone.
 - [ ] 5.2 Move the awk programs of more than ten lines into files beside their modules (D3): `ub-warnings.awk`, `image-logs.awk`, `merge-seeds.awk`.
@@ -56,17 +59,21 @@
 - [ ] 5.3 Pass the tree as an argument (D2): `workdir_tree` replaces `require_workdir`, and the twelve functions that read `TREE` take the tree first and check it.
 
   Verify: `git grep -n 'TREE' scripts` finds no global `TREE`. The unit tests of those functions pass the tree. In the VM, `just config r4s dev` and `just toolchain-build dev` run as before.
-- [ ] 5.4 Add `lib-check` (model layer) and the check `modules` to `just check` (D4). Update the skeleton check to core's line and the `use` line. Add the test of the quality/code-standards scenario "Script calls a function it does not load" (`tests/quality/test_code_standards.py`), and keep the test of "New script added" passing against the new skeleton.
+- [ ] 5.4 Add `lib-check` (model layer) and the check `modules` to `just check` (D4), with dead functions. Update the skeleton check to core's line and the `use` line. Add the tests of the quality/code-standards scenarios "Script calls a function it does not load" and "Library function that nothing calls" (`tests/quality/test_code_standards.py`), and keep the test of "New script added" passing against the new skeleton. Delete the library functions the check finds dead.
 
-  Verify: both tests pass, and the check passes on the tree.
+  Verify: the three tests pass, and the check passes on the tree.
 - [ ] 5.5 Make `toolchain-key.sh` hash the modules that `toolchain-build.sh` and `toolchain-pack.sh` load (D8), and update the toolchain key's entry in `tests/verified-elsewhere.toml`.
 
   Verify: in the VM, the key changes when `seeds.sh` changes, and not when `warnings.sh` does.
-- [ ] 5.6 Describe the shell modules in `docs/conventions.md`: the modules and their domains, `use`, the tree as an argument, and where an awk program goes.
+- [ ] 5.6 Describe the shell modules in `docs/conventions.md`: the modules and their domains, `use`, the tree as an argument, where an awk program goes, and D9's order in a module.
 
   Verify: the document lists every module of `scripts/lib/`.
 
 ## 6. Integration
+
+- [ ] 6.0 Leave nothing behind (D9): `git grep` finds no `lib.sh`, `require_workdir`, global `TREE`, or `json.loads`/`tomllib` read of a data file of D7 in the repository, outside the archived changes.
+
+  Verify: the grep finds nothing, and the dead-code checks of tasks 3.4 and 5.4 pass.
 
 - [ ] 6.1 Build both boards (`just build r4s dev`, `just build r6s dev`), and compose the ci profile's seeds. Compare them with the baseline of task 1.1.
 
