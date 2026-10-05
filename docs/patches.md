@@ -277,7 +277,19 @@ Why it matters here: in the `ubsan` profile, libmd, libmnl and musl-fts failed t
 
 What the patch does: libtool passes every option that starts with `-fsanitize` through, as it already does those that start with `-fno-sanitize`. Upstream, the patch belongs to libtool's `build-aux/ltmain.in`.
 
-Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+Verification log: 2026-10-06, on the VM: libmd, libmnl and musl-fts, regenerated with it (patch 0021), linked under LTO with `-fsanitize-trap` and no call into a runtime.
+
+### build: libtool regenerated in a build that sanitizes
+
+Patch: `patches/openwrt/0021-build-regenerate-libtool-in-a-build-that-sanitizes.patch`, for openwrt/openwrt.
+
+Problem: most packages built with autotools carry their own copy of libtool, which passes `-fsanitize=` to the link but drops the sanitizers' other options, `-fsanitize-trap` among them. Patch 0019 fixes libtool itself, but reaches only the packages that OpenWrt regenerates with its own libtool, those that ask for the libtool fixup.
+
+Why it matters here: in the `ubsan` profile, libmd, libmnl and musl-fts, among others, failed to link for want of libubsan.
+
+What the patch does: in a build whose `TARGET_CFLAGS` sanitize, every package that carries libtool is regenerated with the build's own before it is configured, as the libtool fixup does, unless the package declares `no-autoreconf`. A build without sanitizers is unchanged.
+
+Verification log: 2026-10-06, on the VM, in the R4S's `ubsan` tree: libmd, libmnl and musl-fts, regenerated with libtool 2.5.4 and patch 0019, linked under LTO with no call into a runtime and 1,290, 92 and 222 trap instructions.
 
 ### gcc: each LTRANS job's output whole
 

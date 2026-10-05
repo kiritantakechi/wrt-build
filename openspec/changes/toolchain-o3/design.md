@@ -140,6 +140,7 @@ config/profiles
 **Traps under LTO.** GCC expands UBSan's checks where it generates the code, which under LTO is the link, and lto-wrapper passes no sanitizer option on from the objects: `-fsanitize-trap` counts only on the link line. Many packages link with `LDFLAGS` alone, and libtool dropped `-fsanitize-trap` from every link line, so the first ubsan builds' libraries and programs called `__ubsan_handle_*`, and libtool's links failed for want of `-lubsan`. This was found during the implementation. Turning LTO off would not have been general: it did not reach packages that ask for LTO themselves (mtd, libnftnl) or have their build system do it (glib2), and it would have made the profile differ from the shipped builds. The fixes go where the causes are:
 - OpenWrt links every package with the sanitizer options it compiles with (`patches/openwrt/0017`), which covers make's built-in rule, meson and cmake;
 - libtool passes every `-fsanitize` option on, `-fsanitize-trap` included (`patches/openwrt/0019`, a patch to libtool);
+- in a build that sanitizes, every package that carries its own copy of libtool, as most autotools packages do, is regenerated with the build's (`patches/openwrt/0021`), chosen with the maintainer over a sanitizer runtime for musl and over changes to GCC's driver;
 - after the build, `build.sh` fails if any file of the root filesystem has an undefined `__ubsan_*` symbol, so a check that became a call cannot pass unseen.
 
 **Separate directories.**
