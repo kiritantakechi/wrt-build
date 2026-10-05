@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 5 Oct 2026 08:03:57 +0800
+Subject: [PATCH] download: depend on a package's source only being there
+
+A package's prepared stamp depends on every file the package downloads,
+so make prepares the package again whenever a download is newer than
+the stamp, although its content is the one the package's hash names. A
+download is newer whenever it lands after the stamp: in a fresh
+download directory, or in a tree whose build directories come from a
+cache, where make download runs after the stamps are restored. Every
+package with restored stamps is then prepared and built again; for the
+host builds of Go and Rust that is most of an hour.
+
+The stamp's name already covers the package's own files, its Makefile
+among them, which names each download and its hash: another source
+always gets another stamp. So a download only has to be there when the
+package is prepared. Make it an order-only prerequisite.
+
+Covered by CI's firmware jobs, which restore the host builds of Go and
+Rust before make download fetches their sources, into an empty download
+directory when the download cache misses (build/ci "Toolchain cache
+hit").
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ include/download.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/download.mk b/include/download.mk
+index 0ea08d3..75bc386 100644
+--- a/include/download.mk
++++ b/include/download.mk
+@@ -357,7 +357,7 @@ define Download
+   )
+ 
+   $(foreach dep,$(DOWNLOAD_RDEP),
+-    $(dep): $(DL_DIR)/$(FILE)
++    $(dep): | $(DL_DIR)/$(FILE)
+   )
+   download: $(DL_DIR)/$(FILE)
+ 

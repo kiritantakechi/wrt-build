@@ -165,6 +165,18 @@ What the patch does: once the image pass has run, it refreshes the modules pass'
 
 Verification log: 2026-10-04, on the VM: the first build with the patch ran the modules pass once more; every later build with nothing changed skipped kbuild in both passes, in 2.5 s.
 
+### download: a package's source only has to be there
+
+Patch: `patches/openwrt/0013-download-depend-on-a-package-s-source-only-being-the.patch`, for openwrt/openwrt.
+
+Problem: a package's prepared stamp depends on every file the package downloads (`DOWNLOAD_RDEP` in `include/download.mk`), by modification time. A download that lands after the stamp, in a fresh download directory or in a tree whose build directories a cache restored, makes make prepare the package again, although the file is the one the package's hash names.
+
+Why it matters here: CI's firmware jobs restore the toolchain, whose stamps include the host builds of Go and Rust, before `make download` runs. On 2026-10-04 main's first run after its download cache was gone (run 37220393208) downloaded Go's and Rust's sources after the restore, built both host toolchains again in each board's job, and failed the check that a board's build compiles no part of the toolchain.
+
+What the patch does: the download becomes an order-only prerequisite of the stamps. The stamp's name covers the package's files, its Makefile among them, which names each download and its hash, so another source still gets another stamp; and a missing download is still fetched before the package is prepared.
+
+Verification log: 2026-10-05, on the VM. With Go's source made newer than its host build's prepared stamp, Go's host build was prepared and built again without the patch (382 s), and was up to date with it (8 s).
+
 ### luci-base: the host tools built in the host build directory
 
 Patch: `patches/luci/0001-luci-base-build-po2lmo-and-jsmin-in-the-host-build-d.patch`, for openwrt/luci.

@@ -110,6 +110,9 @@
 - [ ] 6.1 With everything in place, run the full system tests on both boards (dev profile).
 
   Verify: all tests pass on both boards, and `spec-coverage --change toolchain-o3` reports no uncovered scenario.
-- [ ] 6.2 Get a green CI run for both boards.
+- [x] 6.2 Keep a restored toolchain up to date when the download cache misses: main's run 37220393208 rebuilt Go's and Rust's host toolchains in both firmware jobs, as `make download` fetched their sources after the toolchain's stamps were restored. Patch 0013 makes a download an order-only prerequisite of the prepared stamps, with its write-up in `docs/patches.md`, and the run is recorded in `docs/ci.md`.
+
+  Verify: on the VM, with Go's source made newer than its host build's prepared stamp, Go's host build is prepared again without the patch and is up to date with it.
+- [ ] 6.3 Get a green CI run for both boards.
 
   Verify: record the run and its per-board timings in `docs/ci.md`: the cold toolchain and compiler cache of the first run, and the cache hits of the second.
