@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 6 Oct 2026 04:48:53 +0800
+Subject: [PATCH] build: pass the sanitizer options through the packages'
+ libtool
+
+A link that libtool runs takes only the options libtool passes on, and
+the copies of libtool that packages carry pass -fsanitize= but drop the
+sanitizers' other options, -fsanitize-trap among them. With
+CONFIG_TARGET_OPTIMIZATION holding -fsanitize=undefined
+-fsanitize-trap=undefined, a library that such a libtool linked asked
+for libubsan, which the musl toolchain does not have, and failed to
+link: libmd, libmnl and musl-fts among others.
+
+In a build whose TARGET_CFLAGS sanitize, add -fsanitize* to the options
+that every ltmain.sh in a package passes through, before the package is
+configured, as the build's own libtool does (tools/libtool). The line
+it extends is the same in every libtool from 2.2 to 2.5; a copy without
+it stops the build. Regenerating the packages' build systems with the
+build's libtool instead broke libffi's build directories. A build
+without sanitizers is unchanged.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ include/autotools.mk | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/include/autotools.mk b/include/autotools.mk
+index 7fc6f37..75ce68b 100644
+--- a/include/autotools.mk
++++ b/include/autotools.mk
+@@ -132,6 +132,25 @@ ifneq ($(filter autoreconf,$(PKG_FIXUP)),)
+   endif
+ endif
+ 
++# A link that libtool runs takes only the options libtool passes on, and the
++# copies of libtool that packages carry pass -fsanitize= but drop the other
++# sanitizer options, -fsanitize-trap among them. In a build that sanitizes,
++# every copy passes them all, as the build's own libtool does (tools/libtool).
++define libtool_sanitize_target
++	(cd $(PKG_BUILD_DIR); \
++		for lt in $$$$(find . -name ltmain.sh); do \
++			grep -q -e '-fsanitize\*|' $$$$lt || \
++				$(SED) 's/^\([[:space:]]*\)-64|-mips\[0-9\]|/\1-fsanitize*|-64|-mips[0-9]|/' $$$$lt; \
++			grep -q -e '-fsanitize\*|' $$$$lt || { \
++				echo "autotools.mk: cannot pass the sanitizer options through $$$$lt"; exit 1; }; \
++		done; \
++	);
++endef
++
++ifneq ($(filter -fsanitize%,$(TARGET_CFLAGS)),)
++  Hooks/Configure/Pre += libtool_sanitize_target
++endif
++
+ 
+ HOST_FIXUP?=$(PKG_FIXUP)
+ HOST_LIBTOOL_PATHS?=$(if $(PKG_LIBTOOL_PATHS),$(PKG_LIBTOOL_PATHS),.)

@@ -277,19 +277,19 @@ Why it matters here: in the `ubsan` profile, libmd, libmnl and musl-fts failed t
 
 What the patch does: libtool passes every option that starts with `-fsanitize` through, as it already does those that start with `-fno-sanitize`. Upstream, the patch belongs to libtool's `build-aux/ltmain.in`.
 
-Verification log: 2026-10-06, on the VM: libmd, libmnl and musl-fts, regenerated with it (patch 0021), linked under LTO with `-fsanitize-trap` and no call into a runtime.
+Verification log: 2026-10-06, on the VM: libmd, libmnl and musl-fts linked under LTO with `-fsanitize-trap` and no call into a runtime once their libtool passed every sanitizer option (patch 0021 gives their own copies this patch's change).
 
-### build: libtool regenerated in a build that sanitizes
+### build: the sanitizer options through the packages' libtool
 
-Patch: `patches/openwrt/0021-build-regenerate-libtool-in-a-build-that-sanitizes.patch`, for openwrt/openwrt.
+Patch: `patches/openwrt/0021-build-pass-the-sanitizer-options-through-the-package.patch`, for openwrt/openwrt.
 
 Problem: most packages built with autotools carry their own copy of libtool, which passes `-fsanitize=` to the link but drops the sanitizers' other options, `-fsanitize-trap` among them. Patch 0019 fixes libtool itself, but reaches only the packages that OpenWrt regenerates with its own libtool, those that ask for the libtool fixup.
 
 Why it matters here: in the `ubsan` profile, libmd, libmnl and musl-fts, among others, failed to link for want of libubsan.
 
-What the patch does: in a build whose `TARGET_CFLAGS` sanitize, every package that carries libtool is regenerated with the build's own before it is configured, as the libtool fixup does, unless the package declares `no-autoreconf`. A build without sanitizers is unchanged.
+What the patch does: in a build whose `TARGET_CFLAGS` sanitize, every `ltmain.sh` a package carries gets `-fsanitize*` among the options it passes through, before the package is configured, as the build's own libtool has it. The line it extends is the same in every libtool from 2.2 to 2.5, and a copy without it stops the build. Regenerating the packages' build systems with the build's libtool, tried first, broke libffi's build directories. A build without sanitizers is unchanged.
 
-Verification log: 2026-10-06, on the VM, in the R4S's `ubsan` tree: libmd, libmnl and musl-fts, regenerated with libtool 2.5.4 and patch 0019, linked under LTO with no call into a runtime and 1,290, 92 and 222 trap instructions.
+Verification log: 2026-10-06, on the VM, in the R4S's `ubsan` tree: the 27 copies of libtool in the R4S's packages, 2.2.7a to 2.5.4, all have the line. libffi (libtool 2.4.7), libmd, libmnl and musl-fts linked under LTO with no call into a runtime and 4,909, 1,290, 92 and 222 trap instructions.
 
 ### gcc: each LTRANS job's output whole
 
