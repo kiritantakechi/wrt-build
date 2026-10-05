@@ -197,6 +197,24 @@ Why it matters here: `podman update` runs `crun update` for the containers of wr
 
 What the patch does: the update fails with an error, after freeing the generator, as the other callers do.
 
+### bash: six places of undefined behavior
+
+Patch: `patches/packages/0004-bash-fix-the-undefined-behavior-of-six-places.patch` (adds the package patches `100` to `105`), for bash (bug-bash@gnu.org, git.savannah.gnu.org/git/bash.git).
+
+Problem: the review of bash 5.3's warnings at `-O3` (docs/undefined-behavior.md) found five faults behind them and one next to them, none fixed in bash's devel branch (1c20880e, 2026-09-23):
+- `make_command` clears every command's flags through a `SIMPLE_COM` pointer, larger than the group or subshell structure it points to (`-Warray-bounds`).
+- `parse_comsub` restores `extglob` from a local it never set, when parsing a command substitution changes the compatibility level, as a `PS2` that assigns `BASH_COMPAT` does.
+- `array_value_internal` goes on with an array that expanding its subscript (`${ unset A; ...; }`) unset, freed or gave another type: it reads freed memory, and at `-O3` the shell crashed, or an index it never computed.
+- `split_at_delims` leaves the word counts unset for a string of whitespace delimiters, and programmable completion sets `COMP_CWORD` from an indeterminate value.
+- `do_redirection_internal` restores a word's flags from a variable never set, when expanding the word turns posix mode on (`${POSIXLY_CORRECT:=...}`).
+- `pushd --9223372036854775808` overflows a subtraction.
+
+Why it matters here: bash is in every image, and `-O3` is free to exploit any of them.
+
+What the patches do: one patch per fault, each the smallest change that removes it. `array_value_internal` looks the array up again after each expansion of its subscript and expands to nothing when its type changed; `pushd` checks the offset before it subtracts. The others store what they left unset, or keep what they read twice.
+
+Verification log: 2026-10-05, on the VM, with the R6S's `-O3` build run through the image's musl loader. The array whose subscript unsets it and makes it indexed expands to nothing, in a function and at global scope, where the unpatched shell printed another element or crashed; arrays, groups, subshells, functions, posix mode through a redirection word, and `pushd` with `--9223372036854775808` and `--1` behave as before or fail with bash's own errors. The interactive cases (`PS2`, completion) were not run.
+
 ### luci-base: the host tools built in the host build directory
 
 Patch: `patches/luci/0001-luci-base-build-po2lmo-and-jsmin-in-the-host-build-d.patch`, for openwrt/luci.

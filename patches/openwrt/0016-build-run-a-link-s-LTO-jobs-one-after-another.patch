@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 5 Oct 2026 10:29:55 +0800
+Subject: [PATCH] build: run a link's LTO jobs one after another
+
+Packages link with -flto=auto. As a package's build does not pass make's
+jobserver on to the compiler, GCC then runs as many LTRANS jobs at once
+as the host has CPUs, beside the other packages make builds at the same
+time, and their diagnostics interleave line by line in the package's
+log: a warning can follow another job's chain of inlined calls and be
+placed in the wrong function, or lose its function, so the warnings of
+one build differ from the next.
+
+Run each link's LTRANS jobs one after another (-flto=1). The partitions
+stay the same, as their number follows GCC's parameters, not the number
+of jobs, and the build stays parallel through make, which builds several
+packages at once.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Inappropriate [wrt-build reads GCC's warnings from each package's build log]
+---
+ include/package.mk | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/include/package.mk b/include/package.mk
+index 823a055..507d2aa 100644
+--- a/include/package.mk
++++ b/include/package.mk
+@@ -55,9 +55,9 @@ ifeq ($(call pkg_build_flag,gc-sections,$(if $(CONFIG_USE_GC_SECTIONS),1,0)),1)
+   TARGET_LDFLAGS+= -Wl,--gc-sections
+ endif
+ ifeq ($(call pkg_build_flag,lto,$(if $(CONFIG_USE_LTO),1,0)),1)
+-  TARGET_CFLAGS+= -flto=auto -fno-fat-lto-objects
+-  TARGET_CXXFLAGS+= -flto=auto -fno-fat-lto-objects
+-  TARGET_LDFLAGS+= -flto=auto -fuse-linker-plugin
++  TARGET_CFLAGS+= -flto=1 -fno-fat-lto-objects
++  TARGET_CXXFLAGS+= -flto=1 -fno-fat-lto-objects
++  TARGET_LDFLAGS+= -flto=1 -fuse-linker-plugin
+ endif
+ ifdef CONFIG_USE_MOLD
+   ifeq ($(call pkg_build_flag,mold,1),1)

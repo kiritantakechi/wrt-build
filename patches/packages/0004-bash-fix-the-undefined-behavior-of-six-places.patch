@@ -1,0 +1,352 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 5 Oct 2026 09:01:54 +0800
+Subject: [PATCH] bash: fix the undefined behavior of six places
+
+Add package patches for six faults of bash 5.3, none fixed in bash's
+devel branch (1c20880e, 2026-09-23):
+
+- 100: make_command clears the flags of every command through a
+  SIMPLE_COM pointer, larger than the group or subshell structure it
+  points to.
+- 101: parse_comsub restores extglob from a local it never set, when
+  parsing a command substitution changes the compatibility level.
+- 102: array_value_internal goes on with an array that expanding its
+  subscript unset, freed or gave another type: freed memory, or an index
+  it never computed.
+- 103: split_at_delims leaves the word counts unset for a string of
+  whitespace delimiters, and COMP_CWORD gets an indeterminate value.
+- 104: do_redirection_internal restores a word's flags from a variable
+  never set, when expanding the word turns posix mode on.
+- 105: pushd -N overflows a subtraction for N = INTMAX_MIN.
+
+Found reviewing the -O3 build's warnings of bash (docs/undefined-behavior.md),
+100 to 104 among them and 105 next to them.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ utils/bash/Makefile                           |  2 +-
+ ...command-s-flags-without-a-SIMPLE_COM.patch | 27 +++++++
+ ...tore-extglob-only-when-it-was-forced.patch | 70 ++++++++++++++++++
+ ...n-array-up-again-after-its-subscript.patch | 74 +++++++++++++++++++
+ ...t-no-words-in-a-string-of-delimiters.patch | 23 ++++++
+ ...l-restore-a-word-s-flags-in-any-mode.patch | 35 +++++++++
+ ...heck-an-offset-before-subtracting-it.patch | 31 ++++++++
+ 7 files changed, 261 insertions(+), 1 deletion(-)
+ create mode 100644 utils/bash/patches/100-make_command-clear-a-command-s-flags-without-a-SIMPLE_COM.patch
+ create mode 100644 utils/bash/patches/101-parse_comsub-restore-extglob-only-when-it-was-forced.patch
+ create mode 100644 utils/bash/patches/102-array_value_internal-look-an-array-up-again-after-its-subscript.patch
+ create mode 100644 utils/bash/patches/103-split_at_delims-count-no-words-in-a-string-of-delimiters.patch
+ create mode 100644 utils/bash/patches/104-do_redirection_internal-restore-a-word-s-flags-in-any-mode.patch
+ create mode 100644 utils/bash/patches/105-pushd-check-an-offset-before-subtracting-it.patch
+
+diff --git a/utils/bash/Makefile b/utils/bash/Makefile
+index 43c8d9c..8c1ff2f 100644
+--- a/utils/bash/Makefile
++++ b/utils/bash/Makefile
+@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=bash
+ PKG_VERSION:=5.3
+-PKG_RELEASE:=5
++PKG_RELEASE:=6
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+ PKG_SOURCE_URL:=@GNU/bash
+diff --git a/utils/bash/patches/100-make_command-clear-a-command-s-flags-without-a-SIMPLE_COM.patch b/utils/bash/patches/100-make_command-clear-a-command-s-flags-without-a-SIMPLE_COM.patch
+new file mode 100644
+index 0000000..8a6baee
+--- /dev/null
++++ b/utils/bash/patches/100-make_command-clear-a-command-s-flags-without-a-SIMPLE_COM.patch
+@@ -0,0 +1,27 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] make_command: clear a command's flags without a SIMPLE_COM
++
++make_command clears the new command's flags through temp->value.Simple,
++a SIMPLE_COM pointer, whatever structure the command holds. For a group
++or a subshell, that structure is a 16-byte GROUP_COM or SUBSHELL_COM, and
++the store accesses a 24-byte SIMPLE_COM that is not there, which C leaves
++undefined (GCC 15 at -O3: -Warray-bounds). Every command structure begins
++with an int, its flags or a placeholder: clear that int through an int.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/make_cmd.c
+++++ b/make_cmd.c
++@@ -168,7 +168,11 @@
++   temp = (COMMAND *)xmalloc (sizeof (COMMAND));
++   temp->type = type;
++   temp->value.Simple = pointer;
++-  temp->value.Simple->flags = temp->flags = 0;
+++  /* Every command structure begins with an int (flags, or a placeholder
+++     named `ignore'), so clear that member without accessing a SIMPLE_COM
+++     that is not there. */
+++  *(int *)pointer = 0;
+++  temp->flags = 0;
++   temp->redirects = (REDIRECT *)NULL;
++   return (temp);
++ }
+diff --git a/utils/bash/patches/101-parse_comsub-restore-extglob-only-when-it-was-forced.patch b/utils/bash/patches/101-parse_comsub-restore-extglob-only-when-it-was-forced.patch
+new file mode 100644
+index 0000000..29b239e
+--- /dev/null
++++ b/utils/bash/patches/101-parse_comsub-restore-extglob-only-when-it-was-forced.patch
+@@ -0,0 +1,70 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] parse_comsub: restore extglob only when it was forced
++
++parse_comsub forces extended_glob on, and saves its value, when the
++compatibility level is 51 or below, and restores it when the level, read
++again after parsing, is 51 or below. Parsing the command substitution can
++change the level, through PS2 or a key binding: the restore then reads a
++local never set, or leaves extglob forced on. Remember whether it was
++forced. y.tab.c follows parse.y, as in bash's own patches.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/parse.y
+++++ b/parse.y
++@@ -4451,7 +4451,7 @@
++ parse_comsub (int qc, int open, int close, size_t *lenp, int flags)
++ {
++   int peekc, r;
++-  int dolbrace_spec, local_extglob, was_extpat;
+++  int dolbrace_spec, local_extglob, was_extpat, forced_extglob;
++   int start_lineno, save_lineno;
++   int was_word, was_newline, was_semi, was_amp;
++   char *ret, *tcmd;
++@@ -4535,7 +4535,7 @@
++ #if defined (EXTENDED_GLOB)
++   /* If (parser_state & PST_EXTPAT), we're parsing an extended pattern for a
++      conditional command and have already set extended_glob appropriately. */
++-  if (shell_compatibility_level <= 51 && was_extpat == 0)
+++  if ((forced_extglob = shell_compatibility_level <= 51 && was_extpat == 0))
++     {
++       local_extglob = extended_glob;
++       extended_glob = 1;
++@@ -4567,7 +4567,7 @@
++     }
++ 
++ #if defined (EXTENDED_GLOB)
++-  if (shell_compatibility_level <= 51 && was_extpat == 0)
+++  if (forced_extglob)
++     extended_glob = local_extglob;
++ #endif
++ 
++--- a/y.tab.c
+++++ b/y.tab.c
++@@ -6810,7 +6810,7 @@
++ parse_comsub (int qc, int open, int close, size_t *lenp, int flags)
++ {
++   int peekc, r;
++-  int dolbrace_spec, local_extglob, was_extpat;
+++  int dolbrace_spec, local_extglob, was_extpat, forced_extglob;
++   int start_lineno, save_lineno;
++   int was_word, was_newline, was_semi, was_amp;
++   char *ret, *tcmd;
++@@ -6894,7 +6894,7 @@
++ #if defined (EXTENDED_GLOB)
++   /* If (parser_state & PST_EXTPAT), we're parsing an extended pattern for a
++      conditional command and have already set extended_glob appropriately. */
++-  if (shell_compatibility_level <= 51 && was_extpat == 0)
+++  if ((forced_extglob = shell_compatibility_level <= 51 && was_extpat == 0))
++     {
++       local_extglob = extended_glob;
++       extended_glob = 1;
++@@ -6926,7 +6926,7 @@
++     }
++ 
++ #if defined (EXTENDED_GLOB)
++-  if (shell_compatibility_level <= 51 && was_extpat == 0)
+++  if (forced_extglob)
++     extended_glob = local_extglob;
++ #endif
++ 
+diff --git a/utils/bash/patches/102-array_value_internal-look-an-array-up-again-after-its-subscript.patch b/utils/bash/patches/102-array_value_internal-look-an-array-up-again-after-its-subscript.patch
+new file mode 100644
+index 0000000..0e5743c
+--- /dev/null
++++ b/utils/bash/patches/102-array_value_internal-look-an-array-up-again-after-its-subscript.patch
+@@ -0,0 +1,74 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] array_value_internal: look an array up again after its subscript
++
++Expanding an array's subscript can run commands, such as ${ ...; }, that
++unset the array, free it, or give it another type. array_value_internal
++then went on with the variable it looked up before: it read freed memory
++when the variable was gone, and an index it never computed when an
++associative array had become an indexed one. Look the variable up again
++after each expansion, and expand to nothing when its type changed.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/arrayfunc.c
+++++ b/arrayfunc.c
++@@ -1569,11 +1569,15 @@
++     {
++       if (estatep)
++ 	estatep->subtype = 0;
++-      if (var == 0 || array_p (var) || assoc_p (var) == 0)
+++      if (isassoc == 0)
++ 	{
++ 	  if ((flags & AV_USEIND) == 0 || estatep == 0)
++ 	    {
++ 	      ind = array_expand_index (var, t, len, flags);
+++	      /* Expanding the subscript can run commands (${ ...; }) that unset
+++		 VAR, free it, or give it another type: look it up again. */
+++	      if (var)
+++		var = array_variable_part (s, flags, &t, &len);
++ 	      if (ind < 0)
++ 		{
++ 		  /* negative subscripts to indexed arrays count back from end */
++@@ -1590,7 +1594,7 @@
++ 	  if (estatep && var)
++ 	    estatep->type = array_p (var) ? ARRAY_INDEXED : ARRAY_SCALAR;
++ 	}
++-      else if (assoc_p (var))
+++      else
++ 	{
++ 	  t[len - 1] = '\0';
++ 	  if (estatep)
++@@ -1602,6 +1606,8 @@
++ 	  else
++ 	    akey = savestring (t);
++ 	  t[len - 1] = ']';
+++	  /* As for an index: the expansion can unset VAR or free it. */
+++	  var = array_variable_part (s, flags, &t, &len);
++ 	  if (akey == 0 || *akey == 0)
++ 	    {
++ 	      FREE (akey);
++@@ -1609,19 +1615,21 @@
++ 	    }
++ 	}
++ 
+++      /* The expansion looked VAR up again: use IND only for a variable that is
+++	 still not associative, and AKEY only for one that still is. */
++       if (var == 0 || value_cell (var) == 0)
++ 	{
++ 	  FREE (akey);
++ 	  return ((char *)NULL);
++ 	}
++-      else if (invisible_p (var))
+++      else if (invisible_p (var) || (assoc_p (var) != 0) != isassoc)
++ 	{
++ 	  FREE (akey);
++ 	  return ((char *)NULL);
++ 	}
++-      if (array_p (var) == 0 && assoc_p (var) == 0)
+++      if (isassoc == 0 && array_p (var) == 0)
++ 	retval = (ind == 0) ? value_cell (var) : (char *)NULL;
++-      else if (assoc_p (var))
+++      else if (isassoc)
++         {
++ 	  retval = assoc_reference (assoc_cell (var), akey);
++ 	  if (estatep && estatep->key && (flags & AV_USEIND))
+diff --git a/utils/bash/patches/103-split_at_delims-count-no-words-in-a-string-of-delimiters.patch b/utils/bash/patches/103-split_at_delims-count-no-words-in-a-string-of-delimiters.patch
+new file mode 100644
+index 0000000..2ec8651
+--- /dev/null
++++ b/utils/bash/patches/103-split_at_delims-count-no-words-in-a-string-of-delimiters.patch
+@@ -0,0 +1,23 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] split_at_delims: count no words in a string of delimiters
++
++split_at_delims returns early, without storing the number of words and
++the current word, for a string of nothing but whitespace delimiters.
++gen_compspec_completions then sets COMP_CWORD from an indeterminate
++value. Store zeros, as for an empty string.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/subst.c
+++++ b/subst.c
++@@ -2678,6 +2678,10 @@
++     ;
++   if (string[i] == '\0')
++     {
+++      if (nwp)
+++	*nwp = 0;
+++      if (cwp)
+++	*cwp = 0;
++       FREE (d2);
++       return (ret);
++     }
+diff --git a/utils/bash/patches/104-do_redirection_internal-restore-a-word-s-flags-in-any-mode.patch b/utils/bash/patches/104-do_redirection_internal-restore-a-word-s-flags-in-any-mode.patch
+new file mode 100644
+index 0000000..4e405ba
+--- /dev/null
++++ b/utils/bash/patches/104-do_redirection_internal-restore-a-word-s-flags-in-any-mode.patch
+@@ -0,0 +1,35 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] do_redirection_internal: restore a word's flags in any mode
++
++do_redirection_internal saves a redirection word's flags, and restores
++them, only in posix mode in a non-interactive shell, reading
++posixly_correct before and after it expands the word. The expansion can
++turn posix mode on (${POSIXLY_CORRECT:=...}): the flags were then
++restored from a variable never set. Save and restore them in any mode, as
++redirection_error does.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/redir.c
+++++ b/redir.c
++@@ -923,17 +923,14 @@
++     case r_append_err_and_out:	/* command &>> filename */
++     case r_input_output:
++     case r_output_force:
+++      oflags = redirectee->flags;
++       if (posixly_correct && interactive_shell == 0)
++-	{
++-	  oflags = redirectee->flags;
++-	  redirectee->flags |= W_NOGLOB;
++-	}
+++	redirectee->flags |= W_NOGLOB;
++       if ((redirect->rflags & RX_EXPANDED) == 0)
++ 	redirectee_word = redirection_expand (redirectee);
++       else
++ 	redirectee_word = savestring (redirectee->word);
++-      if (posixly_correct && interactive_shell == 0)
++-	redirectee->flags = oflags;
+++      redirectee->flags = oflags;
++ 
++       if (redirectee_word == 0)
++ 	return (AMBIGUOUS_REDIRECT);
+diff --git a/utils/bash/patches/105-pushd-check-an-offset-before-subtracting-it.patch b/utils/bash/patches/105-pushd-check-an-offset-before-subtracting-it.patch
+new file mode 100644
+index 0000000..e0e907e
+--- /dev/null
++++ b/utils/bash/patches/105-pushd-check-an-offset-before-subtracting-it.patch
+@@ -0,0 +1,31 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] pushd: check an offset before subtracting it
++
++pushd -N counts N places from the right before it checks N, so
++pushd -9223372036854775808 overflows the subtraction. Check N first: -N
++is valid for the same N as +N.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/builtins/pushd.def
+++++ b/builtins/pushd.def
++@@ -234,14 +234,16 @@
++ 	      return (EX_USAGE);
++ 	    }
++ 
++-	  if (direction == '-')
++-	    num = directory_list_offset - num;
++-
+++	  /* Checked before the subtraction, which could overflow; -N is valid
+++	     for the same N as +N is. */
++ 	  if (num > directory_list_offset || num < 0)
++ 	    {
++ 	      pushd_error (directory_list_offset, list->word->word);
++ 	      return (EXECUTION_FAILURE);
++ 	    }
+++
+++	  if (direction == '-')
+++	    num = directory_list_offset - num;
++ 	  flags |= ROTATE;
++ 	}
++       else if (*list->word->word == '-')
