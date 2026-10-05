@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 6 Oct 2026 02:40:53 +0800
+Subject: [PATCH 5/5] toolchain: gcc: write each LTRANS job's output whole
+
+When lto-wrapper runs a link's LTRANS jobs in parallel through make, the
+jobs write their diagnostics to the same stream as they go, in pieces,
+and those of jobs running at once interleave: a warning then follows
+another job's chain of inlined calls, and a reader of the build log
+places it in the wrong function or in none. A package built without the
+jobserver has lto-wrapper start such a make with its own number of jobs
+(-flto=auto), whose output no make above it holds back.
+
+Add a patch to GCC that runs that make with --output-sync=target, which
+writes each job's output once the job ends. The patch is meant for GCC
+upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ ...write-each-LTRANS-job-s-output-whole.patch | 34 +++++++++++++++++++
+ 1 file changed, 34 insertions(+)
+ create mode 100644 toolchain/gcc/patches-15.x/990-lto-wrapper-write-each-LTRANS-job-s-output-whole.patch
+
+diff --git a/toolchain/gcc/patches-15.x/990-lto-wrapper-write-each-LTRANS-job-s-output-whole.patch b/toolchain/gcc/patches-15.x/990-lto-wrapper-write-each-LTRANS-job-s-output-whole.patch
+new file mode 100644
+index 0000000..dcc9727
+--- /dev/null
++++ b/toolchain/gcc/patches-15.x/990-lto-wrapper-write-each-LTRANS-job-s-output-whole.patch
+@@ -0,0 +1,34 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] lto-wrapper: write each LTRANS job's output whole
++
++When lto-wrapper runs the LTRANS jobs in parallel through make, every
++job writes its diagnostics to the same stream as it goes. A diagnostic
++is written in pieces, its "In function" context and its chain of
++inlined calls apart from the message itself, so the pieces of jobs
++running at once interleave: a warning then follows another job's
++context, and a reader of the build log places it in the wrong function
++or in none.
++
++Run make with --output-sync=target, which writes each job's output once
++the job ends. Under a jobserver the jobs still run in parallel; only
++their output is held back. lto-wrapper already runs make for parallel
++LTRANS, and GNU make has had the option since 4.0.
++
++gcc/ChangeLog:
++
++	* lto-wrapper.cc (run_gcc): Run make with --output-sync=target.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/gcc/lto-wrapper.cc
+++++ b/gcc/lto-wrapper.cc
++@@ -2194,6 +2194,9 @@
++ 			auto_parallel ? nthreads_var : parallel);
++ 	      obstack_ptr_grow (&argv_obstack, jobs);
++ 	    }
+++	  /* Write each LTRANS job's output whole once the job ends, so that
+++	     the diagnostics of jobs running at once do not interleave.  */
+++	  obstack_ptr_grow (&argv_obstack, "--output-sync=target");
++ 	  obstack_ptr_grow (&argv_obstack, "all");
++ 	  obstack_ptr_grow (&argv_obstack, NULL);
++ 	  new_argv = XOBFINISH (&argv_obstack, const char **);

@@ -105,6 +105,13 @@
 
   Verify: `just patch` applies the series. The tests that cover each patch's behavior pass on both boards (named in its message), and QEMU builds with its patch.
 
+- [ ] 5.4 Fix each fault the `-O3` and UBSan work found where it lies, without trading generality away (`docs/patches.md`, "What a patch fixes"), and drop the workarounds that stood in for those fixes:
+  - mold claims LTO objects in the command line order (0018), instead of linking LTO packages on one thread;
+  - libtool passes every sanitizer option to the link (0019), and packages link with the sanitizer options they compile with (0017), instead of building trap builds without LTO and answering `-lubsan` with an empty archive;
+  - lto-wrapper writes each LTRANS job's output whole (0020), and a parallel package's make each job's (0016), instead of running LTRANS jobs one after another (`-flto=1`).
+
+  Verify: links of the same LTO objects with mold give the same output, with its threads; the `ubsan` builds keep LTO, and no file of their root filesystems calls into a runtime; and every build of a board reports the same warnings.
+
 ## 6. Integration
 
 - [x] 6.1 With everything in place, run the full system tests on both boards (dev profile).

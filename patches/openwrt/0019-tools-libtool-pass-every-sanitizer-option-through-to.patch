@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 6 Oct 2026 02:40:53 +0800
+Subject: [PATCH 4/5] tools: libtool: pass every sanitizer option through to
+ the link
+
+libtool passes -fsanitize=* to the link but drops the sanitizers' other
+options, -fsanitize-trap=* among them, which decide whether the link
+adds a runtime and, under LTO, what the checks become. A library that
+libtool links, built with -fsanitize=undefined
+-fsanitize-trap=undefined, then failed to link for want of libubsan,
+which the musl toolchain does not have, or linked calls into it.
+
+Add a patch to libtool that passes every option starting with
+-fsanitize through, as it does those starting with -fno-sanitize. The
+patch is meant for libtool upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ ...sanitizer-option-through-to-the-link.patch | 40 +++++++++++++++++++
+ 1 file changed, 40 insertions(+)
+ create mode 100644 tools/libtool/patches/150-pass-every-sanitizer-option-through-to-the-link.patch
+
+diff --git a/tools/libtool/patches/150-pass-every-sanitizer-option-through-to-the-link.patch b/tools/libtool/patches/150-pass-every-sanitizer-option-through-to-the-link.patch
+new file mode 100644
+index 0000000..a7c78cc
+--- /dev/null
++++ b/tools/libtool/patches/150-pass-every-sanitizer-option-through-to-the-link.patch
+@@ -0,0 +1,40 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] libtool: pass every sanitizer option through to the link
++
++libtool passes -fsanitize=* to the compiler driver that links, but drops
++the sanitizers' other options, such as -fsanitize-trap=* and
++-fsanitize-recover=*. Those decide what the link does: with
++-fsanitize=undefined alone, GCC links libubsan, while with
++-fsanitize-trap=undefined too it needs no runtime; and under LTO, GCC
++expands the checks at the link, as traps or as calls into the runtime,
++by the options on the link line. A library built with
++-fsanitize=undefined -fsanitize-trap=undefined therefore failed to link
++for want of a libubsan the toolchain does not have, or linked calls into
++it.
++
++Pass every option that starts with -fsanitize through, as
++-fno-sanitize* already is.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/build-aux/ltmain.in
+++++ b/build-aux/ltmain.in
++@@ -5562,7 +5562,8 @@
++       # -stdlib=*            select c++ std lib with clang
++       # -fdiagnostics-color* simply affects output
++       # -frecord-gcc-switches used to verify flags were respected
++-      # -fsanitize=*         Clang/GCC memory and address sanitizer
+++      # -fsanitize*          Clang/GCC sanitizers, and their options that the link
+++      #                      needs too, such as -fsanitize-trap=*
++       # -fno-sanitize*       Clang/GCC memory and address sanitizer
++       # -shared-libsan       Link with shared sanitizer runtimes (Clang)
++       # -static-libsan       Link with static sanitizer runtimes (Clang)
++@@ -5579,7 +5580,7 @@
++       -t[45]*|-txscale*|-p|-pg|--coverage|-fprofile-*|-F*|@*|-tp=*|--sysroot=*| \
++       -O*|-g*|-flto*|-fwhopr*|-fuse-linker-plugin|-fstack-protector*|-no-canonical-prefixes| \
++       -stdlib=*|-rtlib=*|--unwindlib=*| \
++-      -specs=*|-fsanitize=*|-fno-sanitize*|-shared-libsan|-static-libsan| \
+++      -specs=*|-fsanitize*|-fno-sanitize*|-shared-libsan|-static-libsan| \
++       -ffile-prefix-map=*|-fdebug-prefix-map=*|-fmacro-prefix-map=*|-fprofile-prefix-map=*| \
++       -fdiagnostics-color*|-frecord-gcc-switches| \
++       -fuse-ld=*|-static-*|-fcilkplus|-Wa,*|-Werror|-Werror=*)

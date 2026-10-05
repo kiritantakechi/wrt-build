@@ -1,0 +1,141 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 6 Oct 2026 02:40:53 +0800
+Subject: [PATCH 3/5] tools: mold: claim LTO objects in the command line order
+
+mold called the LTO plugin's claim hook for each LTO object as its
+reader threads reached it, so GCC got the objects in an order that
+varied from link to link, and with it the code LTO made: six links of
+jansson's library from the same objects gave six different libraries,
+and the warnings GCC gave while linking came and went. A build with LTO
+and mold (CONFIG_USE_LTO, CONFIG_USE_MOLD) was not reproducible.
+
+Add a patch to mold that claims the LTO objects once all input files
+and linker scripts are read, one at a time and in the command line
+order, as mold already parses linker scripts. The files are still read
+in parallel. The patch is meant for mold upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ ...to-objects-in-the-command-line-order.patch | 111 ++++++++++++++++++
+ 1 file changed, 111 insertions(+)
+ create mode 100644 tools/mold/patches/001-claim-lto-objects-in-the-command-line-order.patch
+
+diff --git a/tools/mold/patches/001-claim-lto-objects-in-the-command-line-order.patch b/tools/mold/patches/001-claim-lto-objects-in-the-command-line-order.patch
+new file mode 100644
+index 0000000..e9621e9
+--- /dev/null
++++ b/tools/mold/patches/001-claim-lto-objects-in-the-command-line-order.patch
+@@ -0,0 +1,111 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] Claim LTO objects in the command line order
++
++mold reads input files in parallel, and the reader threads called the
++LTO plugin's claim_file_hook for each LTO object as they reached it,
++one at a time under a mutex. The plugin hands the objects to the
++compiler in the order it claimed them, and the compiler's output depends
++on that order: six links of the same GCC LTO objects gave six different
++libraries, and GCC warned of an overflow in some of the links only.
++
++Record the LTO objects while reading, and claim them once all input
++files and linker scripts are read, one at a time and in the command line
++order, as linker scripts are parsed. Links of the same objects then give
++the same output, as they do with GNU ld.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/src/lto-unix.cc	2026-10-06 02:26:50
+++++ b/src/lto-unix.cc	2026-10-06 02:27:32
++@@ -607,14 +607,10 @@
++ 
++   load_lto_plugin(ctx);
++ 
++-  // We read input files in parallel, but the plugin interface is not
++-  // ready for concurrent claims: claim_file_hook() returns a file's
++-  // symbol table through the add_symbols() callback into a global
++-  // buffer, and members of the same archive share their parent's file
++-  // descriptor, which we close after each claim. Serialize the whole
++-  // claim sequence.
++-  static std::mutex mu;
++-  std::scoped_lock lock(mu);
+++  // claim_lto_objects() claims one file at a time: claim_file_hook()
+++  // returns a file's symbol table through the add_symbols() callback
+++  // into a global buffer, and members of the same archive share their
+++  // parent's file descriptor, which we close after each claim.
++ 
++   // Create mold's object instance
++   ObjectFile<E> *obj =
++--- a/src/main.cc	2026-10-06 02:26:50
+++++ b/src/main.cc	2026-10-06 02:27:32
++@@ -40,7 +40,18 @@
++   ctx.unsorted_input_files.push_back({rctx.pos, file});
++ }
++ 
+++// An LTO object found in the input files, which the LTO plugin has yet
+++// to claim (see claim_lto_objects()).
+++struct LtoInput {
+++  ReaderContext rctx;
+++  MappedFile *mf;
+++  std::string archive_name;
+++};
+++
++ template <typename E>
+++static tbb::concurrent_vector<LtoInput> lto_inputs;
+++
+++template <typename E>
++ static void new_lto_obj(Context<E> &ctx, ReaderContext &rctx,
++                         MappedFile *mf, std::string archive_name) {
++   static Counter count("parsed_lto_objs");
++@@ -49,15 +60,34 @@
++   if (ctx.arg.ignore_ir_file.count(mf->get_identifier()))
++     return;
++ 
++-  ObjectFile<E> *file = read_lto_object(ctx, mf);
++-  if (!file)
++-    return;
+++  lto_inputs<E>.push_back({rctx, mf, std::move(archive_name)});
+++}
++ 
++-  file->archive_name = archive_name;
++-  file->as_needed =
++-    rctx.in_lib || (!archive_name.empty() && !rctx.whole_archive);
+++// Lets the LTO plugin claim the LTO objects found in the input files,
+++// one at a time and in the command line order. The plugin hands them to
+++// the compiler in the order it claims them, and the compiler's output
+++// depends on that order: claiming them as the reader threads happen to
+++// reach them would make the output differ from one link to the next.
+++template <typename E>
+++static void claim_lto_objects(Context<E> &ctx) {
+++  ranges::sort(lto_inputs<E>, {},
+++               [](const LtoInput &in) -> const std::vector<u32> & {
+++                 return in.rctx.pos;
+++               });
++ 
++-  ctx.unsorted_input_files.push_back({rctx.pos, file});
+++  for (LtoInput &in : lto_inputs<E>) {
+++    ObjectFile<E> *file = read_lto_object(ctx, in.mf);
+++    if (!file)
+++      continue;
+++
+++    file->archive_name = in.archive_name;
+++    file->as_needed =
+++      in.rctx.in_lib || (!in.archive_name.empty() && !in.rctx.whole_archive);
+++
+++    ctx.unsorted_input_files.push_back({in.rctx.pos, file});
+++  }
+++
+++  lto_inputs<E>.clear();
++ }
++ 
++ template <typename E>
++@@ -278,6 +308,9 @@
++   for (ReaderJob &job : scripts)
++     Script(ctx, job.rctx, job.mf).parse_linker_script();
++ 
+++  // Claim the LTO objects that the files and the scripts brought.
+++  claim_lto_objects(ctx);
+++
++   // Sort the files into the command line order and assign priorities.
++   ranges::sort(ctx.unsorted_input_files, {},
++                &std::pair<std::vector<u32>, InputFile<E> *>::first);

@@ -8,6 +8,12 @@ Every patch the project carries or prepares is a file in the repository:
 
 Nothing is submitted upstream, as a pull request, an issue or a mail, without the maintainer's consent. The patches meant for upstream are prepared here; whether and when to submit them is the maintainer's decision.
 
+## What a patch fixes
+
+A patch fixes a fault where it lies, in the component whose code is wrong: a package, a tool such as the linker, or the compiler. It does so in a form that component's upstream could take, and it does not trade generality away to suit this project: it does not turn a feature off, narrow a mode, serialize work or stand in for a missing part, and it keeps working every configuration upstream supports (a fallback for older kernels, the old path for upstream's images). A patch to a tool or to the toolchain is a file in OpenWrt's `tools/<tool>/patches` or `toolchain/<component>/patches-*`, added by a patch of the series. When a general fix replaces a workaround, the workaround goes in the same step.
+
+`Inappropriate` is for what only exists in this project, such as its A/B slot layout and its boards' images.
+
 ## Upstream status
 
 Every patch file states its upstream status in an `Upstream-Status` trailer, in OpenEmbedded's vocabulary, which Buildroot follows as well:
@@ -225,29 +231,65 @@ What the patches do: one patch per fault, each the smallest change that removes 
 
 Verification log: 2026-10-05, on the VM, with the R6S's `-O3` build run through the image's musl loader. The array whose subscript unsets it and makes it indexed expands to nothing, in a function and at global scope, where the unpatched shell printed another element or crashed; arrays, groups, subshells, functions, posix mode through a redirection word, and `pushd` with `--9223372036854775808` and `--1` behave as before or fail with bash's own errors. The interactive cases (`PS2`, completion) were not run.
 
-### build: sanitizers at the link, and no LTO when they trap
+### build: each job's output whole in a package's log
 
-Patch: `patches/openwrt/0017-build-link-with-the-sanitizers-and-no-LTO-when-they-.patch`, for openwrt/openwrt.
+Patch: `patches/openwrt/0016-build-write-each-job-s-output-whole-to-a-package-s-l.patch`, for openwrt/openwrt.
 
-Problem: with `-fsanitize-trap`, a sanitizer's checks become trap instructions instead of calls into its runtime, and GCC decides which where it expands them. Under LTO that is the link, and lto-wrapper passes no sanitizer option on from the objects: only the link line counts. Many packages link with `TARGET_LDFLAGS` alone, as make's built-in rule and meson do, and libtool drops `-fsanitize-trap` from every link line it runs. With `CONFIG_TARGET_OPTIMIZATION` holding `-fsanitize=undefined -fsanitize-trap=undefined`, such packages link their checks as calls into libubsan, which OpenWrt's musl toolchain does not have: a program fails to link, and a shared library links with the calls left undefined and fails to load.
+Problem: a package built in parallel runs its jobs beside each other, and each compiler writes its diagnostics to the package's log as it goes. A diagnostic is written in pieces, its "In function" context and its chain of inlined calls apart from the message, so the pieces of jobs running at once interleave: a warning follows another job's context, and a reader of the log places it in the wrong function or in none.
 
-Why it matters here: the `ubsan` profile (`docs/undefined-behavior.md`) instruments every package in trap mode. Turning `CONFIG_USE_LTO` off was not enough: mtd and libnftnl ask for LTO themselves (`PKG_BUILD_FLAGS:=lto`), and glib2 has meson do LTO (`-Db_lto=true`).
+Why it matters here: the build reports the UB-indicative warnings of each package from its log, by function (`docs/undefined-behavior.md`). bash's warnings were placed in different functions on the two boards.
 
-What the patch does: `include/package.mk` adds the sanitizer options of `TARGET_CFLAGS` to `TARGET_LDFLAGS`, since a sanitizer is a link option too: a link that takes `LDFLAGS` then expands the checks as traps, under LTO of the package's own making too. And it leaves OpenWrt's LTO out when `TARGET_CFLAGS` asks for traps, whatever the package asks for, so that the checks of a package that libtool links are expanded where its objects are compiled. A build without sanitizers is unchanged.
+What the patch does: a parallel package's make runs with `--output-sync=target`, which writes each job's output once the job ends. The jobs still run in parallel under the build's jobserver; only their output is held back. Make passes the option on to the makes it starts, among them the one GCC runs for a link's LTO jobs under the jobserver.
 
-Verification log: 2026-10-05 and 06, on the VM, in the R4S's `ubsan` tree: with LTO, mtd's link failed on undefined `__ubsan_handle_add_overflow` and `__ubsan_handle_sub_overflow`, `libnftnl.so` linked with five undefined `__ubsan_handle_*`, and glib2's library, linked by meson under its own LTO, failed on four; without OpenWrt's LTO, mtd and libnftnl have none, and hold 227 and 4,727 trap instructions.
+Verification log: 2026-10-05, on the VM: the make that GCC ran for bash's LTRANS jobs had `-Otarget` and the build's output-sync mutex in its `MAKEFLAGS`, and no log of either board's build held a diagnostic cut by another job's output.
 
-### build: LTO links with mold on one thread
+### build: sanitizers at the link
 
-Patch: `patches/openwrt/0018-build-link-LTO-with-mold-on-one-thread.patch`, for openwrt/openwrt.
+Patch: `patches/openwrt/0017-build-link-with-the-sanitizers-the-packages-are-comp.patch`, for openwrt/openwrt.
 
-Problem: mold calls the LTO plugin for its input files from several threads, so the order in which GCC's whole-program optimization gets them changes from one link to the next, and with it what LTO decides. An LTO package linked with mold is not reproducible, and the warnings GCC gives while it links come and go.
+Problem: a sanitizer is a link option too: the link adds the sanitizer's runtime, or with `-fsanitize-trap` leaves it out, and under LTO GCC expands the checks only at the link, as traps or as calls into the runtime, by the options on the link line (lto-wrapper passes no sanitizer option on from the objects). Packages compile with `TARGET_CFLAGS`, but many link with `TARGET_LDFLAGS` alone, as make's built-in rule and meson do.
 
-Why it matters here: the build's report of UB-indicative warnings is checked against the register (`docs/undefined-behavior.md`): jansson's three warnings appeared in some builds of a board and not in others, locally and in CI (runs 37293958173 and 37324813891), so its reviews were now unmatched, now missing. `CONFIG_USE_MOLD` and `CONFIG_USE_LTO` are both on (`config/toolchain.seed`).
+Why it matters here: the `ubsan` profile (`docs/undefined-behavior.md`) compiles every package with `-fsanitize=undefined -fsanitize-trap=undefined`. mtd and glib2, which use LTO, linked their checks as calls into libubsan, which OpenWrt's musl toolchain does not have.
 
-What the patch does: when a package uses LTO and mold links it, the link runs on one thread (`-Wl,--threads=1`). The link of an LTO package is GCC's work almost entirely; other links keep mold's threads.
+What the patch does: `include/package.mk` adds the sanitizer options of `TARGET_CFLAGS` to `TARGET_LDFLAGS`. A build without sanitizers is unchanged.
 
-Verification log: 2026-10-06, on the VM, mold 2.42.0: linking jansson's library six times from the same objects gave six different libraries, and the overflow warnings in some links only; with `--threads=1` or with ld.bfd, ten links gave the same library and the warnings every time. Through OpenWrt with the patch, four builds of jansson gave the same library and the same three warnings.
+Verification log: 2026-10-06, on the VM, in the R4S's `ubsan` tree: without the patch, mtd's link failed on undefined `__ubsan_handle_add_overflow` and `__ubsan_handle_sub_overflow`, and glib2's on four; with it, mtd linked with no call into the runtime and 264 trap instructions.
+
+### mold: LTO objects claimed in the command line order
+
+Patch: `patches/openwrt/0018-tools-mold-claim-LTO-objects-in-the-command-line-ord.patch` (adds the mold patch `tools/mold/patches/001-claim-lto-objects-in-the-command-line-order.patch`), for rui314/mold, carried by openwrt/openwrt until then.
+
+Problem: mold reads input files in parallel, and its reader threads called the LTO plugin's claim hook for each LTO object as they reached it, one at a time under a mutex. GCC's plugin hands the objects to the compiler in the order it claimed them, and what LTO makes depends on that order: a link with LTO and mold is not reproducible, and the warnings GCC gives while linking come and go.
+
+Why it matters here: both boards build with LTO and mold (`config/toolchain.seed`). jansson's three warnings appeared in some builds of a board and not in others, locally and in CI (runs 37293958173 and 37324813891), so the register's reviews of them were now unmatched, now missing.
+
+What the patch does: mold records the LTO objects while it reads, and claims them once all input files and linker scripts are read, one at a time and in the command line order, as it already parses linker scripts after the parallel read. The files are still read in parallel; links of the same objects give the same output, as they do with GNU ld. Upstream, the patch belongs to mold.
+
+Verification log: 2026-10-06, on the VM, mold 2.42.0: six links of jansson's library from the same objects gave six different libraries without the patch, and the overflow warnings in some of them only; with the patch, with mold's threads, the six gave the same library, the one GNU ld gives, and the three warnings each time.
+
+### libtool: every sanitizer option passed to the link
+
+Patch: `patches/openwrt/0019-tools-libtool-pass-every-sanitizer-option-through-to.patch` (adds the libtool patch `tools/libtool/patches/150-pass-every-sanitizer-option-through-to-the-link.patch`), for GNU libtool, carried by openwrt/openwrt until then.
+
+Problem: libtool passes `-fsanitize=*` to the compiler driver that links, but drops the sanitizers' other options, `-fsanitize-trap=*` and `-fsanitize-recover=*` among them. Those decide what the link does: with `-fsanitize=undefined` alone GCC links libubsan, while with `-fsanitize-trap=undefined` too it needs no runtime; and under LTO GCC expands the checks at the link by the options on its line.
+
+Why it matters here: in the `ubsan` profile, libmd, libmnl and musl-fts failed to link for want of a libubsan the toolchain does not have, and `libnftnl.so`, which uses LTO, linked five calls into it.
+
+What the patch does: libtool passes every option that starts with `-fsanitize` through, as it already does those that start with `-fno-sanitize`. Upstream, the patch belongs to libtool's `build-aux/ltmain.in`.
+
+Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
+### gcc: each LTRANS job's output whole
+
+Patch: `patches/openwrt/0020-toolchain-gcc-write-each-LTRANS-job-s-output-whole.patch` (adds the GCC patch `toolchain/gcc/patches-15.x/990-lto-wrapper-write-each-LTRANS-job-s-output-whole.patch`), for GCC, carried by openwrt/openwrt until then.
+
+Problem: when lto-wrapper runs a link's LTRANS jobs in parallel through make, the jobs write their diagnostics to the same stream as they go, in pieces, and those of jobs running at once interleave. Under a jobserver the make inherits the build's flags, but a package built without one has lto-wrapper start make with a number of jobs of its own (`-flto=auto`) and no flags from above.
+
+Why it matters here: the warnings of such a package's link would be placed in the wrong function, as bash's were before patch 0016. Running those jobs one after another (`-flto=1`) would have avoided it by giving up their parallelism.
+
+What the patch does: lto-wrapper runs its make with `--output-sync=target`, so each job's output is written whole once the job ends, and the jobs keep running in parallel. GNU make has had the option since 4.0, and lto-wrapper already needs GNU make to run LTRANS in parallel.
+
+Verification log: see the builds of both boards in `docs/undefined-behavior.md` and `docs/ci.md`.
 
 ### luci-base: the host tools built in the host build directory
 

@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 6 Oct 2026 02:40:53 +0800
+Subject: [PATCH 2/5] build: link with the sanitizers the packages are compiled
+ with
+
+A sanitizer is a link option too: the link adds the sanitizer's runtime,
+or with -fsanitize-trap leaves it out, and under LTO GCC expands the
+checks only at the link, as traps or as calls into the runtime, by the
+options on the link line. Packages compile with TARGET_CFLAGS, but many
+link with TARGET_LDFLAGS alone, as make's built-in rule and meson do.
+With CONFIG_TARGET_OPTIMIZATION holding -fsanitize=undefined
+-fsanitize-trap=undefined, mtd and glib2, which use LTO, linked their
+checks as calls into libubsan, which the musl toolchain does not have.
+
+Add the sanitizer options of TARGET_CFLAGS to TARGET_LDFLAGS. A build
+without sanitizers is unchanged.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ include/package.mk | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/include/package.mk b/include/package.mk
+index c71a75b..41f020b 100644
+--- a/include/package.mk
++++ b/include/package.mk
+@@ -59,6 +59,9 @@ ifeq ($(call pkg_build_flag,lto,$(if $(CONFIG_USE_LTO),1,0)),1)
+   TARGET_CXXFLAGS+= -flto=auto -fno-fat-lto-objects
+   TARGET_LDFLAGS+= -flto=auto -fuse-linker-plugin
+ endif
++# A sanitizer is a link option too: the link adds its runtime or, with
++# -fsanitize-trap, leaves it out, and under LTO expands its checks.
++TARGET_LDFLAGS+= $(filter -fsanitize%,$(TARGET_CFLAGS))
+ ifdef CONFIG_USE_MOLD
+   ifeq ($(call pkg_build_flag,mold,1),1)
+     TARGET_LINKER:=mold
