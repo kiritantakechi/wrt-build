@@ -344,7 +344,8 @@ ub_warnings() (
 			at = substr($0, index($0, "'\'' at ") + 5)
 			next
 		}
-		/^[^ :]+:[0-9]+(:[0-9]+)?: (warning|error): / {
+		# Every diagnostic, a note as well, consumes the context lines before it.
+		/^[^ :]+:[0-9]+(:[0-9]+)?: (warning|error|note): / {
 			chain = inlined; call = at; inlined = ""; at = ""
 			if ($0 !~ /: warning: / || !match($0, /\[-W[a-z0-9-]+=?\]$/)) next
 			option = substr($0, RSTART + 3, RLENGTH - 4)

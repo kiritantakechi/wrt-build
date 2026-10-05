@@ -103,6 +103,20 @@ In function 'btf_add_type',
     ]
 
 
+def test_a_note_takes_the_context_before_it(tmp_path: Path) -> None:
+    # GCC gives a note the chain of the code it points to; the warning after it
+    # has a context of its own, or none.
+    log = """\
+In function 'xmalloc',
+    inlined from 'yyparse' at parse.y:1099:9:
+xmalloc.c:42:3: note: by argument 1 of type 'size_t'
+execute_cmd.c:1197:7: warning: 'ofifo_list' may be used uninitialized [-Wmaybe-uninitialized]
+"""
+    assert _warnings(tmp_path, log) == [
+        ("-Wmaybe-uninitialized", "execute_cmd.c", "", "1197"),
+    ]
+
+
 def test_an_option_with_a_value_is_named_without_it(tmp_path: Path) -> None:
     # GCC names an option that takes a level with a trailing "=".
     log = """\
