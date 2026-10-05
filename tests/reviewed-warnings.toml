@@ -256,7 +256,6 @@ package = "jansson"
 option = "-Wstringop-overflow"
 file = "src/load.c"
 function = "lex_get_save"
-boards = ["r6s"]
 reason = "count = utf8_check_first (c) is 2 to 4 for any lead byte that reaches the loop (0 leaves through goto out), so stores stop at buffer[3] and the terminator at buffer[4] of buffer[5]."
 reviewed = 2026-10-05
 
@@ -265,7 +264,6 @@ package = "jansson"
 option = "-Wstringop-overflow"
 file = "src/load.c"
 function = "lex_scan"
-boards = ["r6s"]
 reason = "count = utf8_check_first (c) is 2 to 4 for any lead byte that reaches the loop (0 leaves through goto out), so stores stop at buffer[3] and the terminator at buffer[4] of buffer[5]."
 reviewed = 2026-10-05
 
@@ -274,7 +272,6 @@ package = "jansson"
 option = "-Wstringop-overflow"
 file = "src/load.c"
 function = "stream_get"
-boards = ["r6s"]
 reason = "count = utf8_check_first (c) is 2 to 4 for any lead byte that reaches the loop (0 leaves through goto out), so stores stop at buffer[3] and the terminator at buffer[4] of buffer[5]."
 reviewed = 2026-10-05
 

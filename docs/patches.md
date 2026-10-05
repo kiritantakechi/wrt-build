@@ -225,6 +225,18 @@ What the patches do: one patch per fault, each the smallest change that removes 
 
 Verification log: 2026-10-05, on the VM, with the R6S's `-O3` build run through the image's musl loader. The array whose subscript unsets it and makes it indexed expands to nothing, in a function and at global scope, where the unpatched shell printed another element or crashed; arrays, groups, subshells, functions, posix mode through a redirection word, and `pushd` with `--9223372036854775808` and `--1` behave as before or fail with bash's own errors. The interactive cases (`PS2`, completion) were not run.
 
+### build: no LTO for packages compiled with trapping sanitizers
+
+Patch: `patches/openwrt/0017-build-no-LTO-for-packages-compiled-with-trapping-san.patch`, for openwrt/openwrt.
+
+Problem: with `-fsanitize-trap`, a sanitizer's checks become trap instructions instead of calls into its runtime, and GCC decides which where it expands them. Under LTO that is the link, and lto-wrapper passes no sanitizer option on from the objects: only the link line counts. Many packages link with `TARGET_LDFLAGS` alone, as make's built-in rule does, and libtool drops `-fsanitize-trap` from every link line it runs. With `CONFIG_TARGET_OPTIMIZATION` holding `-fsanitize=undefined -fsanitize-trap=undefined`, such packages link their checks as calls into libubsan, which OpenWrt's musl toolchain does not have: a program fails to link, and a shared library links with the calls left undefined and fails to load.
+
+Why it matters here: the `ubsan` profile (`docs/undefined-behavior.md`) instruments every package in trap mode. Turning `CONFIG_USE_LTO` off was not enough: mtd and libnftnl ask for LTO themselves (`PKG_BUILD_FLAGS:=lto`).
+
+What the patch does: `include/package.mk` leaves LTO out when `TARGET_CFLAGS` asks for traps, whatever the package asks for, so that each check is expanded where its object is compiled, with every flag. A build without trapping sanitizers is unchanged.
+
+Verification log: 2026-10-05, on the VM, in the R4S's `ubsan` tree: with LTO, mtd's link failed on undefined `__ubsan_handle_add_overflow` and `__ubsan_handle_sub_overflow`, and `libnftnl.so` linked with five undefined `__ubsan_handle_*`; with the patch, neither has any, and they hold 227 and 4,727 trap instructions.
+
 ### luci-base: the host tools built in the host build directory
 
 Patch: `patches/luci/0001-luci-base-build-po2lmo-and-jsmin-in-the-host-build-d.patch`, for openwrt/luci.
