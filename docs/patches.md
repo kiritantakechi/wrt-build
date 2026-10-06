@@ -363,6 +363,18 @@ What the patch does: `interface_update()`, `interface_update_proto_neighbor()`, 
 
 Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
 
+### ppp: the host name hashed without signed overflow
+
+Patch: `patches/openwrt/0027-ppp-pppd-hash-the-host-name-without-signed-overflow.patch` (adds the ppp patch `package/network/services/ppp/patches/210-pppd-hash-the-host-name-without-signed-overflow.patch`), for ppp-project/ppp, carried by openwrt/openwrt until then.
+
+Problem: pppd seeds its random numbers with `get_host_seed()`, which hashes the host name into an `int`, `h = h * 37 + c`, from 407. Any name longer than six characters overflows it, which is undefined behavior.
+
+Why it matters here: with every earlier trap fixed, the `ubsan` profile's second run trapped in pppd's `magic_init()` at every start, so the WAN never came up.
+
+What the patch does: the hash is computed in `unsigned int`, which wraps, and takes each character as an unsigned byte.
+
+Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
 ### luci-base: the host tools built in the host build directory
 
 Patch: `patches/luci/0001-luci-base-build-po2lmo-and-jsmin-in-the-host-build-d.patch`, for openwrt/luci.

@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 6 Oct 2026 09:46:13 +0800
+Subject: [PATCH] ppp: pppd: hash the host name without signed overflow
+
+pppd seeds its random numbers with a hash of the host name, computed in
+an int that overflows for any name longer than six characters: signed
+overflow, undefined behaviour. In a UBSan build pppd traps in
+magic_init() at every start, and the WAN never comes up.
+
+Add a patch to ppp that hashes in unsigned arithmetic. It is meant for
+ppp upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/network/services/ppp/Makefile         |  2 +-
+ ...he-host-name-without-signed-overflow.patch | 33 +++++++++++++++++++
+ 2 files changed, 34 insertions(+), 1 deletion(-)
+ create mode 100644 package/network/services/ppp/patches/210-pppd-hash-the-host-name-without-signed-overflow.patch
+
+diff --git a/package/network/services/ppp/Makefile b/package/network/services/ppp/Makefile
+index c0da96a..1ee741b 100644
+--- a/package/network/services/ppp/Makefile
++++ b/package/network/services/ppp/Makefile
+@@ -10,7 +10,7 @@ include $(INCLUDE_DIR)/kernel.mk
+ 
+ PKG_NAME:=ppp
+ PKG_VERSION:=2.5.3
+-PKG_RELEASE:=3
++PKG_RELEASE:=4
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+ PKG_SOURCE_URL:=https://download.samba.org/pub/ppp
+diff --git a/package/network/services/ppp/patches/210-pppd-hash-the-host-name-without-signed-overflow.patch b/package/network/services/ppp/patches/210-pppd-hash-the-host-name-without-signed-overflow.patch
+new file mode 100644
+index 0000000..42e747b
+--- /dev/null
++++ b/package/network/services/ppp/patches/210-pppd-hash-the-host-name-without-signed-overflow.patch
+@@ -0,0 +1,33 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] pppd: hash the host name without signed overflow
++
++get_host_seed() hashes the host name into an int, h = h * 37 + c, which
++overflows for any name longer than six characters: signed overflow,
++undefined behaviour. Built with -fsanitize=undefined
++-fsanitize-trap=undefined, pppd traps in magic_init() at every start on
++a router named "OpenWrt" or longer.
++
++Hash in unsigned arithmetic, which wraps, and take each character as
++unsigned, as a hash of bytes should.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/pppd/sys-linux.c
+++++ b/pppd/sys-linux.c
++@@ -3686,13 +3686,13 @@
++ int
++ get_host_seed(void)
++ {
++-    int h;
+++    unsigned int h;
++     const char *p;
++ 
++     h = 407;
++     for (p = hostname; *p != 0; ++p)
++-	h = h * 37 + *p;
++-    return h;
+++	h = h * 37 + (unsigned char) *p;
+++    return (int) h;
++ }
++ 
++ /********************************************************************
