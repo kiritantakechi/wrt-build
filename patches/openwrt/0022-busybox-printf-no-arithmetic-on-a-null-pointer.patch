@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 6 Oct 2026 09:25:16 +0800
+Subject: [PATCH 1/5] busybox: printf: no arithmetic on a null pointer
+
+printf's print_direc() subtracts one from the place of the conversion's
+'*', which strchr() gives as NULL when there is none: undefined
+behaviour, which traps in every printf without a '*' when the build
+sanitizes with -fsanitize-trap. The init scripts use printf, so a
+UBSan build's boot traps hundreds of times.
+
+Add a patch to busybox that compares only when there is a '*'. It is
+meant for busybox upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/utils/busybox/Makefile                |  2 +-
+ ...-do-not-subtract-from-a-null-pointer.patch | 25 +++++++++++++++++++
+ 2 files changed, 26 insertions(+), 1 deletion(-)
+ create mode 100644 package/utils/busybox/patches/800-printf-do-not-subtract-from-a-null-pointer.patch
+
+diff --git a/package/utils/busybox/Makefile b/package/utils/busybox/Makefile
+index a950cff..bb00d33 100644
+--- a/package/utils/busybox/Makefile
++++ b/package/utils/busybox/Makefile
+@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=busybox
+ PKG_VERSION:=1.38.0
+-PKG_RELEASE:=3
++PKG_RELEASE:=4
+ PKG_FLAGS:=essential
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.bz2
+diff --git a/package/utils/busybox/patches/800-printf-do-not-subtract-from-a-null-pointer.patch b/package/utils/busybox/patches/800-printf-do-not-subtract-from-a-null-pointer.patch
+new file mode 100644
+index 0000000..aa719df
+--- /dev/null
++++ b/package/utils/busybox/patches/800-printf-do-not-subtract-from-a-null-pointer.patch
+@@ -0,0 +1,25 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] printf: do not subtract from a null pointer
++
++print_direc() tells a '*' for the width from the one of ".*" by comparing
++the place of the first '*' less one with that of ".*". In a conversion
++without a '*', strchr() returns NULL, and the comparison subtracts one
++from a null pointer, which is undefined behaviour. Built with
++-fsanitize=undefined -fsanitize-trap=undefined, every printf whose
++format has no '*' traps.
++
++Compare only when the conversion has a '*'.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/coreutils/printf.c
+++++ b/coreutils/printf.c
++@@ -197,7 +197,7 @@
++ 
++ 	have_prec = strstr(format, ".*");
++ 	have_width = strchr(format, '*');
++-	if (have_width - 1 == have_prec)
+++	if (have_width && have_width - 1 == have_prec)
++ 		have_width = NULL;
++ 
++ 	/* multiconvert sets errno = 0, but %s needs it cleared */

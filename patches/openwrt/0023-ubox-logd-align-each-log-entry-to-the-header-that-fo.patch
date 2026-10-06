@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 6 Oct 2026 09:25:16 +0800
+Subject: [PATCH 2/5] ubox: logd: align each log entry to the header that
+ follows it
+
+logd pads its log entries to four bytes, but the header that starts the
+next entry holds a struct timespec and needs eight-byte alignment on
+64-bit targets: reading a misaligned header is undefined behaviour, and
+logd traps within seconds of booting in a UBSan build on aarch64.
+
+Add a patch to ubox that pads each entry to the header's alignment. It
+is meant for ubox upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/system/ubox/Makefile                  |  2 +-
+ ...-entry-to-the-header-that-follows-it.patch | 29 +++++++++++++++++++
+ 2 files changed, 30 insertions(+), 1 deletion(-)
+ create mode 100644 package/system/ubox/patches/100-logd-align-each-log-entry-to-the-header-that-follows-it.patch
+
+diff --git a/package/system/ubox/Makefile b/package/system/ubox/Makefile
+index cccbf33..541b814 100644
+--- a/package/system/ubox/Makefile
++++ b/package/system/ubox/Makefile
+@@ -1,7 +1,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=ubox
+-PKG_RELEASE:=2
++PKG_RELEASE:=3
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/ubox.git
+diff --git a/package/system/ubox/patches/100-logd-align-each-log-entry-to-the-header-that-follows-it.patch b/package/system/ubox/patches/100-logd-align-each-log-entry-to-the-header-that-follows-it.patch
+new file mode 100644
+index 0000000..df7fd14
+--- /dev/null
++++ b/package/system/ubox/patches/100-logd-align-each-log-entry-to-the-header-that-follows-it.patch
+@@ -0,0 +1,29 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] logd: align each log entry to the header that follows it
++
++The log entries follow each other in the buffer, each a struct log_head
++and its message, padded to four bytes. The header holds a struct
++timespec, so it needs eight-byte alignment on 64-bit targets, and after
++a message whose padded length is four more than a multiple of eight the
++next header is misaligned: reading it is undefined behaviour. Built with
++-fsanitize=undefined -fsanitize-trap=undefined on aarch64, logd traps
++in log_next() within seconds of booting.
++
++Pad each entry to the alignment of struct log_head.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/log/syslog.c
+++++ b/log/syslog.c
++@@ -41,7 +41,10 @@
++ 
++ #define KLOG_DEFAULT_PROC	"/proc/kmsg"
++ 
++-#define PAD(x) (x % 4) ? (((x) - (x % 4)) + 4) : (x)
+++/* Entries follow each other in the buffer: pad each to the alignment of the
+++ * header that the next one starts with. */
+++#define PAD(x) (((x) + __alignof__(struct log_head) - 1) & \
+++		~(__alignof__(struct log_head) - 1))
++ 
++ static char *log_dev = LOG_DEFAULT_SOCKET;
++ static int log_size = LOG_DEFAULT_SIZE;

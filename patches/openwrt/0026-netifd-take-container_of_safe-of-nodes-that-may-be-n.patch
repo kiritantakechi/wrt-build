@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 6 Oct 2026 09:25:16 +0800
+Subject: [PATCH 5/5] netifd: take container_of_safe of nodes that may be null
+
+netifd's vlist update callbacks compute container_of() of the old or the
+new node before they check it for NULL, which it is whenever an entry
+is added or removed: pointer arithmetic on a null pointer, which is
+undefined behaviour. In a UBSan build netifd traps when it adds a
+delegated prefix, and the network never comes up.
+
+Add a patch to netifd that uses container_of_safe() in those callbacks.
+It is meant for netifd upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/network/config/netifd/Makefile        |  2 +-
+ ...er_of_safe-of-nodes-that-may-be-null.patch | 68 +++++++++++++++++++
+ 2 files changed, 69 insertions(+), 1 deletion(-)
+ create mode 100644 package/network/config/netifd/patches/100-netifd-take-container_of_safe-of-nodes-that-may-be-null.patch
+
+diff --git a/package/network/config/netifd/Makefile b/package/network/config/netifd/Makefile
+index 894f48c..8f6ebb7 100644
+--- a/package/network/config/netifd/Makefile
++++ b/package/network/config/netifd/Makefile
+@@ -1,7 +1,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=netifd
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/netifd.git
+diff --git a/package/network/config/netifd/patches/100-netifd-take-container_of_safe-of-nodes-that-may-be-null.patch b/package/network/config/netifd/patches/100-netifd-take-container_of_safe-of-nodes-that-may-be-null.patch
+new file mode 100644
+index 0000000..7f51c07
+--- /dev/null
++++ b/package/network/config/netifd/patches/100-netifd-take-container_of_safe-of-nodes-that-may-be-null.patch
+@@ -0,0 +1,68 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] netifd: take container_of_safe of nodes that may be null
++
++The vlist update callbacks get the old or the new node as NULL when an
++entry is added or removed, and interface_update_prefix() is called with
++a NULL tree too. Several of them compute container_of() of those
++pointers before they look at them: pointer arithmetic on a null pointer,
++which is undefined behaviour. Built with -fsanitize=undefined
++-fsanitize-trap=undefined, netifd traps when it adds a delegated prefix.
++
++Use container_of_safe(), which keeps NULL, in interface_update(),
++interface_update_proto_neighbor(), __interface_update_route() and
++interface_update_prefix(), as the other callbacks check before they
++convert.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/interface.c
+++++ b/interface.c
++@@ -1667,8 +1667,8 @@
++ interface_update(struct vlist_tree *tree, struct vlist_node *node_new,
++ 		 struct vlist_node *node_old)
++ {
++-	struct interface *if_old = container_of(node_old, struct interface, node);
++-	struct interface *if_new = container_of(node_new, struct interface, node);
+++	struct interface *if_old = container_of_safe(node_old, struct interface, node);
+++	struct interface *if_new = container_of_safe(node_new, struct interface, node);
++ 
++ 	if (node_old && node_new) {
++ 		D(INTERFACE, "Update interface '%s'", if_new->name);
++--- a/interface-ip.c
+++++ b/interface-ip.c
++@@ -884,8 +884,8 @@
++ 	ip = container_of(tree, struct interface_ip_settings, neighbor);
++ 	dev = ip->iface->l3_dev.dev;
++ 
++-	neighbor_old = container_of(node_old, struct device_neighbor, node);
++-	neighbor_new = container_of(node_new, struct device_neighbor, node);
+++	neighbor_old = container_of_safe(node_old, struct device_neighbor, node);
+++	neighbor_new = container_of_safe(node_new, struct device_neighbor, node);
++ 
++ 	if (node_old && node_new) {
++ 		keep = (!memcmp(neighbor_old->macaddr, neighbor_new->macaddr, sizeof(neighbor_old->macaddr)) &&
++@@ -924,8 +924,8 @@
++ 	if (!node_new || !node_old)
++ 		iface->updated |= IUF_ROUTE;
++ 
++-	route_old = container_of(node_old, struct device_route, node);
++-	route_new = container_of(node_new, struct device_route, node);
+++	route_old = container_of_safe(node_old, struct device_route, node);
+++	route_new = container_of_safe(node_new, struct device_route, node);
++ 
++ 	if (node_old && node_new)
++ 		keep = !memcmp(&route_old->nexthop, &route_new->nexthop, sizeof(route_old->nexthop)) &&
++@@ -1390,10 +1390,10 @@
++ 			     struct vlist_node *node_old)
++ {
++ 	struct device_prefix *prefix_old, *prefix_new;
++-	prefix_old = container_of(node_old, struct device_prefix, node);
++-	prefix_new = container_of(node_new, struct device_prefix, node);
+++	prefix_old = container_of_safe(node_old, struct device_prefix, node);
+++	prefix_new = container_of_safe(node_new, struct device_prefix, node);
++ 
++-	struct interface_ip_settings *ip = container_of(tree, struct interface_ip_settings, prefix);
+++	struct interface_ip_settings *ip = container_of_safe(tree, struct interface_ip_settings, prefix);
++ 	if (tree && (!node_new || !node_old))
++ 		ip->iface->updated |= IUF_PREFIX;
++ 

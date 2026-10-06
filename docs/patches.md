@@ -303,6 +303,66 @@ What the patch does: lto-wrapper runs its make with `--output-sync=target`, so e
 
 Verification log: see the builds of both boards in `docs/undefined-behavior.md` and `docs/ci.md`.
 
+### busybox: printf without arithmetic on a null pointer
+
+Patch: `patches/openwrt/0022-busybox-printf-no-arithmetic-on-a-null-pointer.patch` (adds the busybox patch `package/utils/busybox/patches/800-printf-do-not-subtract-from-a-null-pointer.patch`), for busybox, carried by openwrt/openwrt until then.
+
+Problem: `print_direc()` tells a `*` for the width from the one of `.*` by comparing the place of the first `*` less one with that of `.*`. In a conversion without a `*`, `strchr()` returns NULL, and the comparison subtracts one from a null pointer, which is undefined behavior.
+
+Why it matters here: the `ubsan` profile's first run (`docs/undefined-behavior.md`) trapped here: 384 traps during one boot, in every init script and tool that runs printf, the log service's and the health check's among them.
+
+What the patch does: it compares only when the conversion has a `*`.
+
+Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
+### ubox: logd's entries aligned
+
+Patch: `patches/openwrt/0023-ubox-logd-align-each-log-entry-to-the-header-that-fo.patch` (adds the ubox patch `package/system/ubox/patches/100-logd-align-each-log-entry-to-the-header-that-follows-it.patch`), for git.openwrt.org/project/ubox, carried by openwrt/openwrt until then.
+
+Problem: logd's entries follow each other in its buffer, each a `struct log_head` and its message, padded to four bytes. The header holds a `struct timespec`, which needs eight-byte alignment on 64-bit targets, so after a message whose padded length is four more than a multiple of eight the next header is misaligned, and reading it is undefined behavior.
+
+Why it matters here: the `ubsan` profile's first run (`docs/undefined-behavior.md`) trapped here: logd trapped in `log_next()` within seconds of booting.
+
+What the patch does: each entry is padded to the alignment of `struct log_head`.
+
+Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
+### ubox: logd's log copied into the new buffer
+
+Patch: `patches/openwrt/0024-ubox-logd-copy-the-log-into-the-new-buffer-when-it-g.patch` (adds the ubox patch `package/system/ubox/patches/101-logd-advance-in-the-new-buffer-when-it-copies-the-log.patch`), for git.openwrt.org/project/ubox, carried by openwrt/openwrt until then.
+
+Problem: when the log buffer grows, `log_buffer_init()` copies the entries into the new buffer, but moves the destination past each copy by the old entry's size from the old entry's address. From the second entry on it copies into the old buffer, frees that buffer, and leaves `newest` pointing into it.
+
+Why it matters here: found while reading `log_buffer_init()` for patch 0023. A change of the system's log size grows the buffer at run time.
+
+What the patch does: it moves past each copy in the new buffer.
+
+Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
+### libubox: 64-bit integers formatted without assuming alignment
+
+Patch: `patches/openwrt/0025-libubox-blobmsg_json-read-64-bit-integers-without-as.patch` (adds the libubox patch `package/libs/libubox/patches/100-blobmsg_json-read-64-bit-integers-without-assuming-alignment.patch`), for git.openwrt.org/project/libubox, carried by openwrt/openwrt until then.
+
+Problem: blob attributes are padded to four bytes, so the data of an `INT64` attribute is only four-byte aligned, and `blobmsg_format_element()` read it with a 64-bit load, which is undefined behavior.
+
+Why it matters here: the `ubsan` profile's first run (`docs/undefined-behavior.md`) trapped here: `ubus call` trapped printing a reply with a 64-bit value.
+
+What the patch does: the value is read with `blobmsg_get_u64()`, two aligned 32-bit words, as the `DOUBLE` case already does through `blobmsg_get_double()`.
+
+Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
+### netifd: container_of_safe for nodes that may be null
+
+Patch: `patches/openwrt/0026-netifd-take-container_of_safe-of-nodes-that-may-be-n.patch` (adds the netifd patch `package/network/config/netifd/patches/100-netifd-take-container_of_safe-of-nodes-that-may-be-null.patch`), for git.openwrt.org/project/netifd, carried by openwrt/openwrt until then.
+
+Problem: netifd's vlist update callbacks get the old or the new node as NULL when an entry is added or removed, and `interface_update_prefix()` is called with a NULL tree too. Four of them compute `container_of()` of those pointers before they look at them, which is pointer arithmetic on a null pointer.
+
+Why it matters here: the `ubsan` profile's first run (`docs/undefined-behavior.md`) trapped here: netifd trapped adding a delegated prefix, and the network never came up, so no system test could reach the router.
+
+What the patch does: `interface_update()`, `interface_update_proto_neighbor()`, `__interface_update_route()` and `interface_update_prefix()` use `container_of_safe()`, which keeps NULL, as the other callbacks check before they convert.
+
+Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
 ### luci-base: the host tools built in the host build directory
 
 Patch: `patches/luci/0001-luci-base-build-po2lmo-and-jsmin-in-the-host-build-d.patch`, for openwrt/luci.

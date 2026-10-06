@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 6 Oct 2026 09:25:16 +0800
+Subject: [PATCH 3/5] ubox: logd: copy the log into the new buffer when it
+ grows
+
+When the log buffer grows, logd moves the destination past each copied
+entry from the old entry's address, so from the second entry on it
+copies into the old buffer, frees that buffer, and keeps pointing into
+it.
+
+Add a patch to ubox that moves past each copy in the new buffer. It is
+meant for ubox upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/system/ubox/Makefile                  |  2 +-
+ ...he-new-buffer-when-it-copies-the-log.patch | 24 +++++++++++++++++++
+ 2 files changed, 25 insertions(+), 1 deletion(-)
+ create mode 100644 package/system/ubox/patches/101-logd-advance-in-the-new-buffer-when-it-copies-the-log.patch
+
+diff --git a/package/system/ubox/Makefile b/package/system/ubox/Makefile
+index 541b814..6b1e3f4 100644
+--- a/package/system/ubox/Makefile
++++ b/package/system/ubox/Makefile
+@@ -1,7 +1,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=ubox
+-PKG_RELEASE:=3
++PKG_RELEASE:=4
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/ubox.git
+diff --git a/package/system/ubox/patches/101-logd-advance-in-the-new-buffer-when-it-copies-the-log.patch b/package/system/ubox/patches/101-logd-advance-in-the-new-buffer-when-it-copies-the-log.patch
+new file mode 100644
+index 0000000..33cfb07
+--- /dev/null
++++ b/package/system/ubox/patches/101-logd-advance-in-the-new-buffer-when-it-copies-the-log.patch
+@@ -0,0 +1,24 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] logd: advance in the new buffer when it copies the log
++
++When the log buffer grows, log_buffer_init() copies the entries into the
++new buffer, but it moves the destination past each copy by the size of
++the old entry from the old entry's address. From the second entry on it
++therefore copies into the old buffer, which it frees afterwards, and
++leaves newest pointing into the freed buffer.
++
++Move past each copy in the new buffer.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/log/syslog.c
+++++ b/log/syslog.c
++@@ -345,7 +345,7 @@
++ 		l = log_list(0, NULL);
++ 		while ((start < end) && l && l->size) {
++ 			memcpy(start, l, PAD(sizeof(struct log_head) + l->size));
++-			start = (struct log_head *) &l->data[PAD(l->size)];
+++			start = (struct log_head *) &start->data[PAD(start->size)];
++ 			l = log_list(0, l);
++ 		}
++ 		free(log);

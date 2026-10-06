@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 6 Oct 2026 09:25:16 +0800
+Subject: [PATCH 4/5] libubox: blobmsg_json: read 64-bit integers without
+ assuming alignment
+
+The data of an INT64 blob attribute is only four-byte aligned, and
+formatting it as JSON read it with a 64-bit load: undefined behaviour,
+which traps on aarch64 in a UBSan build, as in `ubus call` printing a
+reply with a 64-bit value.
+
+Add a patch to libubox that reads the value with blobmsg_get_u64(), as
+the DOUBLE case does. It is meant for libubox upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/libs/libubox/Makefile                 |  2 +-
+ ...-integers-without-assuming-alignment.patch | 25 +++++++++++++++++++
+ 2 files changed, 26 insertions(+), 1 deletion(-)
+ create mode 100644 package/libs/libubox/patches/100-blobmsg_json-read-64-bit-integers-without-assuming-alignment.patch
+
+diff --git a/package/libs/libubox/Makefile b/package/libs/libubox/Makefile
+index 5614651..203c844 100644
+--- a/package/libs/libubox/Makefile
++++ b/package/libs/libubox/Makefile
+@@ -1,7 +1,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=libubox
+-PKG_RELEASE=1
++PKG_RELEASE=2
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/libubox.git
+diff --git a/package/libs/libubox/patches/100-blobmsg_json-read-64-bit-integers-without-assuming-alignment.patch b/package/libs/libubox/patches/100-blobmsg_json-read-64-bit-integers-without-assuming-alignment.patch
+new file mode 100644
+index 0000000..7ae7857
+--- /dev/null
++++ b/package/libs/libubox/patches/100-blobmsg_json-read-64-bit-integers-without-assuming-alignment.patch
+@@ -0,0 +1,25 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] blobmsg_json: read 64-bit integers without assuming alignment
++
++Blob attributes are padded to four bytes, so the data of an INT64
++attribute is only four-byte aligned, and blobmsg_format_element() reads
++it with a 64-bit load: undefined behaviour, which traps on aarch64 when
++built with -fsanitize=undefined -fsanitize-trap=undefined, as in
++`ubus call` printing a reply with a 64-bit value.
++
++Read the value with blobmsg_get_u64(), which reads two aligned 32-bit
++words, as the DOUBLE case already does through blobmsg_get_double().
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/blobmsg_json.c
+++++ b/blobmsg_json.c
++@@ -269,7 +269,7 @@
++ 		snprintf(buf, sizeof(buf), "%" PRId32, (int32_t) be32_to_cpu(*(uint32_t *)data));
++ 		break;
++ 	case BLOBMSG_TYPE_INT64:
++-		snprintf(buf, sizeof(buf), "%" PRId64, (int64_t) be64_to_cpu(*(uint64_t *)data));
+++		snprintf(buf, sizeof(buf), "%" PRId64, (int64_t) blobmsg_get_u64(attr));
++ 		break;
++ 	case BLOBMSG_TYPE_DOUBLE:
++ 		snprintf(buf, sizeof(buf), "%.17g", blobmsg_get_double(attr));
