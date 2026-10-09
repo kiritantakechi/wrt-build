@@ -399,6 +399,18 @@ What the patch does: the addresses are allocated with `alloca()`, as the IA_PD o
 
 Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
 
+### fstools: a UUID formatted without assuming its alignment
+
+Patch: `patches/openwrt/0030-fstools-format-a-UUID-without-assuming-its-alignment.patch` (adds the fstools patch `package/system/fstools/patches/100-libblkid-tiny-format-a-UUID-without-assuming-its-alignment.patch`), for git.openwrt.org/project/fstools, carried by openwrt/openwrt until then.
+
+Problem: libblkid-tiny's `blkid_probe_set_uuid_as()` reads the UUID it is given through an `unsigned short` pointer, but the probes pass pointers into on-disk structures of any alignment: btrfs passes its device item's UUID, at the odd offset 0x10b of the superblock. A misaligned load is undefined behavior, and the function made it even for a name it ignores.
+
+Why it matters here: the `ubsan` profile's fourth run trapped here: `block info` died on the data disk that `wrt-data init` had just formatted, so the data disk was never set up, and every module that uses it failed.
+
+What the patch does: the UUID is formatted a byte at a time, which gives the same text.
+
+Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
 ### luci-base: the host tools built in the host build directory
 
 Patch: `patches/luci/0001-luci-base-build-po2lmo-and-jsmin-in-the-host-build-d.patch`, for openwrt/luci.

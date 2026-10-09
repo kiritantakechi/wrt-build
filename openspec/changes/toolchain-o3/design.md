@@ -149,7 +149,7 @@ config/profiles
 
 **Detection.**
 - The manifest names the profile.
-- In a `ubsan` build, the router fixture reads the kernel log for user-space traps before it restores the snapshot, which would erase them. A test of a module that keeps the router (`module_router`) is checked after it runs, and the boot before the first test.
+- In a `ubsan` build, the router fixture reads the kernel log for user-space traps before it restores the snapshot, which would erase them. A test of a module that keeps the router (`module_router`) is checked after it runs, the module's fixtures when the module ends, as a fixture that fails leaves no test to check, and the boot before the first test.
 - A trap fails the test that was running, with the process name and address; a trap while booting fails every test that uses the router.
 
 **The probe.**

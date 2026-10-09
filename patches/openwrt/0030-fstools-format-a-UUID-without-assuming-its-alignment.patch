@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Sat, 10 Oct 2026 03:01:57 +0800
+Subject: [PATCH] fstools: format a UUID without assuming its alignment
+
+libblkid-tiny read a UUID through an unsigned short pointer, which for
+btrfs points at the odd offset of its device item's UUID: a misaligned
+load, undefined behaviour, which traps in a UBSan build, so that block
+info fails on every btrfs filesystem.
+
+Add a patch to fstools that formats the UUID a byte at a time. It is
+meant for fstools upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/system/fstools/Makefile               |  2 +-
+ ...-UUID-without-assuming-its-alignment.patch | 35 +++++++++++++++++++
+ 2 files changed, 36 insertions(+), 1 deletion(-)
+ create mode 100644 package/system/fstools/patches/100-libblkid-tiny-format-a-UUID-without-assuming-its-alignment.patch
+
+diff --git a/package/system/fstools/Makefile b/package/system/fstools/Makefile
+index 8f9321f..2a6405b 100644
+--- a/package/system/fstools/Makefile
++++ b/package/system/fstools/Makefile
+@@ -8,7 +8,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=fstools
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/fstools.git
+diff --git a/package/system/fstools/patches/100-libblkid-tiny-format-a-UUID-without-assuming-its-alignment.patch b/package/system/fstools/patches/100-libblkid-tiny-format-a-UUID-without-assuming-its-alignment.patch
+new file mode 100644
+index 0000000..c0ef764
+--- /dev/null
++++ b/package/system/fstools/patches/100-libblkid-tiny-format-a-UUID-without-assuming-its-alignment.patch
+@@ -0,0 +1,35 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] libblkid-tiny: format a UUID without assuming its alignment
++
++blkid_probe_set_uuid_as() read the UUID through an unsigned short
++pointer, but a probe passes a pointer into an on-disk structure that may
++have any alignment: btrfs passes its device item's UUID, at the odd
++offset 0x10b of the superblock. A misaligned load is undefined
++behaviour, and it reads the UUID even when the name tells it to ignore
++it. Built with -fsanitize=undefined -fsanitize-trap=undefined, block
++info traps on every btrfs filesystem.
++
++Format the UUID a byte at a time, which gives the same text.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/libblkid-tiny/libblkid-tiny.c
+++++ b/libblkid-tiny/libblkid-tiny.c
++@@ -140,13 +140,11 @@
++ 
++ int blkid_probe_set_uuid_as(blkid_probe pr, unsigned char *uuid, const char *name)
++ {
++-	short unsigned int*u = (short unsigned int*) uuid;
++-
++-	if (u[0] && (!name || !strcmp(name, "UUID"))) {
+++	if ((uuid[0] || uuid[1]) && (!name || !strcmp(name, "UUID"))) {
++ 		sprintf(pr->uuid,
++-			"%04x%04x-%04x-%04x-%04x-%04x%04x%04x",
++-			be16_to_cpu(u[0]), be16_to_cpu(u[1]), be16_to_cpu(u[2]), be16_to_cpu(u[3]),
++-			be16_to_cpu(u[4]), be16_to_cpu(u[5]), be16_to_cpu(u[6]), be16_to_cpu(u[7]));
+++			"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+++			uuid[0], uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7],
+++			uuid[8], uuid[9], uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]);
++ 	}
++ 
++ 	return 0;

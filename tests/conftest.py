@@ -147,11 +147,19 @@ def router(booted_router: Router, ubsan_traps: Traps | None) -> Iterator[Router]
 
 @pytest.fixture(scope="module")
 def module_router(booted_router: Router, ubsan_traps: Traps | None) -> Iterator[Router]:
-    """Provide the router from its post-boot state for a whole module; return to it after."""
-    del ubsan_traps  # set up for check_module_traps, which reads it after each test
+    """Provide the router from its post-boot state for a whole module; return to it after.
+
+    In a ubsan build, check_module_traps fails each test after which something
+    trapped; a trap outside the tests, in a module fixture, fails the module's
+    last test, read before the snapshot erases it.
+    """
     booted_router.reset()
     yield booted_router
-    booted_router.reset()
+    try:
+        if ubsan_traps is not None:
+            report(ubsan_traps.new(), "outside the module's tests")
+    finally:
+        booted_router.reset()
 
 
 @pytest.fixture(autouse=True)
