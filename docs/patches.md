@@ -375,6 +375,30 @@ What the patch does: the hash is computed in `unsigned int`, which wraps, and ta
 
 Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
 
+### gcc: no flexible array size without its object's initializer
+
+Patch: `patches/openwrt/0028-toolchain-gcc-no-flexible-array-size-without-its-obj.patch` (adds the GCC patch `toolchain/gcc/patches-15.x/991-tree-no-flexible-array-size-without-its-object-s-initializer.patch`), for GCC, carried by openwrt/openwrt until then.
+
+Problem: `component_ref_size()` takes the size of an initialized flexible array member from its object's initializer, and gives up for an extern object, whose initializer it cannot see. Under LTO, a partition other than the one that defines the object cannot see the initializer either, as `DECL_INITIAL` is `error_mark_node` there. It then took the size of the struct alone, so the member looked empty, and `-fsanitize=object-size` turned every function there that reads it into a trap.
+
+Why it matters here: the `ubsan` profile's third run trapped in nftables' `ct_print()`, which walks a statically initialized flexible array of symbols and had become a single trap: `nft` trapped printing any rule with a ct expression. Without the object-size check, the same function compiles to its code.
+
+What the patch does: the size is unknown when the initializer is not available, as it already is for an extern object.
+
+Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
+### odhcp6c: no variable length array of zero IA_NA addresses
+
+Patch: `patches/openwrt/0029-odhcp6c-no-variable-length-array-of-zero-IA_NA-addre.patch` (adds the odhcp6c patch `package/network/ipv6/odhcp6c/patches/100-dhcpv6-no-variable-length-array-of-zero-IA_NA-addresses.patch`), for git.openwrt.org/project/odhcp6c, carried by openwrt/openwrt until then.
+
+Problem: `dhcpv6_send()` puts the IA_NA addresses in a variable length array as long as their count. That is zero until the client holds an address, and always when it asks for prefixes only, and a variable length array of length zero is undefined behavior.
+
+Why it matters here: the `ubsan` profile's third run trapped here when odhcp6c sent its first Solicit on the WAN.
+
+What the patch does: the addresses are allocated with `alloca()`, as the IA_PD options already are, and their length is taken from their count.
+
+Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
 ### luci-base: the host tools built in the host build directory
 
 Patch: `patches/luci/0001-luci-base-build-po2lmo-and-jsmin-in-the-host-build-d.patch`, for openwrt/luci.
@@ -386,3 +410,15 @@ Why it matters here: with the rest of build-acceleration, luci-base was the only
 What the patch does: `Host/Prepare` already copies `src/` into the host build directory, so `Host/Compile` builds there, and `Host/Install` takes the tools from there.
 
 Verification log: 2026-10-04, both tools build from a copy of `src/`, as in the host build directory, and with the patch a build with nothing changed no longer prepares luci-base.
+
+### luci-base: the string hash without shifting a negative value
+
+Patch: `patches/luci/0002-luci-base-hash-without-shifting-a-negative-value.patch`, for openwrt/luci.
+
+Problem: `sfh_hash()`, which keys LuCI's translation catalogs, shifts the third of the trailing bytes, as a `signed char`, left by 18 bits. For a byte of 0x80 or more, as UTF-8 text has, that shifts a negative value, which is undefined behavior.
+
+Why it matters here: the `ubsan` profile's third run trapped here translating a page into Simplified Chinese, and the page did not render.
+
+What the patch does: the value is shifted as `uint32_t`. That keeps every hash as GCC computed it, so the catalogs that `po2lmo` made still match.
+
+Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.

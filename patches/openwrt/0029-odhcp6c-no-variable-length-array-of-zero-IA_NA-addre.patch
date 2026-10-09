@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Fri, 9 Oct 2026 22:17:38 +0800
+Subject: [PATCH] odhcp6c: no variable length array of zero IA_NA addresses
+
+odhcp6c put its IA_NA addresses in a variable length array as long as
+their count, which is zero until it holds an address, and always when
+it asks for prefixes only: undefined behaviour, which traps in a UBSan
+build when odhcp6c sends its first Solicit.
+
+Add a patch to odhcp6c that allocates them with alloca(), as it already
+does the IA_PD options. It is meant for odhcp6c upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/network/ipv6/odhcp6c/Makefile         |  2 +-
+ ...length-array-of-zero-IA_NA-addresses.patch | 35 +++++++++++++++++++
+ 2 files changed, 36 insertions(+), 1 deletion(-)
+ create mode 100644 package/network/ipv6/odhcp6c/patches/100-dhcpv6-no-variable-length-array-of-zero-IA_NA-addresses.patch
+
+diff --git a/package/network/ipv6/odhcp6c/Makefile b/package/network/ipv6/odhcp6c/Makefile
+index 98ed16b..52f66a6 100644
+--- a/package/network/ipv6/odhcp6c/Makefile
++++ b/package/network/ipv6/odhcp6c/Makefile
+@@ -8,7 +8,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=odhcp6c
+-PKG_RELEASE:=3
++PKG_RELEASE:=4
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/odhcp6c.git
+diff --git a/package/network/ipv6/odhcp6c/patches/100-dhcpv6-no-variable-length-array-of-zero-IA_NA-addresses.patch b/package/network/ipv6/odhcp6c/patches/100-dhcpv6-no-variable-length-array-of-zero-IA_NA-addresses.patch
+new file mode 100644
+index 0000000..0e48108
+--- /dev/null
++++ b/package/network/ipv6/odhcp6c/patches/100-dhcpv6-no-variable-length-array-of-zero-IA_NA-addresses.patch
+@@ -0,0 +1,35 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] dhcpv6: no variable length array of zero IA_NA addresses
++
++dhcpv6_send() put the IA_NA addresses in a variable length array of as
++many elements as the client holds addresses. That is none until it gets
++one, and always when it asks for prefixes only, and a variable length
++array of length zero is undefined behaviour. Built with
++-fsanitize=undefined -fsanitize-trap=undefined, odhcp6c traps sending
++its first Solicit.
++
++Allocate the addresses with alloca(), as the IA_PD options already are,
++and take their length from their count.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/src/dhcpv6.c
+++++ b/src/dhcpv6.c
++@@ -884,7 +884,7 @@
++ 		.t2 = 0,
++ 	};
++ 
++-	struct dhcpv6_ia_addr ia_na_array[ia_na_entry_cnt];
+++	struct dhcpv6_ia_addr *ia_na_array = alloca(ia_na_entry_cnt * sizeof(*ia_na_array));
++ 	for (size_t i = 0; i < ia_na_entry_cnt; ++i) {
++ 		ia_na_array[i].type = htons(DHCPV6_OPT_IA_ADDR);
++ 		ia_na_array[i].len = htons(sizeof(ia_na_array[i]) - DHCPV6_OPT_HDR_SIZE_U);
++@@ -900,7 +900,7 @@
++ 	}
++ 
++ 	ia_na = ia_na_array;
++-	ia_na_len = sizeof(ia_na_array);
+++	ia_na_len = ia_na_entry_cnt * sizeof(*ia_na_array);
++ 	hdr_ia_na.len = htons(ntohs(hdr_ia_na.len) + ia_na_len);
++ 
++ 	// Reconfigure Accept

@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Fri, 9 Oct 2026 22:17:38 +0800
+Subject: [PATCH] toolchain: gcc: no flexible array size without its
+ object's initializer
+
+Under LTO, a partition that does not define an object cannot see its
+initializer, and GCC then took the size of an initialized flexible
+array member of that object as zero: -fsanitize=object-size turned
+every function there that reads the member into a trap. nftables'
+ct_print() became a single trap in a UBSan build, and nft trapped
+printing any rule with a ct expression.
+
+Add a patch to GCC that takes such a member's size as unknown when the
+initializer is not available, as it already does for an extern object.
+It is meant for GCC upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ ...ize-without-its-object-s-initializer.patch | 44 +++++++++++++++++++
+ 1 file changed, 44 insertions(+)
+ create mode 100644 toolchain/gcc/patches-15.x/991-tree-no-flexible-array-size-without-its-object-s-initializer.patch
+
+diff --git a/toolchain/gcc/patches-15.x/991-tree-no-flexible-array-size-without-its-object-s-initializer.patch b/toolchain/gcc/patches-15.x/991-tree-no-flexible-array-size-without-its-object-s-initializer.patch
+new file mode 100644
+index 0000000..3133e7f
+--- /dev/null
++++ b/toolchain/gcc/patches-15.x/991-tree-no-flexible-array-size-without-its-object-s-initializer.patch
+@@ -0,0 +1,44 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] tree: no flexible array size without its object's initializer
++
++component_ref_size() takes the size of an initialized flexible array
++member from its object's initializer, and gives up (NULL_TREE) for an
++extern object, whose initializer it cannot see. An LTO partition other
++than the one that defines the object cannot see the initializer either:
++DECL_INITIAL is error_mark_node there. component_ref_size() then took the
++size of the struct alone, so the member looked empty, and
++-fsanitize=object-size turned every function that reads it in that
++partition into a trap. nftables' ct_print(), which walks a statically
++initialized flexible array of symbols, became a single trap under
++-flto -fsanitize=undefined -fsanitize-trap=undefined.
++
++Give up as for an extern object when the initializer is not available.
++
++gcc/ChangeLog:
++
++	* tree.cc (component_ref_size): Return NULL_TREE for a flexible
++	array member of an object whose initializer is error_mark_node.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/gcc/tree.cc
+++++ b/gcc/tree.cc
++@@ -13502,13 +13502,16 @@
++       if (typematch)
++ 	{
++ 	  if (DECL_P (base)
++-	      && DECL_EXTERNAL (base)
+++	      && (DECL_EXTERNAL (base)
+++		  || DECL_INITIAL (base) == error_mark_node)
++ 	      && bt == basetype
++ 	      && *sam != special_array_member::int_0)
++ 	    /* The size of a flexible array member of an extern struct
++ 	       with no initializer cannot be determined (it's defined
++ 	       in another translation unit and can have an initializer
++-	       with an arbitrary number of elements).  */
+++	       with an arbitrary number of elements).  Nor can it when the
+++	       object's initializer is not available here, as in an LTO
+++	       partition other than the one that defines the object.  */
++ 	    return NULL_TREE;
++ 
++ 	  /* Use the size of the base struct or, for interior zero-length

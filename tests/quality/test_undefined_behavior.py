@@ -66,6 +66,8 @@ def test_a_trap_fails_the_test_and_names_the_process(
     # kernel log, as the router fixture does after every test, and fails with it.
     if ubsan_traps is None:
         pytest.skip("only a ubsan build traps")
-    assert router.returncode(PROBE) == TRAPPED
+    # Run alone, the probe would be the session itself, whose death by a signal
+    # the SSH client reports as 255; the shell reports 128 + the signal instead.
+    assert router.returncode(f"{PROBE}; exit $?") == TRAPPED
     with pytest.raises(pytest.fail.Exception, match=rf"{PROBE}\[[0-9]+\] at pc [0-9a-f]+"):
         report(ubsan_traps.new(), "during the test")
