@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Sat, 10 Oct 2026 05:58:13 +0800
+Subject: [PATCH] wsdd2: seed without overflow
+
+wsdd2 seeds its random numbers by shifting halves of its UUID left by
+16 as an int, which overflows for half of all UUIDs, and has time()
+write a time_t into an unsigned long, which is too small for it on a
+32-bit target with a 64-bit time_t. Built with -fsanitize=undefined
+-fsanitize-trap=undefined, wsdd2 traps on almost every start.
+
+Add a patch that shifts as unsigned long and assigns time()'s result;
+the seed srand48() takes stays the same.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ net/wsdd2/Makefile                            |  2 +-
+ .../020-wsd-seed-without-overflow.patch       | 31 +++++++++++++++++++
+ 2 files changed, 32 insertions(+), 1 deletion(-)
+ create mode 100644 net/wsdd2/patches/020-wsd-seed-without-overflow.patch
+
+diff --git a/net/wsdd2/Makefile b/net/wsdd2/Makefile
+index 7fde40c..edcbc80 100644
+--- a/net/wsdd2/Makefile
++++ b/net/wsdd2/Makefile
+@@ -1,7 +1,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=wsdd2
+-PKG_RELEASE:=2
++PKG_RELEASE:=3
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL:=https://github.com/Netgear/wsdd2.git
+diff --git a/net/wsdd2/patches/020-wsd-seed-without-overflow.patch b/net/wsdd2/patches/020-wsd-seed-without-overflow.patch
+new file mode 100644
+index 0000000..8c80c19
+--- /dev/null
++++ b/net/wsdd2/patches/020-wsd-seed-without-overflow.patch
+@@ -0,0 +1,31 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] wsd: seed without overflow
++
++set_seed() shifted the first 16 bits of each pair of the endpoint's
++UUID left by 16 as an int: for a value of 0x8000 or more, as half of
++all UUIDs have, the result does not fit, which is undefined behaviour.
++Built with -fsanitize=undefined -fsanitize-trap=undefined, wsdd2 traps
++on almost every start. It also had time() write a time_t into an
++unsigned long, which is too small for it on a 32-bit target with a
++64-bit time_t.
++
++Shift as unsigned long, and assign time()'s result. srand48() takes the
++low 32 bits of its seed, which stay the same.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/wsd.c
+++++ b/wsd.c
++@@ -95,10 +95,10 @@
++ 	uuid_endpoint(uuid);
++ 	uuid_parse(uuid, UUID);
++ 
++-	time((time_t *)&seed);
+++	seed = time(NULL);
++ 	
++ 	for(size_t i = 0; i < 4; ++i) {
++-		unsigned long s = UUID[2*i+1] | UUID[2*i+0] << 16;
+++		unsigned long s = UUID[2*i+1] | (unsigned long)UUID[2*i+0] << 16;
++ 		seed ^= s;
++ 	}
++ 

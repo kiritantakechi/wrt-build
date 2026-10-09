@@ -411,6 +411,18 @@ What the patch does: the UUID is formatted a byte at a time, which gives the sam
 
 Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
 
+### wsdd2: the random seed without overflow
+
+Patch: `patches/packages/0005-wsdd2-seed-without-overflow.patch` (adds the package patch `020-wsd-seed-without-overflow.patch`), for openwrt/packages: wsdd2's own repository, github.com/Netgear/wsdd2, is gone, and openwrt/packages builds it from its mirror.
+
+Problem: `set_seed()` folds the endpoint's UUID into its seed by shifting the first 16 bits of each pair left by 16 as an `int`. For a value of 0x8000 or more, as half of all UUIDs have, the result does not fit in an `int`, which is undefined behavior. It also has `time()` write a `time_t` into an `unsigned long`, which is too small for it on a 32-bit target with a 64-bit `time_t`, as musl's are.
+
+Why it matters here: the `ubsan` profile's fifth run trapped here: wsdd2 trapped on almost every start, and procd started it again, through every suite.
+
+What the patch does: the shift is done as `unsigned long`, and the seed takes `time()`'s result. `srand48()` takes the low 32 bits of its seed, which stay the same.
+
+Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
 ### luci-base: the host tools built in the host build directory
 
 Patch: `patches/luci/0001-luci-base-build-po2lmo-and-jsmin-in-the-host-build-d.patch`, for openwrt/luci.
