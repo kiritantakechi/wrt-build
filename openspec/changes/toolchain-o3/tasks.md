@@ -77,13 +77,13 @@
 - [x] 4.2 Add the `ubsan` profile and `config/ubsan.seed` (`CONFIG_TARGET_OPTIMIZATION` plus `-fsanitize=undefined -fsanitize-trap=undefined`). `scripts/config.sh` suffixes the build directories of a profile with board-only seeds with the profile (`r4s_ubsan`), and its outputs go to `out/<board>/ubsan`.
 
   Verify: after `just config r4s ubsan`, `TARGET_CFLAGS` holds the sanitizer flags while the kernel's flags do not, `BUILD_SUFFIX` is `r4s_ubsan`, and the toolchain key equals the dev profile's.
-- [ ] 4.3 Add the feed package `wrt-ubsan-probe`, which overflows a signed integer on purpose; only `config/ubsan.seed` selects it.
+- [x] 4.3 Add the feed package `wrt-ubsan-probe`, which overflows a signed integer on purpose; only `config/ubsan.seed` selects it.
 
   Verify: it builds in the `ubsan` profile, and the dev and ci images do not contain it (`scripts/image-audit.sh` refuses it).
-- [ ] 4.4 Detect traps in the harness. In a build whose manifest names the `ubsan` profile, the router fixture reads the kernel log for user-space traps before it restores the snapshot, and fails the test with the process name and address. Add the test for the scenario "Trap during a system test": it runs the probe and expects the trap to be reported. It skips in other profiles.
+- [x] 4.4 Detect traps in the harness. In a build whose manifest names the `ubsan` profile, the router fixture reads the kernel log for user-space traps before it restores the snapshot, and fails the test with the process name and address. Add the test for the scenario "Trap during a system test": it runs the probe and expects the trap to be reported. It skips in other profiles.
 
   Verify: on a `ubsan` build the scenario's test passes, and a test that runs the probe without expecting the trap fails, naming `wrt-ubsan-probe`.
-- [ ] 4.5 Build and test both boards in the `ubsan` profile (`just build <board> ubsan`, `just test <board> ubsan`). Fix every trap in the code that is wrong, with a patch, its status `Pending`. Document in `docs/undefined-behavior.md` how to run the profile, and when: after an upstream bump, and before a stable release.
+- [x] 4.5 Build and test both boards in the `ubsan` profile (`just build <board> ubsan`, `just test <board> ubsan`). Fix every trap in the code that is wrong, with a patch, its status `Pending`. Document in `docs/undefined-behavior.md` how to run the profile, and when: after an upstream bump, and before a stable release.
 
   Verify: both boards' suites pass under the `ubsan` profile, with no trap, and the run is logged in the document.
 
@@ -95,7 +95,7 @@
 - [x] 5.2 Re-derive BBRv3 from its primary source: the google/bbr v3 branch as Oleksandr Natalenko rebases it onto 6.18. Compare it with the current series, and explain or remove every difference. Its trailer names the source (`Backport [...]`), and its message the comparison.
 
   Verify: the kernel builds on both boards, and the firmware/kernel scenario "BBRv3 as default congestion control" passes on both.
-- [ ] 5.3 Review every other patch against the current pins: the series from 0003 on (`build-acceleration`'s 0011 and 0012 included), the packages patches, einat's patch, QEMU's patch, and the two prepared upstream patches. For each, check:
+- [x] 5.3 Review every other patch against the current pins: the series from 0003 on (`build-acceleration`'s 0011 and 0012 included), the packages patches, einat's patch, QEMU's patch, and the two prepared upstream patches. For each, check:
   - still needed (not upstream, not dead);
   - minimal and correct;
   - its message accurate and current, with `Signed-off-by`;
@@ -105,7 +105,7 @@
 
   Verify: `just patch` applies the series. The tests that cover each patch's behavior pass on both boards (named in its message), and QEMU builds with its patch.
 
-- [ ] 5.4 Fix each fault the `-O3` and UBSan work found where it lies, without trading generality away (`docs/patches.md`, "What a patch fixes"), and drop the workarounds that stood in for those fixes:
+- [x] 5.4 Fix each fault the `-O3` and UBSan work found where it lies, without trading generality away (`docs/patches.md`, "What a patch fixes"), and drop the workarounds that stood in for those fixes:
   - mold claims LTO objects in the command line order (0018), instead of linking LTO packages on one thread;
   - libtool passes every sanitizer option to the link (0019), the packages' own copies of libtool get the same change in a build that sanitizes (0021), and packages link with the sanitizer options they compile with (0017), instead of building trap builds without LTO and answering `-lubsan` with an empty archive;
   - lto-wrapper writes each LTRANS job's output whole (0020), and a parallel package's make each job's (0016), instead of running LTRANS jobs one after another (`-flto=1`).
