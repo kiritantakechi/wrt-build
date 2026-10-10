@@ -17,6 +17,7 @@ spec-coverage = "wrt_tests.model.coverage:main"
 [dependency-groups]
 dev = [
     "ruff>=0.16",
+    "tach>=0.35.2",
     "ty>=0.0.84",
 ]
 

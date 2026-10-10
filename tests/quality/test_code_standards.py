@@ -90,6 +90,19 @@ def test_new_script_without_skeleton_fails(repo: Path) -> None:
     assert "scripts/thing-probe.sh: no just recipe named thing-probe" in result.stderr
 
 
+@spec(CAPABILITY, "Layered test harness", "Harness module imports from a higher layer")
+def test_an_import_from_a_higher_layer_fails(repo: Path) -> None:
+    # A module of the model layer that reaches up to the device layer.
+    with (repo / "tests" / "wrt_tests" / "model" / "poll.py").open("a") as module:
+        module.write("\nfrom wrt_tests.device.router import Router\n")
+    result = _run(repo, "check.sh", "tach")
+    assert result.returncode != 0
+    assert "FAIL  tach" in result.stdout
+    # tach reports on stderr: the module, and what it imports.
+    assert "wrt_tests/model/poll.py" in result.stderr, result.stderr
+    assert "wrt_tests.device.router" in result.stderr, result.stderr
+
+
 @spec(CAPABILITY, "Symmetric naming", "Unpaired operation")
 def test_paired_operations_are_complete() -> None:
     recipes = set(

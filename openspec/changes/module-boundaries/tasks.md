@@ -29,7 +29,7 @@
   - update every import (tests, conftests), the entry points (`board-check`, `emu-prepare`, `spec-coverage`) and `tests/pytest.toml`'s `-p`.
 
   Verify: `just check` passes, the unit tests pass, and `pytest --collect-only -q` collects the same tests as before the move.
-- [ ] 3.2 Add tach to the dev dependencies (`tests/pyproject.toml`, `uv.lock`) and `tests/tach.toml` with the four layers. `just check` runs it as the check `tach`. Add the test of the quality/code-standards scenario "Harness module imports from a higher layer" (`tests/quality/test_code_standards.py`), on a scratch copy of the repository with a model module that imports from the device layer.
+- [x] 3.2 Add tach to the dev dependencies (`tests/pyproject.toml`, `uv.lock`) and `tests/tach.toml` with the four layers. `just check` runs it as the check `tach`. Add the test of the quality/code-standards scenario "Harness module imports from a higher layer" (`tests/quality/test_code_standards.py`), on a scratch copy of the repository with a model module that imports from the device layer.
 
   Verify: `just check` passes on the tree; the test passes, and its failure output names the module and the import.
 - [ ] 3.3 Describe the layers in `docs/conventions.md`: what each holds, what it may import, and where a new module goes; and the order and naming of D9, which every moved module follows.

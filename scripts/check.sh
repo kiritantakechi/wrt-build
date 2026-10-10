@@ -8,7 +8,7 @@ set -eu
 # shellcheck source=scripts/lib.sh
 . "$(dirname -- "$0")/lib.sh"
 
-checks='shfmt shellcheck nixfmt actionlint editorconfig-checker gitleaks forbidden-patterns skeleton marks boards ruff-format ruff-check ty spec-coverage'
+checks='shfmt shellcheck nixfmt actionlint editorconfig-checker gitleaks forbidden-patterns skeleton marks boards ruff-format ruff-check ty tach spec-coverage'
 requested=$*
 for name in ${requested}; do
 	case " ${checks} " in
@@ -145,6 +145,8 @@ run() {
 	run ruff-format uv run --directory tests --locked ruff format --check
 	run ruff-check uv run --directory tests --locked ruff check
 	run ty uv run --directory tests --locked ty check
+	# The harness's layers (tests/tach.toml): no import from a layer above.
+	run tach uv run --directory tests --locked tach check
 	# Structure only: dangling markers, duplicates, the directory rule.
 	run spec-coverage uv run --directory tests --locked spec-coverage --summary
 }

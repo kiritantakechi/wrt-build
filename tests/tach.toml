@@ -1,0 +1,23 @@
+# The test harness's layers (module-boundaries D5), from the top: a module
+# imports only from its own layer and the layers below it, type-checking imports
+# included. The tests themselves are no module: a test uses every layer.
+layers = ["services", "device", "sandbox", "model"]
+source_roots = ["."]
+exclude = [".venv*", "**/__pycache__", "fixtures"]
+ignore_type_checking_imports = false
+
+[[modules]]
+path = "wrt_tests.services"
+layer = "services"
+
+[[modules]]
+path = "wrt_tests.device"
+layer = "device"
+
+[[modules]]
+path = "wrt_tests.sandbox"
+layer = "sandbox"
+
+[[modules]]
+path = "wrt_tests.model"
+layer = "model"
