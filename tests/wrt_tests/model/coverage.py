@@ -9,7 +9,9 @@ The report lists, for each scenario, the test that verifies it, or the job named
   exactly one ``@spec`` of that module's capability, or a ``@spec`` in ``unit/``;
 * a harness module that no other harness module or test imports, that no string
   names (``python -m``) and that the tests' configuration does not name as an
-  entry point or a plugin (module-boundaries D5).
+  entry point or a plugin (module-boundaries D5);
+* a fixture defined in the root ``conftest.py``, which only composes the layers'
+  plugins (module-boundaries D6).
 
 Every scenario of the archived specs (``openspec/specs``, the system as built)
 must be covered; with ``--change NAME`` so must those of that change in flight.
@@ -185,6 +187,31 @@ def unused_modules(tests_dir: Path = TESTS_DIR) -> list[str]:
     ]
 
 
+def _is_fixture(decorator: ast.expr) -> bool:
+    """Return whether ``decorator`` is pytest's fixture decorator, called or not."""
+    match decorator:
+        case ast.Call(func=func):
+            return _is_fixture(func)
+        case ast.Attribute(attr="fixture") | ast.Name(id="fixture"):
+            return True
+        case _:
+            return False
+
+
+def root_fixtures(tests_dir: Path = TESTS_DIR) -> list[str]:
+    """Fixtures the root conftest.py defines, which belong to a layer's plugin (D6)."""
+    conftest = tests_dir / "conftest.py"
+    if not conftest.is_file():
+        return []
+    tree = ast.parse(conftest.read_text(encoding="utf-8"))
+    return [
+        f"conftest.py: defines the fixture {node.name}, which belongs to a layer's plugin"
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and any(_is_fixture(decorator) for decorator in node.decorator_list)
+    ]
+
+
 def coverage_errors(
     scenarios: list[Scenario], tests: list[TestRef], elsewhere: dict[ScenarioId, str]
 ) -> tuple[list[str], dict[ScenarioId, list[TestRef]]]:
@@ -232,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"no such change with specs: {', '.join(unknown)}")
     tests = collect_tests(args.tests.resolve())
     elsewhere = load_elsewhere(args.tests)
-    errors = structure_errors(tests) + unused_modules(args.tests)
+    errors = structure_errors(tests) + unused_modules(args.tests) + root_fixtures(args.tests)
     duplicate_errors, by_scenario = coverage_errors(scenarios, tests, elsewhere)
     errors += duplicate_errors
 

@@ -130,6 +130,19 @@ def _wheel(directory: Path, name: str) -> Path:
     return wheel
 
 
+@spec(CAPABILITY, "Fixtures by layer", "Fixture defined in the root configuration")
+def test_a_fixture_in_the_root_configuration_fails(demo: tuple[Path, Path]) -> None:
+    openspec, tests = demo
+    shutil.copytree(TESTS_DIR / "wrt_tests", tests / "wrt_tests")
+    (tests / "conftest.py").write_text(
+        "import pytest\n\n\n@pytest.fixture(scope='session')\ndef local() -> int:\n    return 1\n"
+    )
+    result = _coverage(openspec, tests)
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "conftest.py: defines the fixture local" in output, output
+
+
 @spec(CAPABILITY, "Python toolchain locked by uv", "Lock file out of sync")
 def test_stale_lock_is_rejected(tmp_path: Path) -> None:
     # Every script syncs or runs the tests project in locked mode ...

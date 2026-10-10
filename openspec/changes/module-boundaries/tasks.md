@@ -41,10 +41,10 @@
 
 ## 4. Fixtures by layer (design D6)
 
-- [ ] 4.1 Move the root conftest's fixtures into each layer's `fixtures.py`, as D6's table lays out. The root `tests/conftest.py` holds only `pytest_plugins`.
+- [x] 4.1 Move the root conftest's fixtures into each layer's `fixtures.py`, as D6's table lays out. The root `tests/conftest.py` holds only `pytest_plugins`.
 
   Verify: `pytest --fixtures` lists the same fixtures as before, the collection is unchanged, and a system test module of each layer (`firmware/test_kernel.py`, `network/test_nat.py`, `storage/test_data_disk.py`, `release/test_publishing.py`) passes on a board's build.
-- [ ] 4.2 Extend `spec-coverage`'s structure check: the root conftest defines no fixture. Add the test of the testing/harness scenario "Fixture defined in the root configuration" (`tests/testing/test_harness.py`).
+- [x] 4.2 Extend `spec-coverage`'s structure check: the root conftest defines no fixture. Add the test of the testing/harness scenario "Fixture defined in the root configuration" (`tests/testing/test_harness.py`).
 
   Verify: the test passes, and the check's output names the fixture.
 
