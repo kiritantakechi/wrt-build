@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=wrt-sync
 PKG_VERSION:=1
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_MAINTAINER:=kiritantakechi <kiritantakechi@gmail.com>
 PKG_LICENSE:=GPL-2.0-only

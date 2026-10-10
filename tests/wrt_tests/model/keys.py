@@ -2,7 +2,7 @@
 
 A release is signed with an apk key (EC P-256, package indexes) and a firmware
 key (usign, images and the manifest). ``Keys.make`` creates both and a keyring
-that mirrors the image's trust anchors (etc/apk/keys, etc/opkg/keys), as
+that mirrors the image's trust anchors (etc/apk/keys, etc/usign/keys), as
 wrt-keyring holds the production ones; ``wrt_tests.device.trust`` puts it on a
 router.
 ``sign`` runs scripts/release-sign.sh, the script CI signs releases with, on a
@@ -19,7 +19,7 @@ from wrt_tests.model.repository import REPO_DIR
 
 RELEASE_SIGN = REPO_DIR / "scripts" / "release-sign.sh"
 APK_KEYS = Path("etc/apk/keys")
-FIRMWARE_KEYS = Path("etc/opkg/keys")
+FIRMWARE_KEYS = Path("etc/usign/keys")
 
 
 def _run(*command: str | Path) -> str:

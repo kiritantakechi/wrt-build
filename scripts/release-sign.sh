@@ -45,7 +45,7 @@ done
 # apk reads its keys directory relative to its root, /.
 keyring=$(realpath "${keyring}")
 apk_keys="${keyring}/etc/apk/keys"
-fw_keys="${keyring}/etc/opkg/keys"
+fw_keys="${keyring}/etc/usign/keys"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/wrt-sign.XXXXXX")
 trap 'rm -rf "${work}"' EXIT INT TERM

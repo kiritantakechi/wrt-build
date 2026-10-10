@@ -41,7 +41,7 @@ Anything pushed to main goes to both remotes, Codeberg first.
 
 ## On the router
 
-The router's first release is a flash of the stable release's factory image (`docs/migration-single-to-ab.md`). It trusts the release keys only: the image's `/etc/apk/keys` and `/etc/opkg/keys` hold nothing else (`wrt-keyring`).
+The router's first release is a flash of the stable release's factory image (`docs/migration-single-to-ab.md`). It trusts the release keys only: the image's `/etc/apk/keys` and `/etc/usign/keys` hold nothing else (`wrt-keyring`).
 
 ```sh
 wrt-sync                   # fetch the newest stable release; prints "<tag> is current"

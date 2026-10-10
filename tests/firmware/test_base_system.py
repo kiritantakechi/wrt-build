@@ -162,3 +162,5 @@ def test_excluded_components(router: Router, emulation_dir: Path, tmp_path: Path
         and UPX_MAGIC in path.read_bytes()
     ]
     assert packed == []
+    # Nothing keeps opkg's directory: the firmware keys are usign's (/etc/usign/keys).
+    assert not (root / "etc" / "opkg").exists()

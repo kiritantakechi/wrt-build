@@ -8,7 +8,7 @@
 # (board-model D10). The container gets the router's own programs read-only and
 # only that directory to write, and nothing it fetches is trusted: the release
 # becomes current only once its manifest's signature verifies with
-# /etc/opkg/keys, the manifest is of a build for the router's device and lists
+# /etc/usign/keys, the manifest is of a build for the router's device and lists
 # its upgrade image and its indexes, these match it, and every index verifies
 # with /etc/apk/keys. The newest releases (wrt-sync.main.keep) stay; apk
 # installs from current and wrt-update upgrades to its image.
@@ -62,7 +62,7 @@ release="${REPO}/releases/${tag}"
 if [ ! -d "${release}" ]; then
 	incoming="${REPO}/.incoming/${tag}"
 	usign -V -q -m "${incoming}/manifest.json" -x "${incoming}/manifest.json.sig" \
-		-P /etc/opkg/keys || die "${tag}: manifest.json is not signed by a trusted key"
+		-P /etc/usign/keys || die "${tag}: manifest.json is not signed by a trusted key"
 	mkdir -p "${incoming}/targets"
 	tar -xf "${incoming}/repo.tar" -C "${incoming}" ||
 		die "${tag}: the package repository is incomplete"

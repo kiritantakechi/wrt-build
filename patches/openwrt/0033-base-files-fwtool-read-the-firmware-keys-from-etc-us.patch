@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Sun, 11 Oct 2026 07:36:30 +0800
+Subject: [PATCH] base-files: fwtool: read the firmware keys from
+ /etc/usign/keys
+
+The keys that sign firmware images are usign keys, which ucert checks
+an image's signature against. fwtool_check_signature() read them from
+/etc/opkg/keys, opkg's directory, which images built with apk no longer
+need for anything else.
+
+Read them from /etc/usign/keys, named after the tool whose keys they
+are as /etc/apk/keys is, and from /etc/opkg/keys on an image that has no
+such directory, so that every image keeps checking its signatures as
+before.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/base-files/files/lib/upgrade/fwtool.sh | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/package/base-files/files/lib/upgrade/fwtool.sh b/package/base-files/files/lib/upgrade/fwtool.sh
+index 0bc6e69..eaee053 100644
+--- a/package/base-files/files/lib/upgrade/fwtool.sh
++++ b/package/base-files/files/lib/upgrade/fwtool.sh
+@@ -18,8 +18,12 @@ fwtool_check_signature() {
+ 		return 0
+ 	fi
+ 
++	# The firmware keys: usign's, or opkg's directory on an image without it.
++	local keys=/etc/usign/keys
++	[ -d "$keys" ] || keys=/etc/opkg/keys
++
+ 	fwtool -q -T -s /dev/null "$1" | \
+-		ucert -V -m - -c "/tmp/sysupgrade.ucert" -P /etc/opkg/keys
++		ucert -V -m - -c "/tmp/sysupgrade.ucert" -P "$keys"
+ 
+ 	return $?
+ }

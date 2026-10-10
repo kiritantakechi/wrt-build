@@ -435,6 +435,18 @@ What the patch does: the packets are received two bytes into a four-byte aligned
 
 Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
 
+### base-files: the firmware keys in /etc/usign/keys
+
+Patch: `patches/openwrt/0033-base-files-fwtool-read-the-firmware-keys-from-etc-us.patch`, for openwrt/openwrt.
+
+Problem: sysupgrade checks an image's signature with ucert against the keys in `/etc/opkg/keys` (`fwtool_check_signature()`). They are usign keys, kept in opkg's directory, which an image built with apk no longer needs for anything else.
+
+Why it matters here: the image has no opkg left, and no `/etc/opkg` (`device-modernization` D5): wrt-keyring puts the release keys in `/etc/usign/keys`, and sysupgrade has to find them there.
+
+What the patch does: `fwtool_check_signature()` reads `/etc/usign/keys`, named after the tool whose keys they are as `/etc/apk/keys` is, and `/etc/opkg/keys` on an image without that directory, so upstream's images check their signatures as before.
+
+Verification log: the firmware/ab-upgrade tests take a signed upgrade and refuse an unsigned one on both boards.
+
 ### wsdd2: the random seed without overflow
 
 Patch: `patches/packages/0005-wsdd2-seed-without-overflow.patch` (adds the package patch `020-wsd-seed-without-overflow.patch`), for openwrt/packages: wsdd2's own repository, github.com/Netgear/wsdd2, is gone, and openwrt/packages builds it from its mirror.
