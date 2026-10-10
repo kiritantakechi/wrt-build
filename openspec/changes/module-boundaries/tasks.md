@@ -78,7 +78,7 @@
 - [x] 6.1 Build both boards (`just build r4s dev`, `just build r6s dev`), and compose the ci profile's seeds. Compare them with the baseline of task 1.1.
 
   Verify: the composed seeds, `.config` and each image's package list equal the baseline.
-- [ ] 6.2 Run the full system tests on both boards.
+- [x] 6.2 Run the full system tests on both boards.
 
   Verify: `just test r4s dev` and `just test r6s dev` pass, and `spec-coverage --change module-boundaries` reports no uncovered scenario.
 - [x] 6.3 Point `device-modernization`'s proposal and tasks to the new paths of the trust anchors' code (`model/keys.py`, `device/trust.py`).
