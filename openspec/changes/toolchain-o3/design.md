@@ -206,7 +206,7 @@ For each board, the EROFS root and the upgrade image are measured before and aft
 - [The first CI run rebuilds the toolchain and every package] → Expected once. After `build-acceleration`, the host stage rebuilds with its compiler cache serving what the flags do not touch, and a firmware job compiles its packages cold in 1.5 to 2.5 hours instead of the 3.5 to 4.75 of a cold run today (docs/ci.md). The compiler caches recover on the next run.
 - [The kernel briefly gets `-O3` if `CONFIG_KERNEL_CFLAGS` is lost] → The kernel flags test (spec firmware/toolchain) fails such a build.
 - [The board-only seeds and the one-line-per-symbol merge change `compose_seeds` for every profile] → For dev and ci the composed seed only loses duplicate lines. The toolchain key changes, as it does anyway with `-O3`.
-- [The `ubsan` profile costs about 45 GB per board, and a full build and test run each time] → It is kept off CI and run at the points D5 names. Its build directories can be deleted in between.
+- [The `ubsan` profile costs about 18 GB per board, and a full build and test run each time] → It is kept off CI and run at the points D5 names. Its build directories can be deleted in between.
 
 ## Migration Plan
 

@@ -56,6 +56,15 @@ MAKES = 8
 ROUNDS = 20
 
 
+def _manifest(build: Path) -> dict[str, Any]:
+    return cast("dict[str, Any]", json.loads((build / MANIFEST_FILE).read_text()))
+
+
+def _build_dirs(tree: Path, build: Path) -> list[Path]:
+    """Return the build directories of ``build`` in ``tree``: one, or none once deleted."""
+    return list((tree / "build_dir").glob(f"target-*_{_manifest(build)['build']}"))
+
+
 def _builds_beside(build_output: Path) -> list[tuple[Board, Path]]:
     """Return every board's build of the same profile in the work directory of ``build_output``."""
     out, profile = build_output.parents[1], build_output.name
@@ -64,10 +73,6 @@ def _builds_beside(build_output: Path) -> list[tuple[Board, Path]]:
         for board in load_all()
         if (out / board.id / profile / MANIFEST_FILE).is_file()
     ]
-
-
-def _manifest(build: Path) -> dict[str, Any]:
-    return cast("dict[str, Any]", json.loads((build / MANIFEST_FILE).read_text()))
 
 
 @spec(CAPABILITY, "One description per board", "A malformed description")
@@ -179,28 +184,36 @@ def test_an_unknown_board_is_refused(recipe: str, tmp_path: Path) -> None:
 
 @spec(CAPABILITY, "One build per board from one tree", "Two boards in one tree")
 def test_boards_build_apart(build_output: Path) -> None:
-    builds = _builds_beside(build_output)
+    tree = Path(os.environ["WRT_WORKDIR"]) / "openwrt"
+    # A build whose directories were deleted since, as a ubsan build's may be,
+    # is no longer in the tree.
+    builds = [
+        (board, build) for board, build in _builds_beside(build_output) if _build_dirs(tree, build)
+    ]
     if all(build == build_output for _, build in builds):
         pytest.skip("no other board's build beside this one")
-    tree = Path(os.environ["WRT_WORKDIR"]) / "openwrt"
     variants = {board.uboot.variant for board, _ in builds}
     for board, build in builds:
         manifest = _manifest(build)
         assert manifest["board"] == board.id
-        # Its own build and staging directories, and its own output directory...
+        # Its own build and staging directories, and its own output directory,
+        # named after the board, and its profile when that profile has seeds of
+        # its own for the boards...
+        name = manifest["build"]
+        assert name in {board.id, f"{board.id}_{manifest['profile']}"}
         config = (build / "diffconfig").read_text().splitlines()
-        assert f'CONFIG_BUILD_SUFFIX="{board.id}"' in config
+        assert f'CONFIG_BUILD_SUFFIX="{name}"' in config
         assert any(
-            line.startswith("CONFIG_BINARY_FOLDER=") and line.endswith(f'/bin/{board.id}"')
+            line.startswith("CONFIG_BINARY_FOLDER=") and line.endswith(f'/bin/{name}"')
             for line in config
         )
         # ...which hold its build objects alone: its own U-Boot, no other board's...
-        (build_dir,) = (tree / "build_dir").glob(f"target-*_{board.id}")
+        (build_dir,) = _build_dirs(tree, build)
         built = {variant for variant in variants if (build_dir / f"u-boot-{variant}").is_dir()}
         assert built == {board.uboot.variant}
         # ...and its own images alone, still the ones of its manifest while the
         # tree's last build of the board was of this profile.
-        (targets,) = (tree / "bin" / board.id / "targets").glob("*/*")
+        (targets,) = (tree / "bin" / name / "targets").glob("*/*")
         images = {path.name for pattern in IMAGES for path in targets.glob(pattern)}
         assert len(images) == len(IMAGES)
         assert all(f"-{board.device}-" in name for name in images), images

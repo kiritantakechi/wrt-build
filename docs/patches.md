@@ -411,6 +411,18 @@ What the patch does: the UUID is formatted a byte at a time, which gives the sam
 
 Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
 
+### ucode: ubus values read without assuming their alignment
+
+Patch: `patches/openwrt/0031-ucode-ubus-read-blob-values-without-assuming-their-a.patch` (adds the ucode patch `package/utils/ucode/patches/120-ubus-read-blob-values-without-assuming-their-alignment.patch`), for github.com/jow-/ucode, carried by openwrt/openwrt until then.
+
+Problem: the ubus module's `blob_to_ucv()` reads 64-bit integers and doubles through a `uint64_t` pointer, but blob attributes are padded to four bytes, so their data is only four-byte aligned: a misaligned load, which is undefined behavior. It is the fault of patch 0025, in ucode's copy of the conversion.
+
+Why it matters here: the `ubsan` profile's first R6S run trapped here: uhttpd's ucode handler died converting a ubus reply with such a value, and the metrics stopped after the first collector.
+
+What the patch does: every scalar is read with libubox's `blobmsg_get_*()` accessors, whose `blobmsg_get_u64()` reads two aligned 32-bit words.
+
+Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
 ### wsdd2: the random seed without overflow
 
 Patch: `patches/packages/0005-wsdd2-seed-without-overflow.patch` (adds the package patch `020-wsd-seed-without-overflow.patch`), for openwrt/packages: wsdd2's own repository, github.com/Netgear/wsdd2, is gone, and openwrt/packages builds it from its mirror.

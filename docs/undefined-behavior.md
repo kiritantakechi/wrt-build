@@ -62,6 +62,20 @@ just build r4s ubsan
 just test r4s ubsan
 ```
 
-The register checks of the warnings skip in this profile: it ships nothing, and the instrumentation changes what GCC warns of. It is not run in CI, where a second full build per board does not fit. It runs after an upstream bump and before a stable release, and about 45 GB of build directories per board can be deleted in between.
+The register checks of the warnings skip in this profile: it ships nothing, and the instrumentation changes what GCC warns of. It is not run in CI, where a second full build per board does not fit. It runs after an upstream bump and before a stable release, and its build and staging directories, about 18 GB per board, can be deleted in between.
 
 **A trap** is undefined behavior in code the image runs. It is fixed in that code, with a patch meant for upstream, its status `Pending`, like a warning that is undefined behavior; alignment findings included, since the compiler may assume alignment, and vectorized code does.
+
+### Runs
+
+Each run is the whole system suite of one board on a `ubsan` build; a trap is fixed where it lies, and the board is built and tested again.
+
+| Date | Board | Result | What trapped, and the fix |
+|---|---|---|---|
+| 2026-10-06 | R4S | No system test could reach the router | netifd, adding a delegated prefix, so the network never came up (patch 0026); `ubus call`, printing a 64-bit value (0025); busybox `printf` (0022); logd, aligning its entries (0023). Reading logd for 0023 found its copy into a grown buffer (0024) |
+| 2026-10-06 | R4S | The WAN never came up | pppd's seed, at every start (0027) |
+| 2026-10-06 | R4S | 258 passed, 2 failed, 91 errors | nft, in `ct_print()`, which GCC had made a single trap under LTO (0028), and every test that lists the ruleset with it; odhcp6c's first Solicit (0029); LuCI's string hash, in a page in Simplified Chinese (luci 0002). The probe's test read the trap's status through SSH, which reports 255 (fixed in the test) |
+| 2026-10-10 | R4S | 316 passed, 33 errors | `block info`, on the btrfs data disk that `wrt-data init` had just made (0030), so no module got its data disk. The harness did not report it: the trap came in a module fixture, outside any test, and the module's end restored the snapshot over it; `module_router` now reads it first |
+| 2026-10-10 | R4S | 348 passed, 1 failed, 7 errors | wsdd2's seed, on almost every start (packages 0005). `test_inbound_ipv6_is_rejected` was refused a LAN connection once, with no trap; it passed in the runs before and after |
+| 2026-10-10 | R4S | 349 passed, 5 skipped, no trap | |
+| 2026-10-10 | R6S | 347 passed, 4 failed, 1 error | uhttpd, in ucode's ubus module, converting a reply with a 64-bit value (0031), so the metrics stopped after their first collector. And `test_boards_build_apart` expected the board's name as the build directories' suffix, which a ubsan build's is not; the manifest now names the build (`build`) |

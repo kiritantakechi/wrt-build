@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Sat, 10 Oct 2026 12:44:45 +0800
+Subject: [PATCH] ucode: ubus: read blob values without assuming their
+ alignment
+
+ucode's ubus module read 64-bit integers and doubles of a ubus message
+through a uint64_t pointer, although blob attributes are only four-byte
+aligned: a misaligned load, undefined behaviour, which traps in a UBSan
+build, so that uhttpd's ucode handlers died converting such a reply.
+
+Add a patch to ucode that reads every scalar with libubox's
+blobmsg_get_*() accessors. It is meant for ucode upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/utils/ucode/Makefile                  |  2 +-
+ ...ues-without-assuming-their-alignment.patch | 51 +++++++++++++++++++
+ 2 files changed, 52 insertions(+), 1 deletion(-)
+ create mode 100644 package/utils/ucode/patches/120-ubus-read-blob-values-without-assuming-their-alignment.patch
+
+diff --git a/package/utils/ucode/Makefile b/package/utils/ucode/Makefile
+index eb6abd6..d05aaa4 100644
+--- a/package/utils/ucode/Makefile
++++ b/package/utils/ucode/Makefile
+@@ -8,7 +8,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=ucode
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=https://github.com/jow-/ucode.git
+diff --git a/package/utils/ucode/patches/120-ubus-read-blob-values-without-assuming-their-alignment.patch b/package/utils/ucode/patches/120-ubus-read-blob-values-without-assuming-their-alignment.patch
+new file mode 100644
+index 0000000..d424baa
+--- /dev/null
++++ b/package/utils/ucode/patches/120-ubus-read-blob-values-without-assuming-their-alignment.patch
+@@ -0,0 +1,51 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] ubus: read blob values without assuming their alignment
++
++blob_to_ucv() read 64-bit integers and doubles through a uint64_t
++pointer, but blob attributes are padded to four bytes, so their data is
++only four-byte aligned: a misaligned load, which is undefined behaviour.
++Built with -fsanitize=undefined -fsanitize-trap=undefined, ucode traps
++converting a ubus reply that holds such a value.
++
++Read every scalar with libubox's blobmsg_get_*() accessors, whose
++blobmsg_get_u64() reads two aligned 32-bit words, as libubox's own
++blobmsg_format_json() does for 64-bit integers.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/lib/ubus.c
+++++ b/lib/ubus.c
++@@ -774,28 +774,20 @@
++ 
++ 	switch (blob_id(attr)) {
++ 	case BLOBMSG_TYPE_BOOL:
++-		return ucv_boolean_new(*(uint8_t *)data);
+++		return ucv_boolean_new(blobmsg_get_bool(attr));
++ 
++ 	case BLOBMSG_TYPE_INT16:
++-		return ucv_int64_new((int16_t)be16_to_cpu(*(uint16_t *)data));
+++		return ucv_int64_new((int16_t)blobmsg_get_u16(attr));
++ 
++ 	case BLOBMSG_TYPE_INT32:
++-		return ucv_int64_new((int32_t)be32_to_cpu(*(uint32_t *)data));
+++		return ucv_int64_new((int32_t)blobmsg_get_u32(attr));
++ 
++ 	case BLOBMSG_TYPE_INT64:
++-		return ucv_int64_new((int64_t)be64_to_cpu(*(uint64_t *)data));
+++		return ucv_int64_new((int64_t)blobmsg_get_u64(attr));
++ 
++ 	case BLOBMSG_TYPE_DOUBLE:
++-		;
++-		union {
++-			double d;
++-			uint64_t u64;
++-		} v;
++-
++-		v.u64 = be64_to_cpu(*(uint64_t *)data);
+++		return ucv_double_new(blobmsg_get_double(attr));
++ 
++-		return ucv_double_new(v.d);
++-
++ 	case BLOBMSG_TYPE_STRING:
++ 		return ucv_string_new_length(data, len - 1);
++ 

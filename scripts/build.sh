@@ -161,9 +161,9 @@ cp "${board_uboot}/.config" "${out}/u-boot.config"
 cp "${qemu_uboot}/.config" "${out}/u-boot-qemu.config"
 cp "${staging_dir}/image/wrt-qemu-u-boot.bin" "${out}/u-boot-qemu.bin"
 
-# manifest.json: which board (and its OpenWrt device) was built from what and
-# with which flags, and the hash of every image, index, configuration and
-# firmware above.
+# manifest.json: which board (and its OpenWrt device) was built, in which build
+# directories (the build's name), from what and with which flags, and the hash
+# of every image, index, configuration and firmware above.
 run="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}"
 lock_sha256=$(sha256sum "${LOCK_FILE}")
 patches_sha256=$(cat "${REPO_DIR}"/patches/*/*.patch | sha256sum)
@@ -184,6 +184,7 @@ printf '%s\n' "${hashes}" | jq -R -n \
 	--arg device "${device}" \
 	--arg run "${run}" \
 	--arg profile "${profile}" \
+	--arg build "${name}" \
 	--arg cflags "${cflags}" \
 	--arg kernel_cflags "${kernel_cflags}" \
 	--arg toolchain_cflags "${toolchain_cflags}" \
@@ -197,6 +198,7 @@ printf '%s\n' "${hashes}" | jq -R -n \
 		device: $device,
 		run: $run,
 		profile: $profile,
+		build: $build,
 		cflags: $cflags,
 		kernel_cflags: $kernel_cflags,
 		toolchain_cflags: $toolchain_cflags,
