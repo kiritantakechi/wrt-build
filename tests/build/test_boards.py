@@ -16,11 +16,14 @@ import pytest
 import yaml
 
 from wrt_tests import spec
-from wrt_tests.boards import BOARDS_DIR, Board, load_all
-from wrt_tests.emu import MANIFEST_FILE, sha256
+from wrt_tests.boards import BOARDS_DIR, Board, Description, load_all
+from wrt_tests.data import read_json, write_json
+from wrt_tests.emu import sha256
+from wrt_tests.outputs import MANIFEST_FILE, TOOLCHAIN_FILE, Manifest, ToolchainRecord
 
 CAPABILITY = "build/boards"
 REPO = Path(__file__).resolve().parents[2]
+FIXTURES = REPO / "tests" / "fixtures"
 WORKFLOW = REPO / ".github" / "workflows" / "build.yml"
 # What the board facts must stay out of, and the places they belong instead:
 # the descriptions and each board's own U-Boot fragments.
@@ -56,13 +59,13 @@ MAKES = 8
 ROUNDS = 20
 
 
-def _manifest(build: Path) -> dict[str, Any]:
-    return cast("dict[str, Any]", json.loads((build / MANIFEST_FILE).read_text()))
+def _manifest(build: Path) -> Manifest:
+    return read_json(build / MANIFEST_FILE, Manifest)
 
 
 def _build_dirs(tree: Path, build: Path) -> list[Path]:
     """Return the build directories of ``build`` in ``tree``: one, or none once deleted."""
-    return list((tree / "build_dir").glob(f"target-*_{_manifest(build)['build']}"))
+    return list((tree / "build_dir").glob(f"target-*_{_manifest(build).build}"))
 
 
 def _builds_beside(build_output: Path) -> list[tuple[Board, Path]]:
@@ -79,10 +82,10 @@ def _builds_beside(build_output: Path) -> list[tuple[Board, Path]]:
 def test_a_malformed_description_is_named(tmp_path: Path) -> None:
     boards = tmp_path / "boards"
     shutil.copytree(BOARDS_DIR, boards)
-    description = json.loads((boards / "r6s.json").read_text())
+    description = read_json(boards / "r6s.json", Description).model_dump(mode="json")
     del description["cpu"]
     description["emulator"]["cores"] = "eight"
-    (boards / "r6s.json").write_text(json.dumps(description))
+    (boards / "r6s.json").write_text(json.dumps(description), encoding="utf-8")
     result = subprocess.run(
         [BOARD_CHECK, "--boards", boards], capture_output=True, text=True, check=False
     )
@@ -106,6 +109,8 @@ def test_no_board_is_named_outside_its_description() -> None:
         )
     }
     fragments = {f"uboot/board-{board.id}.{kind}" for board in boards for kind in ("env", "config")}
+    # The files the tests keep as a build and a release wrote them name the board.
+    recorded = f"{FIXTURES.relative_to(REPO).as_posix()}/"
     listed = subprocess.run(
         [
             *("git", "-C", REPO, "ls-files", "--cached", "--others", "--exclude-standard"),
@@ -118,7 +123,7 @@ def test_no_board_is_named_outside_its_description() -> None:
     naming = {}
     for name in sorted(set(listed) - fragments):
         path = REPO / name
-        if not path.is_file():
+        if not path.is_file() or name.startswith(recorded):
             continue
         text = path.read_bytes().decode(errors="replace").lower()
         if found := sorted(fact for fact in facts if fact in text):
@@ -195,12 +200,12 @@ def test_boards_build_apart(build_output: Path) -> None:
     variants = {board.uboot.variant for board, _ in builds}
     for board, build in builds:
         manifest = _manifest(build)
-        assert manifest["board"] == board.id
+        assert manifest.board == board.id
         # Its own build and staging directories, and its own output directory,
         # named after the board, and its profile when that profile has seeds of
         # its own for the boards...
-        name = manifest["build"]
-        assert name in {board.id, f"{board.id}_{manifest['profile']}"}
+        name = manifest.build
+        assert name in {board.id, f"{board.id}_{manifest.profile}"}
         config = (build / "diffconfig").read_text().splitlines()
         assert f'CONFIG_BUILD_SUFFIX="{name}"' in config
         assert any(
@@ -219,21 +224,21 @@ def test_boards_build_apart(build_output: Path) -> None:
         assert all(f"-{board.device}-" in name for name in images), images
         if (targets / "config.buildinfo").read_text() == (build / "diffconfig").read_text():
             assert {name: sha256(targets / name) for name in images} == {
-                name: manifest["files"][f"targets/{name}"] for name in images
+                name: manifest.files[f"targets/{name}"] for name in images
             }
 
 
 @spec(CAPABILITY, "One toolchain for every board", "Toolchain free of board flags")
 def test_the_toolchain_carries_no_board_flags(build_output: Path) -> None:
     builds = _builds_beside(build_output)
-    toolchains = {_manifest(build)["toolchain_cflags"] for _, build in builds}
+    toolchains = {_manifest(build).toolchain_cflags for _, build in builds}
     assert len(toolchains) == 1, toolchains
-    flags = set(toolchains.pop().split())
+    flags = set(toolchains.pop())
     assert "-mcpu=generic" in flags
     assert not {f"-mcpu={board.cpu}" for board in load_all()} & flags
 
 
-def _tree_with_toolchain(workdir: Path, board: Board, record: dict[str, str] | None) -> Path:
+def _tree_with_toolchain(workdir: Path, board: Board, record: ToolchainRecord | None) -> Path:
     """Write a stand-in tree configured for ``board`` whose toolchain has ``record``.
 
     Its Makefile answers build.sh's val.* queries and marks any build it is asked for.
@@ -246,7 +251,7 @@ def _tree_with_toolchain(workdir: Path, board: Board, record: dict[str, str] | N
     rust_std.parent.mkdir(parents=True)
     rust_std.write_bytes(RUST_STD_CONTENT)
     if record is not None:
-        (toolchain / "wrt-toolchain.json").write_text(json.dumps(record))
+        write_json(toolchain / TOOLCHAIN_FILE, record)
     (tree / ".config").write_text(f'CONFIG_BUILD_SUFFIX="{board.id}"\n')
     (tree / "Makefile").write_text(
         f"TOOLCHAIN_DIR := {toolchain}\n"
@@ -267,32 +272,38 @@ def _rust_std_hash() -> str:
     return hashlib.sha256(listing.encode()).hexdigest()
 
 
-def _board_toolchains() -> list[tuple[str, dict[str, str] | None, str | None]]:
-    libc = hashlib.sha256(LIBC).hexdigest()
-    rust_std = _rust_std_hash()
+def _neutral_record() -> ToolchainRecord:
+    """Return the record of a board-neutral toolchain, with the stand-in libraries."""
+    return ToolchainRecord.model_validate(
+        {
+            "cflags": NEUTRAL_CFLAGS,
+            "libc": hashlib.sha256(LIBC).hexdigest(),
+            "rust_std": _rust_std_hash(),
+        }
+    )
+
+
+def _board_toolchains() -> list[tuple[str, ToolchainRecord | None, str | None]]:
+    neutral = _neutral_record()
     return [
-        ("neutral", {"cflags": NEUTRAL_CFLAGS, "libc": libc, "rust_std": rust_std}, None),
+        ("neutral", neutral, None),
         ("no-record", None, "has no record of its flags"),
         *(
             (
                 f"{board.id}-mcpu",
-                {
-                    "cflags": f"{NEUTRAL_CFLAGS} -mcpu={board.cpu}",
-                    "libc": libc,
-                    "rust_std": rust_std,
-                },
+                neutral.model_copy(update={"cflags": (*neutral.cflags, f"-mcpu={board.cpu}")}),
                 f"built with {board.id}'s -mcpu={board.cpu}",
             )
             for board in load_all()
         ),
         (
             "other-libc",
-            {"cflags": NEUTRAL_CFLAGS, "libc": "0" * 64, "rust_std": rust_std},
+            neutral.model_copy(update={"libc": "0" * 64}),
             "C library is not the one its record names",
         ),
         (
             "other-rust-std",
-            {"cflags": NEUTRAL_CFLAGS, "libc": libc, "rust_std": "0" * 64},
+            neutral.model_copy(update={"rust_std": "0" * 64}),
             "Rust's standard library is not the one the toolchain's record names",
         ),
     ]
@@ -374,8 +385,11 @@ def _tree_to_build_toolchain(
     if record is not None:
         toolchain.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256(record).hexdigest()
-        (toolchain / "wrt-toolchain.json").write_text(
-            json.dumps({"cflags": cflags, "libc": digest, "rust_std": _rust_std_hash()})
+        write_json(
+            toolchain / TOOLCHAIN_FILE,
+            ToolchainRecord.model_validate(
+                {"cflags": cflags, "libc": digest, "rust_std": _rust_std_hash()}
+            ),
         )
     (tree / "Makefile").write_text(
         f"TOOLCHAIN_DIR := {toolchain}\n"
@@ -447,30 +461,25 @@ def test_a_changed_toolchain_is_built_anew(found: Found, tmp_path: Path) -> None
     assert (tree / "rust-built").exists() == found.rust_rebuilt, result.stderr
     toolchain = tree / "staging_dir" / "toolchain"
     assert (toolchain / "lib" / "libc.so").read_bytes() == LIBC
-    record = json.loads((toolchain / "wrt-toolchain.json").read_text())
-    assert record == {
-        "cflags": NEUTRAL_CFLAGS,
-        "libc": hashlib.sha256(LIBC).hexdigest(),
-        "rust_std": _rust_std_hash(),
-    }
+    assert read_json(toolchain / TOOLCHAIN_FILE, ToolchainRecord) == _neutral_record()
 
 
 @spec(CAPABILITY, "One toolchain for every board", "Keep the cross toolchain when Go or Rust fails")
 def test_a_failed_rust_build_keeps_the_cross_toolchain(tmp_path: Path) -> None:
     tree = _tree_to_build_toolchain(tmp_path, None, None)
-    record = tree / "staging_dir" / "toolchain" / "wrt-toolchain.json"
-    cross = {"cflags": NEUTRAL_CFLAGS, "libc": hashlib.sha256(LIBC).hexdigest()}
+    record = tree / "staging_dir" / "toolchain" / TOOLCHAIN_FILE
+    cross = _neutral_record().model_copy(update={"rust_std": None})
     failed = _toolchain_build(tree, RUST_FAILS="1")
     assert failed.returncode != 0
     assert (tree / "built").exists(), failed.stderr
     # The cross toolchain is recorded as soon as it is built, Rust's library not yet.
-    assert json.loads(record.read_text()) == cross
+    assert read_json(record, ToolchainRecord) == cross
     (tree / "built").unlink()
     result = _toolchain_build(tree)
     assert result.returncode == 0, result.stderr
     assert not (tree / "built").exists(), result.stderr
     assert (tree / "rust-built").exists(), result.stderr
-    assert json.loads(record.read_text()) == {**cross, "rust_std": _rust_std_hash()}
+    assert read_json(record, ToolchainRecord) == _neutral_record()
 
 
 @spec(CAPABILITY, "One toolchain for every board", "Keep the toolchain in buildbot mode")
@@ -548,7 +557,7 @@ def test_parallel_makes_check_the_version(tmp_path: Path) -> None:
     [pytest.param(record, refusal, id=name) for name, record, refusal in _board_toolchains()],
 )
 def test_a_board_toolchain_is_refused(
-    record: dict[str, str] | None, refusal: str | None, tmp_path: Path
+    record: ToolchainRecord | None, refusal: str | None, tmp_path: Path
 ) -> None:
     board = load_all()[0]
     tree = _tree_with_toolchain(tmp_path, board, record)
@@ -571,12 +580,7 @@ def test_a_board_toolchain_is_refused(
 @spec(CAPABILITY, "One toolchain for every board", "Boards share the toolchain")
 def test_a_board_build_that_compiles_the_toolchain_fails(tmp_path: Path) -> None:
     board = load_all()[0]
-    record = {
-        "cflags": NEUTRAL_CFLAGS,
-        "libc": hashlib.sha256(LIBC).hexdigest(),
-        "rust_std": _rust_std_hash(),
-    }
-    tree = _tree_with_toolchain(tmp_path, board, record)
+    tree = _tree_with_toolchain(tmp_path, board, _neutral_record())
     result = subprocess.run(
         [REPO / "scripts" / "build.sh", board.id],
         env={

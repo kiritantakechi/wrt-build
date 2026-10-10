@@ -9,14 +9,14 @@ code around. A review that names boards matches only their builds' warnings: wha
 GCC finds can depend on the optimization, and so on the board's ``-mcpu``.
 """
 
-import tomllib
 from datetime import date
 from pathlib import Path
 from typing import Annotated, override
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field
 
 from wrt_tests import boards
+from wrt_tests.data import read_json, read_toml
 
 REGISTER = Path(__file__).resolve().parents[1] / "reviewed-warnings.toml"
 REPORT_FILE = "warnings.json"
@@ -73,14 +73,12 @@ class Review(_Located):
 
 def load_report(build_output: Path) -> list[Diagnostic]:
     """Return the UB-indicative warnings of the build in ``build_output``."""
-    text = (build_output / REPORT_FILE).read_text()
-    return TypeAdapter(list[Diagnostic]).validate_json(text)
+    return read_json(build_output / REPORT_FILE, list[Diagnostic])
 
 
 def load_register(path: Path = REGISTER) -> list[Review]:
     """Return the reviews of ``path``, which name known boards and no warning twice."""
-    entries = tomllib.loads(path.read_text()).get("warning", [])
-    reviews = [Review.model_validate(entry) for entry in entries]
+    reviews = read_toml(path, "warning", Review)
     known = {board.id for board in boards.load_all()}
     seen: set[Key] = set()
     for review in reviews:

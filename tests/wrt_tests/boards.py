@@ -14,7 +14,9 @@ import sys
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from wrt_tests.data import DataError, read_json
 
 REPO_DIR = Path(__file__).resolve().parents[2]
 BOARDS_DIR = REPO_DIR / "boards"
@@ -128,20 +130,13 @@ def load(board: str, directory: Path = BOARDS_DIR) -> Board:
         known = ", ".join(sorted(p.stem for p in directory.glob("*.json")))
         msg = f"no board {board!r} (boards: {known})"
         raise LookupError(msg)
-    description = Description.model_validate_json(path.read_text())
+    description = read_json(path, Description)
     return Board.model_validate({"id": board, **dict(description)})
 
 
 def load_all(directory: Path = BOARDS_DIR) -> tuple[Board, ...]:
     """Return every board's description, by id."""
     return tuple(load(path.stem, directory) for path in sorted(directory.glob("*.json")))
-
-
-def _errors(path: Path, error: ValidationError) -> list[str]:
-    return [
-        f"{path.name}: {'.'.join(map(str, detail['loc'])) or '(description)'}: {detail['msg']}"
-        for detail in error.errors()
-    ]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -156,8 +151,8 @@ def main(argv: list[str] | None = None) -> int:
     for path in paths:
         try:
             load(path.stem, args.boards)
-        except ValidationError as error:
-            problems += _errors(path, error)
+        except DataError as error:
+            problems += error.problems
     for problem in problems:
         print(f"error: {problem}", file=sys.stderr)
     return 1 if problems else 0

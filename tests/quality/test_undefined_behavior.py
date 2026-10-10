@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.emu import manifest_flags
 from wrt_tests.ubsan import PROBE, PROFILE, Traps, report
 from wrt_tests.undefined_behavior import load_register, load_report, stale, unreviewed
 
@@ -13,6 +12,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from wrt_tests.boards import Board
+    from wrt_tests.outputs import Manifest
     from wrt_tests.router import Router
 
 CAPABILITY = "quality/undefined-behavior"
@@ -52,10 +52,10 @@ def test_every_review_matches_a_warning(board: Board, build_output: Path, profil
 
 @spec(CAPABILITY, "No global masking of undefined behavior", "Check the shared flags")
 @pytest.mark.parametrize("key", ["cflags", "kernel_cflags"])
-def test_no_shared_flag_masks_undefined_behavior(key: str, build_output: Path) -> None:
+def test_no_shared_flag_masks_undefined_behavior(key: str, manifest: Manifest) -> None:
     # The flags every target package compiles with, and those the build adds to the
     # kernel's own; a package's build may add such an option for itself.
-    assert not MASKING & set(manifest_flags(build_output, key))
+    assert not MASKING & set(getattr(manifest, key))
 
 
 @spec(CAPABILITY, "Undefined behavior traps under UBSan", "Trap during a system test")

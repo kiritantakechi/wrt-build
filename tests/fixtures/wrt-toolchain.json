@@ -1,0 +1,5 @@
+{
+  "cflags": "-Os -pipe -mcpu=generic -Warray-bounds -Wuninitialized -Wmaybe-uninitialized -Wstrict-aliasing -Wuse-after-free -Wdangling-pointer -Wshift-negative-value -fno-caller-saves -fno-plt -O3 -fhonour-copts",
+  "libc": "e78879829a7361414e05c02f6465b813bcfdda0e7463b438b6cab7fdf11ee083",
+  "rust_std": "e63dcdeaa09673f339e9a54fc67feb941d34599b73ee556e0aef712d07e690fe"
+}

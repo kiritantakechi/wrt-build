@@ -1,18 +1,32 @@
-"""testing/harness: every scenario maps to one test, and uv pins the Python toolchain."""
+"""testing/harness: one test per scenario, a locked toolchain, and a schema per data file."""
 
+import json
 import re
 import shutil
 import subprocess
 import sys
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from wrt_tests import spec
+from wrt_tests.boards import BOARDS_DIR, Description
+from wrt_tests.coverage import VerifiedElsewhere
+from wrt_tests.data import DataError, read_json, read_toml
+from wrt_tests.outputs import EmulationSource, Manifest, Release, ToolchainRecord
+from wrt_tests.undefined_behavior import Diagnostic, Review
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from pydantic import BaseModel
 
 CAPABILITY = "testing/harness"
 TESTS_DIR = Path(__file__).resolve().parents[1]
+FIXTURES = TESTS_DIR / "fixtures"
 DEMO_SPEC = """## ADDED Requirements
 
 ### Requirement: Demo
@@ -156,3 +170,97 @@ def test_type_error_is_reported(tmp_path: Path) -> None:
     )
     assert result.returncode != 0
     assert "broken.py:1:" in result.stdout
+
+
+def _break(entry: dict[str, object], breakage: str) -> str:
+    """Break ``entry`` in place; return the field that is wrong now."""
+    if breakage == "unknown field":
+        entry["colour"] = "red"
+        return "colour"
+    field = next(key for key, value in entry.items() if isinstance(value, str))
+    entry[field] = 1
+    return field
+
+
+@dataclass(frozen=True, slots=True)
+class _JsonFile:
+    """A JSON data file the tests read, and how: one document, or a list of entries."""
+
+    path: Path
+    read: Callable[[Path], BaseModel | list[BaseModel]]
+
+    def break_into(self, copy: Path, breakage: str) -> str:
+        """Write a copy of the file with ``breakage``; return where its problem lies."""
+        match self.read(self.path):
+            case list() as entries:
+                dumped = [entry.model_dump(mode="json") for entry in entries]
+                where = f"[0]: {_break(dumped[0], breakage)}"
+                copy.write_text(json.dumps(dumped), encoding="utf-8")
+            case document:
+                dumped = document.model_dump(mode="json")
+                where = _break(dumped, breakage)
+                copy.write_text(json.dumps(dumped), encoding="utf-8")
+        return where
+
+
+@dataclass(frozen=True, slots=True)
+class _TomlFile:
+    """A TOML data file the tests read: the entries of one array of tables."""
+
+    path: Path
+    table: str
+    model: type[BaseModel]
+
+    def read(self, path: Path) -> list[BaseModel]:
+        """Read ``path`` as this file is read."""
+        return list(read_toml(path, self.table, self.model))
+
+    def break_into(self, copy: Path, breakage: str) -> str:
+        """Write a copy of the file with ``breakage`` in its first entry; return where."""
+        text = self.path.read_text(encoding="utf-8")
+        header = re.search(rf"^\[\[{self.table}\]\]\n", text, re.MULTILINE)
+        assert header, self.path
+        head, entry = text[: header.end()], text[header.end() :]
+        if breakage == "unknown field":
+            field, entry = "colour", f'colour = "red"\n{entry}'
+        else:
+            line = re.search(r'^(\w+) = ".*"$', entry, re.MULTILINE)
+            assert line, self.path
+            field = line.group(1)
+            entry = f"{entry[: line.start()]}{field} = 1{entry[line.end() :]}"
+        copy.write_text(head + entry, encoding="utf-8")
+        return f"{self.table}[0]: {field}"
+
+
+# Every data file the tests read (module-boundaries D7), a real one of each.
+DATA_FILES = {
+    "board description": _JsonFile(BOARDS_DIR / "r4s.json", lambda p: read_json(p, Description)),
+    "verified elsewhere": _TomlFile(
+        TESTS_DIR / "verified-elsewhere.toml", "scenario", VerifiedElsewhere
+    ),
+    "reviewed warnings": _TomlFile(TESTS_DIR / "reviewed-warnings.toml", "warning", Review),
+    "manifest": _JsonFile(FIXTURES / "manifest.json", lambda p: read_json(p, Manifest)),
+    "warnings report": _JsonFile(
+        FIXTURES / "warnings.json", lambda p: list(read_json(p, list[Diagnostic]))
+    ),
+    "emulation source": _JsonFile(
+        FIXTURES / "source.json", lambda p: read_json(p, EmulationSource)
+    ),
+    "toolchain record": _JsonFile(
+        FIXTURES / "wrt-toolchain.json", lambda p: read_json(p, ToolchainRecord)
+    ),
+    "release": _JsonFile(FIXTURES / "release.json", lambda p: read_json(p, Release)),
+}
+
+
+@spec(CAPABILITY, "One schema per data file", "Malformed data file")
+@pytest.mark.parametrize("breakage", ["unknown field", "wrong type"])
+@pytest.mark.parametrize("name", DATA_FILES)
+def test_a_malformed_data_file_names_the_field(name: str, breakage: str, tmp_path: Path) -> None:
+    data = DATA_FILES[name]
+    copy = tmp_path / data.path.name
+    where = data.break_into(copy, breakage)
+    with pytest.raises(DataError) as error:
+        data.read(copy)
+    problems = error.value.problems
+    assert any(problem.startswith(f"{copy}: {where}: ") for problem in problems), problems

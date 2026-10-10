@@ -1,0 +1,28 @@
+{
+  "board": "r4s",
+  "device": "friendlyarm_nanopi-r4s",
+  "run": "local-0",
+  "profile": "dev",
+  "build": "r4s",
+  "cflags": "-Os -pipe -mcpu=generic -Warray-bounds -Wuninitialized -Wmaybe-uninitialized -Wstrict-aliasing -Wuse-after-free -Wdangling-pointer -Wshift-negative-value -fno-caller-saves -fno-plt -O3 -mcpu=cortex-a72.cortex-a53+crypto -fhonour-copts",
+  "kernel_cflags": "-fno-caller-saves -O3 -mcpu=cortex-a72.cortex-a53+crypto -O2",
+  "toolchain_cflags": "-Os -pipe -mcpu=generic -Warray-bounds -Wuninitialized -Wmaybe-uninitialized -Wstrict-aliasing -Wuse-after-free -Wdangling-pointer -Wshift-negative-value -fno-caller-saves -fno-plt -O3 -fhonour-copts",
+  "upstream_lock_sha256": "f8df55f7d61af40f648ab7d074d106b2202fe6c3739e7a3c2fdf729fcadf3d0e",
+  "patches_sha256": "4930e7716bfbacfeced841564dcfe0baf615d413c58197b22af6b6b3c39bd026",
+  "openwrt_head": "f879fa1be82c24f12a3b75f6b14c454771c43301",
+  "kernel_version": "6.18.52~96aa0a1385b8ca83e6c87595d2ad4a04-r1",
+  "vermagic": "96aa0a1385b8ca83e6c87595d2ad4a04",
+  "files": {
+    "kernel.config": "0c4fdac068567170004ebf5cc7def939eb5c8f9292e6fd12f2eeda052b4ce5ec",
+    "packages/aarch64_generic/base/packages.adb": "607d8ec0b0d86dc623cdc5e9569488788b8961c1e9c8f464060da5c5c47db1b0",
+    "packages/aarch64_generic/luci/packages.adb": "70181b5d93957b4942f3ffcec63d7f52bdf92620814055ce13e11c6e58463e8a",
+    "packages/aarch64_generic/packages/packages.adb": "1ac9a64abcbe0eade9ec18eb845e6f6651943df1d32d0ad3d1be4ef549fc11d1",
+    "packages/aarch64_generic/wrtbuild/packages.adb": "dbf86908db0c7b34370251ad3a258643e113d7baa1a287d7c5b9bbd8c96668ca",
+    "targets/openwrt-rockchip-armv8-friendlyarm_nanopi-r4s-erofs-factory.img.gz": "69347bcf5dbb2ad3f5e2a98154af0c46a29be444ed79d17822e6ed65d80ac702",
+    "targets/openwrt-rockchip-armv8-friendlyarm_nanopi-r4s-erofs-sysupgrade.tar.gz": "40361d01db02694d707d66a924eb022604a4cb14073290abbcdecdb74d835817",
+    "targets/packages/packages.adb": "dcbed4be67cfaf4e8e5ee2e751c19a6a037af98f36d135e0f1ab342f1cc24d33",
+    "u-boot.config": "bfcd59a13451d9341dd501b84255fd3bbb2bdeaaa4b9c3bb723e88c4ea84b53d",
+    "u-boot-qemu.bin": "27d63b33aace2dc2b23c634fd63334079691f7db671067e49c9de860f41a2b53",
+    "u-boot-qemu.config": "7d051461e420072ded5a3e1b08d7e3b71da3317a491c3dd735af92968dd5fbf7"
+  }
+}

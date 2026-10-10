@@ -1,0 +1,16 @@
+{
+  "tag": "r20261009-1019293-1",
+  "prerelease": false,
+  "notes": "Built from these upstream commits (upstream.lock):\n\n- openwrt `101929399c12644ac8c3fe9b11b83c93fe9ee755`\n- packages `a637759c3aae15f112bff2f3a845c74ee331b978`\n- luci `05dc750ddb5e5c4aacf4ae0635bbf8b14a494909`\n\nPatch queue: `740b378ca608cfeb8b98db2b6ba13c70756006cd3f2502246589d03e9ceb4853` (sha256 of patches/)\nKernel: `6.18.52~96aa0a1385b8ca83e6c87595d2ad4a04-r1`\nBoards: r4s\n",
+  "boards": [
+    "r4s"
+  ],
+  "assets": [
+    "friendlyarm_nanopi-r4s-manifest.json",
+    "friendlyarm_nanopi-r4s-manifest.json.sig",
+    "friendlyarm_nanopi-r4s-repo.tar",
+    "openwrt-rockchip-armv8-friendlyarm_nanopi-r4s-erofs-factory.img.gz",
+    "openwrt-rockchip-armv8-friendlyarm_nanopi-r4s-erofs-sysupgrade.tar.gz",
+    "SHA256SUMS"
+  ]
+}

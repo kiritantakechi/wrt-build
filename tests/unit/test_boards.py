@@ -5,9 +5,9 @@ import shutil
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from pydantic import ValidationError
 
-from wrt_tests.boards import BOARDS_DIR, load, load_all
+from wrt_tests.boards import BOARDS_DIR, Description, load, load_all
+from wrt_tests.data import DataError, read_json
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -56,7 +56,7 @@ def _two_wan_ports(description: dict[str, Any]) -> None:
         (_no_cpu, "cpu"),
         (_cores_in_words, "soc.cores.0"),
         (_an_id, "id"),
-        (_two_wan_ports, "ports"),
+        (_two_wan_ports, "(document)"),
     ],
     ids=["missing field", "wrong type", "id in the file", "two WAN ports"],
 )
@@ -65,10 +65,10 @@ def test_a_broken_description_is_refused(
 ) -> None:
     boards = tmp_path / "boards"
     shutil.copytree(BOARDS_DIR, boards)
-    description = json.loads((boards / "r6s.json").read_text())
+    description = read_json(boards / "r6s.json", Description).model_dump(mode="json")
     breakage(description)
-    (boards / "r6s.json").write_text(json.dumps(description))
-    with pytest.raises(ValidationError) as refused:
+    (boards / "r6s.json").write_text(json.dumps(description), encoding="utf-8")
+    with pytest.raises(DataError) as refused:
         load("r6s", boards)
-    located = {".".join(map(str, error["loc"])) or "ports" for error in refused.value.errors()}
+    located = {problem.split(": ")[1] for problem in refused.value.problems}
     assert field in located

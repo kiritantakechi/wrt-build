@@ -1,0 +1,310 @@
+[
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "/usr/local/src/chet/src/bash/src/parse.y",
+    "function": "parse_comsub",
+    "line": 4659
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "alias.c",
+    "function": "all_aliases",
+    "line": 262
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "bashline.c",
+    "function": "attempt_shell_completion",
+    "line": 1739
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "braces.c",
+    "function": "brace_expand",
+    "line": 249
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "builtins/declare.def",
+    "function": "declare_internal",
+    "line": 409
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "builtins/enable.def",
+    "function": "enable_builtin",
+    "line": 196
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "builtins/history.def",
+    "function": "history_builtin",
+    "line": 190
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "builtins/pushd.def",
+    "function": "pushd_builtin",
+    "line": 265
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "execute_cmd.c",
+    "function": "execute_command_internal",
+    "line": 1197
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "jobs.c",
+    "function": "make_child",
+    "line": 2327
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "lib/glob/glob.c",
+    "function": "skipname",
+    "line": 263
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "lib/readline/complete.c",
+    "function": "print_filename",
+    "line": 1101
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "lib/readline/complete.c",
+    "function": "rl_complete_internal",
+    "line": 2178
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "lib/readline/display.c",
+    "function": "rl_redisplay",
+    "line": 1490
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "pathexp.c",
+    "function": "sh_sortglob",
+    "line": 917
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "redir.c",
+    "function": "do_redirection_internal",
+    "line": 872
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "subst.c",
+    "function": "parameter_brace_expand",
+    "line": 10247
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "subst.c",
+    "function": "parameter_brace_expand_length",
+    "line": 8300
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "subst.c",
+    "function": "parameter_brace_find_indir",
+    "line": 7867
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "subst.c",
+    "function": "parameter_brace_substring",
+    "line": 9078
+  },
+  {
+    "package": "bash",
+    "option": "-Wmaybe-uninitialized",
+    "file": "subst.c",
+    "function": "read_comsub",
+    "line": 6722
+  },
+  {
+    "package": "f2fs-tools",
+    "option": "-Wmaybe-uninitialized",
+    "file": "segment.c",
+    "function": "f2fs_build_file",
+    "line": 495
+  },
+  {
+    "package": "iproute2",
+    "option": "-Wstringop-overflow",
+    "file": "lib/libnetlink.c",
+    "function": "mdb_flush",
+    "line": 1388
+  },
+  {
+    "package": "iproute2",
+    "option": "-Wstringop-overflow",
+    "file": "lib/libnetlink.c",
+    "function": "mdb_get",
+    "line": 1388
+  },
+  {
+    "package": "iproute2",
+    "option": "-Wstringop-overflow",
+    "file": "lib/libnetlink.c",
+    "function": "mdb_modify",
+    "line": 1388
+  },
+  {
+    "package": "jansson",
+    "option": "-Wstringop-overflow",
+    "file": "src/load.c",
+    "function": "lex_get_save",
+    "line": 233
+  },
+  {
+    "package": "jansson",
+    "option": "-Wstringop-overflow",
+    "file": "src/load.c",
+    "function": "lex_scan",
+    "line": 573
+  },
+  {
+    "package": "jansson",
+    "option": "-Wstringop-overflow",
+    "file": "src/load.c",
+    "function": "stream_get",
+    "line": 178
+  },
+  {
+    "package": "libgcrypt",
+    "option": "-Wstringop-overflow",
+    "file": "basic.c",
+    "function": "check_one_cipher_ctr_reset",
+    "line": 12274
+  },
+  {
+    "package": "libseccomp",
+    "option": "-Wdangling-pointer",
+    "file": "gen_bpf.c",
+    "function": "_gen_bpf_build_bpf",
+    "line": 2077
+  },
+  {
+    "package": "ncurses",
+    "option": "-Wmaybe-uninitialized",
+    "file": "ncurses/base/lib_getch.c",
+    "function": "_nc_wgetch",
+    "line": 477
+  },
+  {
+    "package": "pcre2",
+    "option": "-Wstringop-overflow",
+    "file": "src/pcre2_jit_compile.c",
+    "function": "fast_forward_first_n_chars",
+    "line": 6542
+  },
+  {
+    "package": "podman",
+    "option": "-Wstringop-overread",
+    "file": "vendor/github.com/mattn/go-sqlite3/sqlite3-binding.c",
+    "function": "sqlite3ColumnSetColl",
+    "line": 123724
+  },
+  {
+    "package": "ppp",
+    "option": "-Waddress-of-packed-member",
+    "file": "pptp.c",
+    "function": "pptp_start_client",
+    "line": 185
+  },
+  {
+    "package": "ppp",
+    "option": "-Warray-bounds",
+    "file": "discovery.c",
+    "function": "sendPADI",
+    "line": 338
+  },
+  {
+    "package": "ppp",
+    "option": "-Warray-bounds",
+    "file": "discovery.c",
+    "function": "sendPADI",
+    "line": 339
+  },
+  {
+    "package": "ppp",
+    "option": "-Wmaybe-uninitialized",
+    "file": "ipcp.c",
+    "function": "setnetmask",
+    "line": 526
+  },
+  {
+    "package": "ppp",
+    "option": "-Wmaybe-uninitialized",
+    "file": "options.c",
+    "function": "ppp_get_filepath",
+    "line": 540
+  },
+  {
+    "package": "ppp",
+    "option": "-Wmaybe-uninitialized",
+    "file": "options.c",
+    "function": "ppp_get_path",
+    "line": 513
+  },
+  {
+    "package": "procd",
+    "option": "-Wmaybe-uninitialized",
+    "file": "uxc.c",
+    "function": "uxc_list",
+    "line": 1330
+  },
+  {
+    "package": "util-linux",
+    "option": "-Wstringop-overread",
+    "file": "lib/sha1.c",
+    "function": "ul_SHA1Final",
+    "line": 242
+  },
+  {
+    "package": "util-linux",
+    "option": "-Wstringop-overread",
+    "file": "lib/sha1.c",
+    "function": "ul_SHA1Final",
+    "line": 245
+  },
+  {
+    "package": "zsh",
+    "option": "-Wfree-nonheap-object",
+    "file": "hashtable.c",
+    "function": "emptyhisttable",
+    "line": 1389
+  },
+  {
+    "package": "zsh",
+    "option": "-Wfree-nonheap-object",
+    "file": "hist.c",
+    "function": "histremovedups",
+    "line": 1253
+  }
+]

@@ -14,7 +14,6 @@ builds that have since changed are removed.
 
 import argparse
 import hashlib
-import json
 import os
 import re
 import shutil
@@ -31,14 +30,15 @@ import yaml
 from pexpect import TIMEOUT
 
 from wrt_tests.boards import Board, load
+from wrt_tests.data import DataError, read_json, write_json
 from wrt_tests.image import SECTOR, Fit, FitNode, gunzip_first_member, parse_fit, read_mbr
 from wrt_tests.net import segments, taps
+from wrt_tests.outputs import MANIFEST_FILE, SOURCE_FILE, EmulationSource, Manifest
 
 if TYPE_CHECKING:
     from labgrid import Target
     from labgrid.driver import QEMUDriver
 
-MANIFEST_FILE = "manifest.json"
 FACTORY_IMAGE = "targets/*-factory.img.gz"
 FIRMWARE = "u-boot-qemu.bin"
 # The files of an emulator directory.
@@ -46,7 +46,6 @@ DISK_FILE = "disk.raw"
 OVERLAY_FILE = "overlay.qcow2"
 FIRMWARE_FILE = "u-boot.bin"
 DTB_FILE = "board.dtb"
-SOURCE_FILE = "source.json"
 TARGET_FILE = "target.yaml"
 QEMU = "qemu-system-aarch64"
 MACHINE = "virt,gic-version=3"
@@ -159,12 +158,6 @@ class Machine:
         }
 
 
-def manifest_flags(build: Path, key: str) -> list[str]:
-    """Return the compiler flags the manifest of ``build`` records under ``key``."""
-    manifest = json.loads((build / MANIFEST_FILE).read_text())
-    return str(manifest[key]).split()
-
-
 def sha256(path: Path) -> str:
     """SHA-256 of a file, read in chunks."""
     digest = hashlib.sha256()
@@ -222,11 +215,11 @@ class Build:
         if len(images) != 1:
             msg = f"expected one {FACTORY_IMAGE} in {directory}, found {len(images)}"
             raise SystemExit(msg)
-        manifest = json.loads((directory / MANIFEST_FILE).read_text())
-        build = cls(directory, load(manifest["board"]), images[0], directory / FIRMWARE)
+        manifest = read_json(directory / MANIFEST_FILE, Manifest)
+        build = cls(directory, load(manifest.board), images[0], directory / FIRMWARE)
         for path in (build.image, build.firmware):
             name = path.relative_to(directory).as_posix()
-            if sha256(path) != manifest["files"].get(name):
+            if sha256(path) != manifest.files.get(name):
                 msg = f"{name} does not match {directory / MANIFEST_FILE}"
                 raise SystemExit(msg)
         return build
@@ -262,15 +255,15 @@ def prepare(build: Build, root: Path) -> Path:
         for node, capacity in zip(cpus, build.board.soc.cores, strict=True):
             run("fdtput", "-t", "u", str(dtb), f"/cpus/{node}", "capacity-dmips-mhz", str(capacity))
 
-        source = {
-            "build": str(build.directory),
-            "board": build.board.id,
-            "image": str(build.image),
-            "image_sha256": image_sha256,
-            "firmware": str(build.firmware),
-            "firmware_sha256": firmware_sha256,
-        }
-        (work / SOURCE_FILE).write_text(json.dumps(source, indent=2) + "\n")
+        source = EmulationSource(
+            build=build.directory,
+            board=build.board.id,
+            image=build.image,
+            image_sha256=image_sha256,
+            firmware=build.firmware,
+            firmware_sha256=firmware_sha256,
+        )
+        write_json(work / SOURCE_FILE, source)
         shutil.rmtree(directory, ignore_errors=True)
         work.rename(directory)
     description = machine.description(directory)
@@ -278,24 +271,30 @@ def prepare(build: Build, root: Path) -> Path:
     return directory
 
 
-def _current(source: dict[str, str]) -> bool:
-    """Return whether the build an emulator directory was made from still has those files."""
-    build = Path(source["build"])
+def _current(record: Path) -> bool:
+    """Return whether the build an emulator directory was made from still has those files.
+
+    A record or a manifest that no longer reads as one names a build that changed.
+    """
     try:
-        files = json.loads((build / MANIFEST_FILE).read_text())["files"]
-    except FileNotFoundError:
+        source = read_json(record, EmulationSource)
+        files = read_json(source.build / MANIFEST_FILE, Manifest).files
+    except FileNotFoundError, DataError:
         return False
     return all(
-        files.get(Path(source[kind]).relative_to(build).as_posix()) == source[f"{kind}_sha256"]
-        for kind in ("image", "firmware")
+        files.get(path.relative_to(source.build).as_posix()) == digest
+        for path, digest in (
+            (source.image, source.image_sha256),
+            (source.firmware, source.firmware_sha256),
+        )
     )
 
 
 def prune(root: Path) -> None:
     """Remove the emulator directories of builds that have changed or gone since."""
-    for source in root.glob(f"*/{SOURCE_FILE}"):
-        if not _current(json.loads(source.read_text())):
-            shutil.rmtree(source.parent)
+    for record in root.glob(f"*/{SOURCE_FILE}"):
+        if not _current(record):
+            shutil.rmtree(record.parent)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import releases
+from wrt_tests.data import write_json
 from wrt_tests.internet import RELEASES
+from wrt_tests.outputs import RELEASE_FILE, Release
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -22,8 +24,8 @@ def _release(directory: Path, tag: str, *, prerelease: bool) -> Path:
     """Write a release of one asset, as release-publish.sh lays one out."""
     directory.mkdir(parents=True)
     (directory / "asset.bin").write_bytes(tag.encode() * 4096)
-    info = {"tag": tag, "prerelease": prerelease, "notes": tag, "assets": ["asset.bin"]}
-    (directory / "release.json").write_text(json.dumps(info))
+    info = Release(tag=tag, prerelease=prerelease, notes=tag, boards=(), assets=("asset.bin",))
+    write_json(directory / RELEASE_FILE, info)
     return directory
 
 

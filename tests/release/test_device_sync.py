@@ -10,7 +10,6 @@ comes with the first test that asks for it and stays for the module.
 """
 
 import itertools
-import json
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -22,8 +21,10 @@ import pytest
 from wrt_tests import releases, spec
 from wrt_tests.ab import boot_area_sha256, slot, slot_sha256
 from wrt_tests.boards import load_all
+from wrt_tests.data import read_json, write_json
 from wrt_tests.internet import RELEASES
 from wrt_tests.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
+from wrt_tests.outputs import RELEASE_FILE, Manifest, Release
 from wrt_tests.storage import MOUNT
 from wrt_tests.trees import linked_copy, replace
 
@@ -72,7 +73,7 @@ class Releases:
     def publish(self, release: Path | None = None, *, prerelease: bool = False) -> str:
         """Publish the build (or ``release``) as a new release, the newest now; return its tag."""
         release = release or self.assembled
-        tag = json.loads((release / "release.json").read_text())["tag"]
+        tag = read_json(release / RELEASE_FILE, Release).tag
         return releases.publish(
             self.root,
             REPOSITORY,
@@ -315,9 +316,9 @@ def test_a_release_of_several_boards(
     for asset in [path for path in release.iterdir() if board.device in path.name]:
         foreign = release / asset.name.replace(board.device, other.device)
         foreign.write_bytes(b"another board's asset\n")
-    info = json.loads((release / "release.json").read_text())
-    info["assets"] = sorted(path.name for path in release.iterdir() if path.name != "release.json")
-    replace(release / "release.json", json.dumps(info))
+    info = read_json(release / RELEASE_FILE, Release)
+    assets = tuple(sorted(path.name for path in release.iterdir() if path.name != RELEASE_FILE))
+    write_json(release / RELEASE_FILE, info.model_copy(update={"assets": assets}))
     tag = stand_in.publish(release)
     ok, said = stand_in.sync()
     assert ok, said
@@ -344,8 +345,8 @@ def test_another_board_s_build_is_refused(
     other = next(other for other in load_all() if other.id != board.id)
     release = linked_copy(stand_in.assembled, tmp_path / "release")
     manifest = release / f"{board.device}-manifest.json"
-    content = json.loads(manifest.read_text())
-    replace(manifest, json.dumps({**content, "board": other.id, "device": other.device}) + "\n")
+    content = read_json(manifest, Manifest)
+    write_json(manifest, content.model_copy(update={"board": other.id, "device": other.device}))
     release_keys.sign_file(manifest)
     tag = stand_in.publish(release)
     ok, said = stand_in.sync()

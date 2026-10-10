@@ -16,14 +16,15 @@ import argparse
 import contextlib
 import io
 import sys
-import tomllib
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import override
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 
+from wrt_tests.data import read_toml
 from wrt_tests.specs import Scenario, ScenarioId, capability_of_module, load_scenarios
 
 TESTS_DIR = Path(__file__).resolve().parent.parent
@@ -44,6 +45,22 @@ class TestRef:
     def __str__(self) -> str:
         """Render as ``module::function``."""
         return f"{self.module.as_posix()}::{self.function}"
+
+
+class VerifiedElsewhere(BaseModel):
+    """A scenario that the build or CI verifies rather than a test, and what verifies it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    capability: str
+    requirement: str
+    scenario: str
+    by: str
+
+    @property
+    def id(self) -> ScenarioId:
+        """Return the scenario's identity."""
+        return ScenarioId(self.capability, self.requirement, self.scenario)
 
 
 class _Collector:
@@ -84,11 +101,7 @@ def load_elsewhere(tests_dir: Path = TESTS_DIR) -> dict[ScenarioId, str]:
     path = tests_dir / ELSEWHERE_FILE
     if not path.exists():
         return {}
-    entries = tomllib.loads(path.read_text(encoding="utf-8")).get("scenario", [])
-    return {
-        ScenarioId(entry["capability"], entry["requirement"], entry["scenario"]): entry["by"]
-        for entry in entries
-    }
+    return {entry.id: entry.by for entry in read_toml(path, "scenario", VerifiedElsewhere)}
 
 
 def structure_errors(tests: list[TestRef]) -> list[str]:

@@ -1,7 +1,6 @@
 """testing/emulation: the emulator boots the shipped image as its board (D14, board-model D7)."""
 
 import ipaddress
-import json
 import lzma
 import re
 from pathlib import Path
@@ -10,13 +9,14 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.emu import MANIFEST_FILE, boot_files, extract_fit_image, read_fit, sha256
+from wrt_tests.emu import boot_files, extract_fit_image, read_fit, sha256
 from wrt_tests.poll import until
 from wrt_tests.storage import PLUG_TIMEOUT, Disk, device
 
 if TYPE_CHECKING:
     from wrt_tests.boards import Board
     from wrt_tests.net import Netns, Network
+    from wrt_tests.outputs import EmulationSource, Manifest
     from wrt_tests.router import Router
 
 CAPABILITY = "testing/emulation"
@@ -28,15 +28,17 @@ LAN = ipaddress.ip_network("10.0.0.0/24")
 def test_boots_the_shipped_artifacts(
     router: Router,
     emulation_dir: Path,
-    emulation_source: dict[str, str],
-    build_output: Path,
+    emulation_source: EmulationSource,
+    manifest: Manifest,
     tmp_path: Path,
 ) -> None:
-    files = json.loads((build_output / MANIFEST_FILE).read_text())["files"]
-    for kind in ("image", "firmware"):
-        path = Path(emulation_source[kind])
-        shipped = files[path.relative_to(build_output).as_posix()]
-        assert sha256(path) == emulation_source[f"{kind}_sha256"] == shipped
+    source = emulation_source
+    for path, recorded in (
+        (source.image, source.image_sha256),
+        (source.firmware, source.firmware_sha256),
+    ):
+        shipped = manifest.files[path.relative_to(source.build).as_posix()]
+        assert sha256(path) == recorded == shipped
 
     # U-Boot started the kernel of slot A's FIT, with the slot's command line.
     boot_files(emulation_dir / "disk.raw", 1, ("kernel.img",), tmp_path)

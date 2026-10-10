@@ -5,8 +5,9 @@
 # release on GitHub, the one the board's manifest in that release names, checked
 # against it. While no stable release carries the board, before the first
 # release or when the board is new, it gets this build's own (out/<board>/ci).
-# Either comes with this build's emulator firmware and a manifest of the two, as
-# emu-prepare reads a build: the drill boots it and upgrades to the signed
+# Either comes with this build's emulator firmware, and with the manifest of
+# the build the image comes from, profile drill-base, its files those two: as
+# emu-prepare reads a build, the drill boots it and upgrades to the signed
 # candidate. Only GitHub's answer that there is no stable release counts as none:
 # any other failure to look it up stops here, rather than let the drill start
 # from the candidate itself.
@@ -52,6 +53,7 @@ if [ -n "${tag}" ] &&
 		--dir "${base}/targets" || die "cannot download ${image#targets/} of ${tag}"
 	(cd "${base}" && sha256sum --check --quiet "${work}/factory.sha256") ||
 		die "${image#targets/} of ${tag} does not match ${manifest}"
+	built="${work}/${manifest}"
 	info "drill base: ${tag}, the latest stable release"
 else
 	if [ -n "${tag}" ]; then
@@ -59,12 +61,12 @@ else
 	else
 		reason="no stable release yet"
 	fi
-	tag=this-build
 	cp "${ci}"/targets/*-factory.img.gz "${base}/targets/"
+	built="${ci}/manifest.json"
 	info "drill base: this build (${reason})"
 fi
 cp "${ci}/u-boot-qemu.bin" "${base}/"
 (cd "${base}" && sha256sum targets/*-factory.img.gz u-boot-qemu.bin) >"${work}/base.sha256"
-jq -R -n --arg board "${board}" --arg tag "${tag}" \
-	'{board: $board, run: "drill-base", profile: $tag, files: [inputs | split("  ") | {(.[1]): .[0]}] | add}' \
+jq -R -n --slurpfile built "${built}" \
+	'$built[0] + {profile: "drill-base", files: [inputs | split("  ") | {(.[1]): .[0]}] | add}' \
 	<"${work}/base.sha256" >"${base}/manifest.json"

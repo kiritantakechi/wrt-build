@@ -19,7 +19,6 @@ and the image's own trust anchors decide.
 """
 
 import functools
-import json
 import os
 import subprocess
 import threading
@@ -30,13 +29,15 @@ from typing import TYPE_CHECKING, cast, override
 import pytest
 
 from wrt_tests import app, boards, pki
+from wrt_tests.data import read_json
 from wrt_tests.datapath import Online, dae_start
-from wrt_tests.emu import MANIFEST_FILE, SOURCE_FILE, Emulator
+from wrt_tests.emu import Emulator
 from wrt_tests.internet import REGISTRY
 from wrt_tests.isp import Isp
 from wrt_tests.keys import Keys, install_trust, sign
 from wrt_tests.net import RUNNER_ADDRESS, Network, topology
 from wrt_tests.oci import IMAGE, TAG, extract_root, image_layout, push
+from wrt_tests.outputs import MANIFEST_FILE, SOURCE_FILE, EmulationSource, Manifest
 from wrt_tests.poll import until
 from wrt_tests.router import Router
 from wrt_tests.storage import Disk, initialize, wait_mounted
@@ -253,30 +254,33 @@ def app_pod(trusted_ca: Online, data_disk: Disk, app_image: str) -> Online:
 
 
 @pytest.fixture(scope="session")
-def emulation_source(emulation_dir: Path) -> dict[str, str]:
+def emulation_source(emulation_dir: Path) -> EmulationSource:
     """Return what emu-prepare recorded about the emulator's files."""
-    path = emulation_dir / SOURCE_FILE
-    return cast("dict[str, str]", json.loads(path.read_text()))
+    return read_json(emulation_dir / SOURCE_FILE, EmulationSource)
 
 
 @pytest.fixture(scope="session")
-def build_output(emulation_source: dict[str, str]) -> Path:
+def build_output(emulation_source: EmulationSource) -> Path:
     """Return the output directory of the build the emulator boots."""
-    return Path(emulation_source["build"])
+    return emulation_source.build
 
 
 @pytest.fixture(scope="session")
-def board(build_output: Path) -> boards.Board:
+def manifest(build_output: Path) -> Manifest:
+    """Return the manifest of the build under test."""
+    return read_json(build_output / MANIFEST_FILE, Manifest)
+
+
+@pytest.fixture(scope="session")
+def board(manifest: Manifest) -> boards.Board:
     """Return the board the build under test was built for, as its manifest names it."""
-    manifest = json.loads((build_output / MANIFEST_FILE).read_text())
-    return boards.load(manifest["board"])
+    return boards.load(manifest.board)
 
 
 @pytest.fixture(scope="session")
-def profile(build_output: Path) -> str:
+def profile(manifest: Manifest) -> str:
     """Return the profile the build under test was built in, as its manifest names it."""
-    manifest = json.loads((build_output / MANIFEST_FILE).read_text())
-    return str(manifest["profile"])
+    return manifest.profile
 
 
 @pytest.fixture(scope="session")

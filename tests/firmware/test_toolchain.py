@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.emu import manifest_flags
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from wrt_tests.boards import Board
+    from wrt_tests.outputs import Manifest
 
 CAPABILITY = "firmware/toolchain"
 PATCHES = Path(__file__).resolve().parents[2] / "patches" / "openwrt"
@@ -30,7 +32,7 @@ RELAXING = frozenset(
 )
 
 
-def _last(flags: list[str], pattern: re.Pattern[str]) -> int:
+def _last(flags: Sequence[str], pattern: re.Pattern[str]) -> int:
     """Return the index of the last of ``flags`` that ``pattern`` matches; GCC takes that one."""
     return max(i for i, flag in enumerate(flags) if pattern.fullmatch(flag))
 
@@ -48,9 +50,9 @@ def test_patch_queue_leaves_target_mk_alone() -> None:
 
 
 @spec(CAPABILITY, "Optimization flags for big.LITTLE cores", "Check compile command")
-def test_packages_compile_for_the_board(board: Board, build_output: Path) -> None:
+def test_packages_compile_for_the_board(board: Board, manifest: Manifest) -> None:
     # Every target package compiles with TARGET_CFLAGS, which the manifest records.
-    flags = manifest_flags(build_output, "cflags")
+    flags = manifest.cflags
     size = flags.index("-Os")
     optimization = _last(flags, OPTIMIZATION)
     cpu = _last(flags, MCPU)
@@ -61,14 +63,14 @@ def test_packages_compile_for_the_board(board: Board, build_output: Path) -> Non
 
 
 @spec(CAPABILITY, "Kernel at its supported optimization level", "Check the kernel's flags")
-def test_the_kernel_compiles_for_the_board(board: Board, build_output: Path) -> None:
+def test_the_kernel_compiles_for_the_board(board: Board, manifest: Manifest) -> None:
     # Kbuild appends the flags the build adds (KCFLAGS) after its own.
-    flags = manifest_flags(build_output, "kernel_cflags")
+    flags = manifest.kernel_cflags
     assert flags[_last(flags, OPTIMIZATION)] == "-O2"
     assert flags[_last(flags, MCPU)] == f"-mcpu={board.cpu}"
 
 
 @spec(CAPABILITY, "No relaxed floating-point semantics", "Check for relaxed floating point")
 @pytest.mark.parametrize("key", ["cflags", "kernel_cflags"])
-def test_no_flag_relaxes_floating_point(key: str, build_output: Path) -> None:
-    assert not RELAXING & set(manifest_flags(build_output, key))
+def test_no_flag_relaxes_floating_point(key: str, manifest: Manifest) -> None:
+    assert not RELAXING & set(getattr(manifest, key))

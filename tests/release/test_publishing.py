@@ -6,7 +6,6 @@ to gh, a stand-in on PATH that records its arguments. The workflow checks read
 .github/workflows/build.yml.
 """
 
-import json
 import os
 import re
 import subprocess
@@ -19,6 +18,8 @@ import yaml
 
 from wrt_tests import spec
 from wrt_tests.boards import load_all
+from wrt_tests.data import read_json, write_json
+from wrt_tests.outputs import MANIFEST_FILE, RELEASE_FILE, Manifest, Release
 from wrt_tests.trees import linked_copy, replace
 
 if TYPE_CHECKING:
@@ -77,11 +78,11 @@ def _gh_args(gh: Path) -> Sequence[str]:
 def test_release_contents(board: Board, signed_boards: Path, tmp_path: Path) -> None:
     release = tmp_path / "release"
     assert _publish(signed_boards, release).returncode == 0
-    info = json.loads((release / "release.json").read_text())
-    assert info["boards"] == [board.id]
+    info = read_json(release / RELEASE_FILE, Release)
+    assert info.boards == (board.id,)
     # Each board's set is named after its device.
     device = board.device
-    assets = set(info["assets"])
+    assets = set(info.assets)
     named = {f"{device}-{name}" for name in ("repo.tar", "manifest.json", "manifest.json.sig")}
     assert {*named, "SHA256SUMS"} <= assets
     assert any(f"-{device}-" in name and name.endswith(FACTORY) for name in assets)
@@ -91,7 +92,7 @@ def test_release_contents(board: Board, signed_boards: Path, tmp_path: Path) -> 
     )
     assert sums.returncode == 0
     # The kmods in the repository depend on the kernel the manifest names.
-    manifest = json.loads((release / f"{device}-manifest.json").read_text())
+    manifest = read_json(release / f"{device}-{MANIFEST_FILE}", Manifest)
     with tarfile.open(release / f"{device}-repo.tar") as repo:
         repo.extract(KMODS, tmp_path / "repo", filter="data")
     index = subprocess.run(
@@ -99,7 +100,7 @@ def test_release_contents(board: Board, signed_boards: Path, tmp_path: Path) -> 
     ).stdout
     kernels = set(re.findall(r"kernel=([^\s\"']+)", index))
     assert kernels
-    assert all(manifest["vermagic"] in kernel for kernel in kernels), kernels
+    assert all(manifest.vermagic in kernel for kernel in kernels), kernels
 
 
 @spec(CAPABILITY, "Publish after signing and drill", "Upgrade drill fails")
@@ -147,7 +148,7 @@ def test_a_bump_is_a_candidate(signed_boards: Path, tmp_path: Path, gh: Path) ->
     release = tmp_path / "release"
     result = _publish(signed_boards, release, "--prerelease", "--upload", gh=gh)
     assert result.returncode == 0, result.stderr
-    assert json.loads((release / "release.json").read_text())["prerelease"] is True
+    assert read_json(release / RELEASE_FILE, Release).prerelease
     args = _gh_args(gh)
     assert args[:2] == ["release", "create"]
     assert {"--prerelease", "--latest=false"} <= set(args)
@@ -165,13 +166,13 @@ def test_main_is_a_stable_release(
     release = tmp_path / "release"
     result = _publish(signed_boards, release, "--upload", gh=gh)
     assert result.returncode == 0, result.stderr
-    assert json.loads((release / "release.json").read_text())["prerelease"] is False
+    assert not read_json(release / RELEASE_FILE, Release).prerelease
     args = _gh_args(gh)
     assert "--latest" in args
     assert "--prerelease" not in args
     uploaded = {Path(arg).name for arg in args if arg.startswith(str(release))}
     assert f"{board.device}-repo.tar" in uploaded
-    assert "release.json" not in uploaded
+    assert RELEASE_FILE not in uploaded
 
 
 @spec(CAPABILITY, "Publish after signing and drill", "A board missing")
@@ -212,12 +213,11 @@ def test_release_notes_name_the_sources(
 ) -> None:
     release = tmp_path / "release"
     assert _publish(signed_boards, release).returncode == 0
-    notes = json.loads((release / "release.json").read_text())["notes"]
+    notes = read_json(release / RELEASE_FILE, Release).notes
     for line in LOCK.read_text().splitlines():
         if line.strip() and not line.startswith("#"):
             assert line.split()[2] in notes
-    patches = json.loads((signed_repo / "manifest.json").read_text())["patches_sha256"]
-    assert patches in notes
+    assert read_json(signed_repo / MANIFEST_FILE, Manifest).patches_sha256 in notes
 
 
 @spec(CAPABILITY, "Artifacts come from one build", "Boards built from different sources")
@@ -232,9 +232,11 @@ def test_boards_from_different_sources_are_not_mixed(
     signed.mkdir()
     (signed / board.id).symlink_to(signed_repo)
     linked_copy(signed_repo, signed / other.id)
-    manifest = signed / other.id / "manifest.json"
-    built = {"board": other.id, "device": other.device, field: "0" * 40}
-    replace(manifest, json.dumps(json.loads(manifest.read_text()) | built))
+    manifest = signed / other.id / MANIFEST_FILE
+    content = read_json(manifest, Manifest)
+    source = "0" * len(getattr(content, field))
+    built = {"board": other.id, "device": other.device, field: source}
+    write_json(manifest, content.model_copy(update=built))
     result = _publish(signed, tmp_path / "release", "--upload", gh=gh)
     assert result.returncode != 0
     assert f"were built from different sources: their {field} differs" in result.stderr

@@ -19,6 +19,8 @@ import pytest
 
 from wrt_tests import spec
 from wrt_tests.boards import load_all
+from wrt_tests.data import read_json, write_json
+from wrt_tests.outputs import MANIFEST_FILE, Manifest
 
 if TYPE_CHECKING:
     from wrt_tests.boards import Board
@@ -58,6 +60,9 @@ case "$1" in
 esac
 """
 NOT_FOUND = "gh: Not Found (HTTP 404)"
+# The CI runs of the stand-in builds: the released one, and this one.
+RELEASED = "37000000001-1"
+THIS_BUILD = "37000000002-1"
 TAG = "r20260930-23fd10a-7"
 GIT_IDENTITY = {
     "GIT_AUTHOR_NAME": "upstream",
@@ -190,6 +195,28 @@ def _factory(board: Board, *, suffix: str = "") -> str:
     return f"openwrt-rockchip-armv8-{board.device}{suffix}-erofs-factory.img.gz"
 
 
+def _manifest(board: Board, run: str, files: dict[str, str]) -> Manifest:
+    """Return the manifest of a build of ``board`` by CI run ``run``, listing ``files``."""
+    return Manifest.model_validate(
+        {
+            "board": board.id,
+            "device": board.device,
+            "run": run,
+            "profile": "ci",
+            "build": board.id,
+            "cflags": "-O3",
+            "kernel_cflags": "-O2",
+            "toolchain_cflags": "-O3",
+            "upstream_lock_sha256": "0" * 64,
+            "patches_sha256": "0" * 64,
+            "openwrt_head": "0" * 40,
+            "kernel_version": "",
+            "vermagic": "",
+            "files": files,
+        }
+    )
+
+
 def _drill_base(
     root: Path, board: Board, latest: str | None, error: str = NOT_FOUND
 ) -> subprocess.CompletedProcess[str]:
@@ -201,7 +228,7 @@ def _drill_base(
     """
     ci = root / "work" / "out" / board.id / "ci"
     (ci / "targets").mkdir(parents=True)
-    (ci / "manifest.json").write_text("{}")
+    write_json(ci / MANIFEST_FILE, _manifest(board, THIS_BUILD, {}))
     (ci / "targets" / _factory(board)).write_bytes(b"this build's factory image")
     (ci / "u-boot-qemu.bin").write_bytes(b"this build's emulator firmware")
     gh = root / "gh"
@@ -238,17 +265,25 @@ def _release(root: Path, board: Board, image: bytes, *, listed: bytes | None = N
     (assets / _factory(board, suffix="-enterprise")).write_bytes(b"another device's image")
     digest = hashlib.sha256(image if listed is None else listed).hexdigest()
     files = {f"targets/{_factory(board)}": digest}
-    (assets / f"{board.device}-manifest.json").write_text(json.dumps({"files": files}))
+    write_json(assets / f"{board.device}-{MANIFEST_FILE}", _manifest(board, RELEASED, files))
 
 
 def _base(root: Path, board: Board) -> tuple[str, bytes]:
-    """Return what the drill starts from: the base's tag and its factory image."""
+    """Return what the drill starts from: the run that built its image, and the image.
+
+    Its manifest is that build's, its profile drill-base, its files the image and
+    this build's emulator firmware, as emu-prepare checks them.
+    """
     base = root / "work" / "out" / board.id / "drill-base"
     (image,) = (base / "targets").iterdir()
     assert image.name == _factory(board)
-    tag = json.loads((base / "manifest.json").read_text())["profile"]
-    assert isinstance(tag, str)
-    return tag, image.read_bytes()
+    manifest = read_json(base / MANIFEST_FILE, Manifest)
+    assert manifest.profile == "drill-base"
+    assert manifest.files == {
+        f"targets/{image.name}": hashlib.sha256(image.read_bytes()).hexdigest(),
+        "u-boot-qemu.bin": hashlib.sha256(b"this build's emulator firmware").hexdigest(),
+    }
+    return manifest.run, image.read_bytes()
 
 
 @spec(CAPABILITY, "Merge only after the upgrade drill passes", "Drill base of each board")
@@ -257,18 +292,19 @@ def test_each_drill_starts_from_the_board_s_latest_release(tmp_path: Path) -> No
     _release(tmp_path, board, b"the released factory image")
     result = _drill_base(tmp_path, board, TAG)
     assert result.returncode == 0, result.stderr
-    assert _base(tmp_path, board) == (TAG, b"the released factory image")
+    assert f"drill base: {TAG}, the latest stable release" in result.stderr
+    assert _base(tmp_path, board) == (RELEASED, b"the released factory image")
     # A board that no stable release carries yet starts from this build...
     result = _drill_base(tmp_path, other, TAG)
     assert result.returncode == 0, result.stderr
     assert f"carries no {other.id}" in result.stderr
-    assert _base(tmp_path, other) == ("this-build", b"this build's factory image")
+    assert _base(tmp_path, other) == (THIS_BUILD, b"this build's factory image")
     # ...as every board does before the first release.
     first = tmp_path / "first"
     result = _drill_base(first, board, None)
     assert result.returncode == 0, result.stderr
     assert "no stable release yet" in result.stderr
-    assert _base(first, board) == ("this-build", b"this build's factory image")
+    assert _base(first, board) == (THIS_BUILD, b"this build's factory image")
 
 
 @spec(CAPABILITY, "Merge only after the upgrade drill passes", "Drill base cannot be had")
@@ -284,7 +320,7 @@ def test_a_drill_base_that_cannot_be_had_stops_the_drill(failure: str, tmp_path:
         refusal = f"of {TAG} does not match {board.device}-manifest.json"
     assert result.returncode != 0
     assert refusal in result.stderr, result.stderr
-    assert not (tmp_path / "work" / "out" / board.id / "drill-base" / "manifest.json").exists()
+    assert not (tmp_path / "work" / "out" / board.id / "drill-base" / MANIFEST_FILE).exists()
 
 
 @pytest.mark.drill

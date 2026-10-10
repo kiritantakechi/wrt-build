@@ -1,0 +1,8 @@
+{
+  "build": "/mnt/wrt/out/r4s/dev",
+  "board": "r4s",
+  "image": "/mnt/wrt/out/r4s/dev/targets/openwrt-rockchip-armv8-friendlyarm_nanopi-r4s-erofs-factory.img.gz",
+  "image_sha256": "69347bcf5dbb2ad3f5e2a98154af0c46a29be444ed79d17822e6ed65d80ac702",
+  "firmware": "/mnt/wrt/out/r4s/dev/u-boot-qemu.bin",
+  "firmware_sha256": "27d63b33aace2dc2b23c634fd63334079691f7db671067e49c9de860f41a2b53"
+}

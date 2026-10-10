@@ -159,11 +159,12 @@ Each layer has a `fixtures.py`, a pytest plugin with the fixtures of its domain:
 
 ### D7. One schema per data file
 
-`model/data.py` is the one way to read a data file:
-- `read_json(path, Model)` reads one document;
-- `read_toml(path, table, Model)` reads the entries of a TOML table.
+`model/data.py` is the one way to read a data file, and to write one from Python:
+- `read_json(path, Model)` reads one document, or a list of them (`list[Model]`);
+- `read_toml(path, table, Model)` reads the entries of a TOML file's array of tables;
+- `write_json(path, record)` writes a document as `read_json` reads it back, as a file of its own: a file linked to the one it replaces keeps what that one held.
 
-Both raise `DataError`, which names the file, the entry (its index, or its key) and the field, from pydantic's error locations.
+The readers raise `DataError`, which names the file, the entry (its index) and the field, from pydantic's error locations.
 
 The models are strict, with `extra="forbid"`:
 
@@ -172,16 +173,18 @@ The models are strict, with `extra="forbid"`:
 | `boards/*.json` | `Board` | `boards` (it already is one; it moves onto `read_json`) |
 | `tests/verified-elsewhere.toml` | `VerifiedElsewhere` | `coverage` |
 | `tests/reviewed-warnings.toml` | `Review` | `undefined_behavior` |
-| `out/.../manifest.json` | `Manifest` | `outputs` |
+| `out/.../manifest.json`, a release's `<device>-manifest.json` (the build's, copied) | `Manifest` | `outputs` |
 | `out/.../warnings.json` | `Diagnostic` (a list) | `undefined_behavior` |
 | `<emulator>/source.json` | `EmulationSource` | `outputs` (emu-prepare writes it through the model as well) |
 | `wrt-toolchain.json` | `ToolchainRecord` | `outputs` |
-| `release.json`, `<device>-manifest.json` | `Release`, `ReleaseManifest` | `outputs` |
+| `release.json` | `Release` | `outputs` |
 
 **Who uses them.**
 - Every test reads these files through the models, instead of `json.loads` and dictionary keys.
 - `emu.manifest_flags` becomes the `Manifest`'s `cflags` and `kernel_cflags`, as lists.
 - The shell scripts keep writing the files with jq. The models are their schema, and the system tests read every file a build writes.
+- A drill base (`out/<board>/drill-base`) is read as a build, so its manifest is a `Manifest` too: the manifest of the build its image comes from, profile `drill-base`, its files the image and this build's emulator firmware. The release it comes from is in drill-base's log, no longer in the manifest's `profile`.
+- The Releases API's stand-in keeps the time it published a release beside it, in `.published` as it keeps `.cut` and `.downloads`, rather than in an extra field of `release.json`.
 
 ### D8. The toolchain key hashes the modules its scripts load
 

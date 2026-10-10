@@ -6,9 +6,10 @@ its releases newest first (``/repos/<owner>/<repo>/releases``), and each asset a
 its ``browser_download_url`` (``/<owner>/<repo>/releases/download/<tag>/<asset>``,
 as on GitHub). A repository's releases are directories under
 ``<root>/<owner>/<repo>``, each an assembled release (release-publish.sh) that
-``publish`` put there. A release with a ``.cut`` file sends only that many bytes
-of each asset, then drops the connection: a sync interrupted halfway. Every
-download is recorded in the release's ``.downloads``, which ``downloads`` reads.
+``publish`` put there, with the time it did in ``.published``. A release with a
+``.cut`` file sends only that many bytes of each asset, then drops the
+connection: a sync interrupted halfway. Every download is recorded in the
+release's ``.downloads``, which ``downloads`` reads.
 """
 
 import argparse
@@ -22,9 +23,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, override
 
+from wrt_tests.data import read_json, write_json
+from wrt_tests.outputs import RELEASE_FILE, Release
+
 PORT = 443
 CHUNK = 1 << 16
 DOWNLOADS = ".downloads"
+PUBLISHED = ".published"
 # Where the sandbox's stand-in serves from, in the sandbox's directory.
 ROOT = Path("inet") / "releases"
 
@@ -42,15 +47,18 @@ def publish(
     ``tag`` and ``prerelease`` publish it as another release: one assembled
     build stands for several. Its files are linked, not copied (none changes).
     """
-    info = json.loads((release / "release.json").read_text())
-    info["tag"] = tag or info["tag"]
-    info["prerelease"] = info["prerelease"] if prerelease is None else prerelease
-    info["published"] = time.time()
-    target = root / repository / info["tag"]
+    info = read_json(release / RELEASE_FILE, Release)
+    info = info.model_copy(
+        update={
+            "tag": tag or info.tag,
+            "prerelease": info.prerelease if prerelease is None else prerelease,
+        }
+    )
+    target = root / repository / info.tag
     shutil.copytree(release, target, copy_function=os.link)
-    (target / "release.json").unlink()
-    (target / "release.json").write_text(json.dumps(info))
-    return str(info["tag"])
+    write_json(target / RELEASE_FILE, info)
+    (target / PUBLISHED).write_text(str(time.time()))
+    return info.tag
 
 
 def cut(root: Path, repository: str, tag: str, size: int | None) -> None:
@@ -72,26 +80,25 @@ def _releases(directory: Path, base: str) -> list[dict[str, Any]]:
     """Return a repository's releases in the API's form, newest first."""
     found = []
     for release in directory.iterdir() if directory.is_dir() else ():
-        manifest = release / "release.json"
-        if not manifest.is_file():
+        if not (release / PUBLISHED).is_file():
             continue
-        info = json.loads(manifest.read_text())
+        info = read_json(release / RELEASE_FILE, Release)
         found.append(
             {
-                "tag_name": info["tag"],
-                "name": info["tag"],
-                "prerelease": info["prerelease"],
+                "tag_name": info.tag,
+                "name": info.tag,
+                "prerelease": info.prerelease,
                 "draft": False,
-                "body": info["notes"],
-                "published": info.get("published", 0),
+                "body": info.notes,
+                "published": float((release / PUBLISHED).read_text()),
                 "assets": [
                     {
                         "name": asset,
                         "size": (release / asset).stat().st_size,
-                        "browser_download_url": f"{base}/download/{info['tag']}/{asset}",
+                        "browser_download_url": f"{base}/download/{info.tag}/{asset}",
                     }
-                    for asset in info["assets"]
-                    if asset != "release.json"
+                    for asset in info.assets
+                    if asset != RELEASE_FILE
                 ],
             }
         )

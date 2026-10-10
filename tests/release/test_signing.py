@@ -19,6 +19,7 @@ from wrt_tests.oci import extract_root
 from wrt_tests.trees import linked_copy, replace
 
 if TYPE_CHECKING:
+    from wrt_tests.outputs import EmulationSource
     from wrt_tests.router import Router
 
 CAPABILITY = "release/signing"
@@ -109,9 +110,9 @@ def test_the_router_reads_the_signed_index(router: Router, signed_repo: Path) ->
 
 @spec(CAPABILITY, "Devices trust only release keys", "Check trust anchors in the image")
 def test_the_image_trusts_only_the_release_keys(
-    emulation_dir: Path, emulation_source: dict[str, str], tmp_path: Path
+    emulation_dir: Path, emulation_source: EmulationSource, tmp_path: Path
 ) -> None:
-    if Path(emulation_source["build"]).name != "ci":
+    if emulation_source.build.name != "ci":
         pytest.skip("only the release build (ci profile) carries the release keys (design D1)")
     root = extract_root(emulation_dir / "disk.raw", tmp_path / "root")
     for anchors in (APK_KEYS, FIRMWARE_KEYS):
