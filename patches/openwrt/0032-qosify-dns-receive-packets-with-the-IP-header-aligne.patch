@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Sat, 10 Oct 2026 15:12:37 +0800
+Subject: [PATCH] qosify: dns: receive packets with the IP header aligned
+
+qosify read the IP header of each DNS packet it learns from through a
+struct ip or struct ip6_hdr pointer two bytes off a four-byte boundary,
+right after the Ethernet header: a misaligned access, undefined
+behaviour, which traps in a UBSan build.
+
+Add a patch to qosify that receives the packets two bytes into an
+aligned buffer, as NET_IP_ALIGN does. It is meant for qosify upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/network/config/qosify/Makefile        |  2 +-
+ ...e-packets-with-the-IP-header-aligned.patch | 42 +++++++++++++++++++
+ 2 files changed, 43 insertions(+), 1 deletion(-)
+ create mode 100644 package/network/config/qosify/patches/101-dns-receive-packets-with-the-IP-header-aligned.patch
+
+diff --git a/package/network/config/qosify/Makefile b/package/network/config/qosify/Makefile
+index 0fd4095..8087bd3 100644
+--- a/package/network/config/qosify/Makefile
++++ b/package/network/config/qosify/Makefile
+@@ -14,7 +14,7 @@ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_DATE:=2026-06-22
+ PKG_SOURCE_VERSION:=beeb87ec1f16aaf5d99ff8060c2455971d9d400e
+ PKG_MIRROR_HASH:=c9ef0ad68daedb7e18e4959884a40cc0c64849dbd17bf6fdadeed8bdd8d49358
+-PKG_RELEASE:=3
++PKG_RELEASE:=4
+ 
+ PKG_LICENSE:=GPL-2.0
+ PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
+diff --git a/package/network/config/qosify/patches/101-dns-receive-packets-with-the-IP-header-aligned.patch b/package/network/config/qosify/patches/101-dns-receive-packets-with-the-IP-header-aligned.patch
+new file mode 100644
+index 0000000..e895537
+--- /dev/null
++++ b/package/network/config/qosify/patches/101-dns-receive-packets-with-the-IP-header-aligned.patch
+@@ -0,0 +1,42 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] dns: receive packets with the IP header aligned
++
++qosify_dns_socket_cb() received each packet at the start of its buffer,
++so that the IP header, after the 14-byte Ethernet header, was two bytes
++off a four-byte boundary. It was read through a struct ip or a struct
++ip6_hdr pointer, whose alignment is four: a misaligned access, which is
++undefined behaviour. Built with -fsanitize=undefined
++-fsanitize-trap=undefined, qosify traps on the first DNS reply it
++learns from.
++
++Receive two bytes into a four-byte aligned buffer, as the kernel's
++NET_IP_ALIGN does, so that the IP header is aligned, with a VLAN tag
++or without.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++--- a/dns.c
+++++ b/dns.c
++@@ -329,14 +329,19 @@
++ static void
++ qosify_dns_socket_cb(struct uloop_fd *fd, unsigned int events)
++ {
++-	static uint8_t buf[8192];
+++	/*
+++	 * Received two bytes into a four-byte aligned buffer, as NET_IP_ALIGN
+++	 * does: the IP header after the Ethernet header, and after a VLAN tag,
+++	 * is then four-byte aligned, as struct ip and struct ip6_hdr must be.
+++	 */
+++	static uint8_t buf[2 + 8192] __attribute__((aligned(4)));
++ 	struct packet pkt = {
++-		.buffer = buf,
+++		.buffer = buf + 2,
++ 	};
++ 	int len;
++ 
++ retry:
++-	len = recvfrom(fd->fd, buf, sizeof(buf), MSG_DONTWAIT, NULL, NULL);
+++	len = recvfrom(fd->fd, buf + 2, sizeof(buf) - 2, MSG_DONTWAIT, NULL, NULL);
++ 	if (len < 0) {
++ 		if (errno == EINTR)
++ 			goto retry;

@@ -44,7 +44,7 @@
 
 - [ ] 4.1 Write the qosify patch:
   - the classifiers attach with `bpf_program__attach_tcx` and `BPF_F_AFTER`, as links the daemon owns;
-  - DNS learning reads replies from a packet socket on each managed WAN device, filtered to source port 53, and no longer creates `ifb-dns` and its filters;
+  - DNS learning reads replies from a packet socket on each managed WAN device, filtered to source port 53, and no longer creates `ifb-dns` and its filters; it receives through `qosify_dns_socket_cb()`, with the IP header aligned (patch 0032);
   - ingress shaping redirects with `bpf_redirect()` to the interface's ifb, whose index the daemon keeps in a map entry per interface;
   - patch 0010's re-attach on a replaced device carries over to the links;
   - a kernel that refuses a tcx link, or `qosify.global.tcx=off`, gets today's `cls_bpf` under `clsact`, after einat's.

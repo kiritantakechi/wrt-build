@@ -423,6 +423,18 @@ What the patch does: every scalar is read with libubox's `blobmsg_get_*()` acces
 
 Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
 
+### qosify: DNS packets received with the IP header aligned
+
+Patch: `patches/openwrt/0032-qosify-dns-receive-packets-with-the-IP-header-aligne.patch` (adds the qosify patch `package/network/config/qosify/patches/101-dns-receive-packets-with-the-IP-header-aligned.patch`), for git.openwrt.org/project/qosify, carried by openwrt/openwrt until then.
+
+Problem: `qosify_dns_socket_cb()` receives each packet at the start of its buffer, so the IP header, after the 14-byte Ethernet header, is two bytes off a four-byte boundary, and qosify reads it through a `struct ip` or `struct ip6_hdr` pointer, whose alignment is four: a misaligned access, which is undefined behavior.
+
+Why it matters here: the `ubsan` profile's second R6S run trapped here once, when a DNS reply reached qosify's DNS socket during a trial boot.
+
+What the patch does: the packets are received two bytes into a four-byte aligned buffer, as the kernel's `NET_IP_ALIGN` does, so the IP header is aligned, with a VLAN tag or without. DNS learning on a packet socket of its own (`device-modernization`) receives through the same function.
+
+Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
 ### wsdd2: the random seed without overflow
 
 Patch: `patches/packages/0005-wsdd2-seed-without-overflow.patch` (adds the package patch `020-wsd-seed-without-overflow.patch`), for openwrt/packages: wsdd2's own repository, github.com/Netgear/wsdd2, is gone, and openwrt/packages builds it from its mirror.

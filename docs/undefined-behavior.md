@@ -79,3 +79,4 @@ Each run is the whole system suite of one board on a `ubsan` build; a trap is fi
 | 2026-10-10 | R4S | 348 passed, 1 failed, 7 errors | wsdd2's seed, on almost every start (packages 0005). `test_inbound_ipv6_is_rejected` was refused a LAN connection once, with no trap; it passed in the runs before and after |
 | 2026-10-10 | R4S | 349 passed, 5 skipped, no trap | |
 | 2026-10-10 | R6S | 347 passed, 4 failed, 1 error | uhttpd, in ucode's ubus module, converting a reply with a 64-bit value (0031), so the metrics stopped after their first collector. And `test_boards_build_apart` expected the board's name as the build directories' suffix, which a ubsan build's is not; the manifest now names the build (`build`) |
+| 2026-10-10 | R6S | 350 passed, 4 skipped, 1 error | qosify, reading the IP header of a DNS reply two bytes off its alignment (0032), once, during a trial boot |
