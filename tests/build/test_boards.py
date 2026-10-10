@@ -267,7 +267,7 @@ def _tree_with_toolchain(workdir: Path, board: Board, record: ToolchainRecord | 
 
 
 def _rust_std_hash() -> str:
-    """Return what toolchain_rust_std (scripts/lib.sh) makes of the stand-in Rust library."""
+    """Return what toolchain_rust_std (scripts/lib/toolchain.sh) makes of the stand-in Rust std."""
     listing = f"{hashlib.sha256(RUST_STD_CONTENT).hexdigest()}  ./{RUST_STD}\n"
     return hashlib.sha256(listing.encode()).hexdigest()
 

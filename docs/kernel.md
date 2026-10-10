@@ -10,7 +10,7 @@ Kernel configuration comes from three sources, each responsible for one kind of 
 | `config/kernel.config` | Symbols with no upstream `CONFIG_KERNEL_*` option | F2FS compression, QEMU virt drivers, netkit |
 | `patches/openwrt/` | Only BBRv3 modifies kernel source | `hack-6.18/960-bbr3-*` |
 
-`scripts/config.sh` links `config/kernel.config` to `$TREE/env/kernel-config`. It is the last layer of `LINUX_KCONFIG_LIST` (`include/target.mk`), a mechanism upstream supports natively. After the build, `scripts/build.sh` checks it line by line: every line of the kernel config overlay must appear verbatim in the kernel's `.config`.
+`scripts/config.sh` links `config/kernel.config` to the tree's `env/kernel-config`. It is the last layer of `LINUX_KCONFIG_LIST` (`include/target.mk`), a mechanism upstream supports natively. After the build, `scripts/build.sh` checks it line by line: every line of the kernel config overlay must appear verbatim in the kernel's `.config`.
 
 ## Adding symbols to the kernel config overlay
 

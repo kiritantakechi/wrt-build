@@ -18,8 +18,9 @@
 # --upload then creates the release on GitHub (gh release create); a candidate
 # never becomes the latest release.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
+use boards upstream
 
 usage() {
 	die "usage: release-publish <signed> <release> [--boards <id>,...] [--prerelease] [--run <number>] [--upload]"

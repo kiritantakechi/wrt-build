@@ -29,6 +29,7 @@ ignore = [
 # Command-line tools print their report.
 "wrt_tests/model/boards.py" = ["T201"]
 "wrt_tests/model/coverage.py" = ["T201"]
+"wrt_tests/model/lib_check.py" = ["T201"]
 
 [lint.flake8-type-checking]
 # pydantic reads the annotations of its models when it builds them.

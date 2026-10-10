@@ -4,8 +4,8 @@
 # The output must be identical on every host (local VM and CI), so it holds
 # version numbers only: no architecture, path or build date.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
 require_linux
 ensure_fhs test "$@"

@@ -10,14 +10,15 @@
 # and a run's files would stay there. $WRT_TESTDIR is the work directory unless
 # set: a disk slow to flush stalls the emulator (docs/dev-setup.md).
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
+use boards
 
 board=${1:-}
 profile=${2:-dev}
 
 require_linux
-require_workdir
+workdir_tree >/dev/null
 ensure_fhs test "$@"
 [ -n "${board}" ] || die "usage: test <board> [profile] [pytest args]"
 board_field "${board}" .device >/dev/null

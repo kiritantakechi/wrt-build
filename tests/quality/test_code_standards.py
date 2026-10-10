@@ -90,6 +90,32 @@ def test_new_script_without_skeleton_fails(repo: Path) -> None:
     assert "scripts/thing-probe.sh: no just recipe named thing-probe" in result.stderr
 
 
+@spec(CAPABILITY, "Scripts load what they call", "Script calls a function it does not load")
+def test_a_call_without_its_module_fails(repo: Path) -> None:
+    # fetch.sh calls fetch_locked, of the upstream module, which it stops loading.
+    script = repo / "scripts" / "fetch.sh"
+    text = script.read_text()
+    assert "\nuse boards upstream\n" in text
+    script.write_text(text.replace("\nuse boards upstream\n", "\nuse boards\n"))
+    result = _run(repo, "check.sh", "modules")
+    assert result.returncode != 0
+    assert "FAIL  modules" in result.stdout
+    assert "scripts/fetch.sh: calls fetch_locked without loading upstream" in result.stderr
+
+
+@spec(CAPABILITY, "No dead code in the host-side code", "Library function that nothing calls")
+def test_a_library_function_that_nothing_calls_fails(repo: Path) -> None:
+    # Named here only as it is put together: a test that names a function calls it.
+    word = "spent"
+    name = f"time_{word}"
+    with (repo / "scripts" / "lib" / "timing.sh").open("a") as module:
+        module.write(f"\n# {name}: what nothing calls.\n{name}() (\n\techo 0\n)\n")
+    result = _run(repo, "check.sh", "modules")
+    assert result.returncode != 0
+    assert "FAIL  modules" in result.stdout
+    assert f"scripts/lib/timing.sh: nothing calls {name}" in result.stderr
+
+
 @spec(CAPABILITY, "Layered test harness", "Harness module imports from a higher layer")
 def test_an_import_from_a_higher_layer_fails(repo: Path) -> None:
     # A module of the model layer that reaches up to the device layer.

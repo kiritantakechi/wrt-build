@@ -8,8 +8,8 @@
 #    merged unless its candidate passed the drill.
 # Reports every finding, then fails if there was one.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
 repository=${1:-${GITHUB_REPOSITORY:-kiritantakechi/wrt-build}}
 ENVIRONMENT=release-signing

@@ -4,8 +4,8 @@
 # The counterpart of workdir-mount; unmounting twice is a no-op. The loop device
 # is released with the mount (mount -o loop sets autoclear).
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
 mountpoint=${1:-/mnt/wrt}
 

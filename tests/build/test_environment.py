@@ -9,11 +9,11 @@ import pytest
 
 from wrt_tests import spec
 from wrt_tests.model.boards import load_all
+from wrt_tests.model.shell import library
 
 CAPABILITY = "build/environment"
 REPO = Path(__file__).resolve().parents[2]
 SOURCE_ENTRY_POINTS = ("fetch", "patch", "config", "build", "toolchain-build")
-LIB = REPO / "scripts" / "lib.sh"
 GIT_IDENTITY = {
     "GIT_AUTHOR_NAME": "test",
     "GIT_AUTHOR_EMAIL": "test@localhost",
@@ -118,19 +118,12 @@ class Series:
 
     def apply(self) -> subprocess.CompletedProcess[str]:
         """Build the series' commit on the base and move the work tree to it."""
-        return subprocess.run(
-            [
-                "sh",
-                "-c",
-                f'. "{LIB}" && commit=$(series_commit "$1" "$2" "$3") && move_tree "$2" "$commit"',
-                "sh",
-                str(self.patches),
-                str(self.repo),
-                self.base,
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        return library(
+            "tree upstream",
+            'commit=$(series_commit "$1" "$2" "$3") && move_tree "$2" "${commit}"',
+            str(self.patches),
+            str(self.repo),
+            self.base,
         )
 
     def files(self) -> list[Path]:

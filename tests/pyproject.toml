@@ -12,6 +12,7 @@ dependencies = [
 [project.scripts]
 board-check = "wrt_tests.model.boards:main"
 emu-prepare = "wrt_tests.device.emu:main"
+lib-check = "wrt_tests.model.lib_check:main"
 spec-coverage = "wrt_tests.model.coverage:main"
 
 [dependency-groups]

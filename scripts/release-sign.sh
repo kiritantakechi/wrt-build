@@ -16,8 +16,8 @@
 # The same script signs releases with the production keys and, in the tests,
 # anything with keys made for the test.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
 usage() {
 	die "usage: release-sign <build> <signed> --apk-key <file> --fw-key <file> [--keyring <dir>]"

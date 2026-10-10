@@ -6,8 +6,9 @@
 # each checked to be supported first: a build checks its board this way before
 # anything else runs, and fails naming the supported ones.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
+use boards
 
 for board in "$@"; do
 	board_field "${board}" .device >/dev/null

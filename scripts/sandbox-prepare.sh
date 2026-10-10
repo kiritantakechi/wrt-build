@@ -9,8 +9,8 @@
 # only a loaded module lets a user namespace create.
 # Running it twice changes nothing.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
 require_linux
 uid=$(id -u)

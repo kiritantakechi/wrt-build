@@ -8,34 +8,35 @@
 # the step, named, before any file changes; the resulting HEAD is the same on
 # every run.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
+use upstream
 
 require_linux
-require_workdir
+tree=$(workdir_tree)
 ensure_fhs build "$@"
 
-[ -f "${TREE}/feeds.conf" ] || die "no source tree; run 'just fetch' first"
+[ -f "${tree}/feeds.conf" ] || die "no source tree; run 'just fetch' first"
 
-patch_tree openwrt "${TREE}"
+patch_tree openwrt "${tree}"
 # The build timestamp is the pinned commit's, whenever the patches were applied
 # (scripts/get_source_date_epoch.sh reads version.date first). It is written only
 # when it changes, like every other file.
 epoch=$(lock_field openwrt epoch)
-recorded=$(cat "${TREE}/version.date" 2>/dev/null || true)
-[ "${recorded}" = "${epoch}" ] || printf '%s\n' "${epoch}" >"${TREE}/version.date"
+recorded=$(cat "${tree}/version.date" 2>/dev/null || true)
+[ "${recorded}" = "${epoch}" ] || printf '%s\n' "${epoch}" >"${tree}/version.date"
 feeds=$(lock_feeds)
 for feed in ${feeds}; do
-	patch_tree "${feed}" "${TREE}/feeds/${feed}"
+	patch_tree "${feed}" "${tree}/feeds/${feed}"
 done
 
 # Our own feed wins over upstream packages with the same name.
 log="${WRT_WORKDIR}/feeds.log"
 (
-	cd "${TREE}" &&
+	cd "${tree}" &&
 		./scripts/feeds update -i -a &&
 		./scripts/feeds install -a &&
 		./scripts/feeds install -a -f -p wrtbuild
 ) >"${log}" 2>&1 || die "feeds index/install failed; see ${log}"
-head=$(git -C "${TREE}" rev-parse HEAD)
+head=$(git -C "${tree}" rev-parse HEAD)
 info "patched tree at ${head}"

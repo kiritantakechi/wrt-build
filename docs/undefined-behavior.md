@@ -6,7 +6,7 @@ Two independent checks find it: GCC's warnings at build time, and UBSan at run t
 
 ## UB-indicative warnings
 
-GCC diagnoses some undefined behavior while it optimizes. These options are the UB-indicative ones (`UB_WARNINGS` in `scripts/lib.sh`):
+GCC diagnoses some undefined behavior while it optimizes. These options are the UB-indicative ones (`UB_WARNINGS` in `scripts/lib/warnings.sh`):
 
 | Undefined behavior | Options |
 |---|---|

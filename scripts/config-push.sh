@@ -17,8 +17,8 @@
 # was if it does not come back, which fails the push. SSH authenticates with a
 # key only (--identity, or the agent's); a password is never tried.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
 usage() {
 	die "usage: config-push <host> [--identity <key>]"

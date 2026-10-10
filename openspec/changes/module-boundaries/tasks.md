@@ -50,22 +50,22 @@
 
 ## 5. Shell modules (design D1–D4, D8)
 
-- [ ] 5.1 Split `scripts/lib.sh` into `scripts/lib/*.sh` as D1 lays out, each module in D9's order, with `use` in core and each module's dependencies at its top. Every script loads core by path and its other modules with one `use` line. The unit tests (`test_lib.py`, `test_warnings.py`) load the modules they test by name.
+- [x] 5.1 Split `scripts/lib.sh` into `scripts/lib/*.sh` as D1 lays out, each module in D9's order, with `use` in core and each module's dependencies at its top. Every script loads core by path and its other modules with one `use` line. The unit tests (`test_lib.py`, `test_warnings.py`) load the modules they test by name.
 
   Verify: shellcheck and shfmt pass, the unit tests pass, and `scripts/lib.sh` is gone.
-- [ ] 5.2 Move the awk programs of more than ten lines into files beside their modules (D3): `ub-warnings.awk`, `image-logs.awk`, `merge-seeds.awk`.
+- [x] 5.2 Move the awk programs of more than ten lines into files beside their modules (D3): `ub-warnings.awk`, `image-logs.awk`, `merge-seeds.awk`.
 
   Verify: the unit tests run each program directly and pass.
-- [ ] 5.3 Pass the tree as an argument (D2): `workdir_tree` replaces `require_workdir`, and the twelve functions that read `TREE` take the tree first and check it.
+- [x] 5.3 Pass the tree as an argument (D2): `workdir_tree` replaces `require_workdir`, and the twelve functions that read `TREE` take the tree first and check it.
 
   Verify: `git grep -n 'TREE' scripts` finds no global `TREE`. The unit tests of those functions pass the tree. In the VM, `just config r4s dev` and `just toolchain-build dev` run as before.
-- [ ] 5.4 Add `lib-check` (model layer) and the check `modules` to `just check` (D4), with dead functions. Update the skeleton check to core's line and the `use` line. Add the tests of the quality/code-standards scenarios "Script calls a function it does not load" and "Library function that nothing calls" (`tests/quality/test_code_standards.py`), and keep the test of "New script added" passing against the new skeleton. Delete the library functions the check finds dead.
+- [x] 5.4 Add `lib-check` (model layer) and the check `modules` to `just check` (D4), with dead functions. Update the skeleton check to core's line and the `use` line. Add the tests of the quality/code-standards scenarios "Script calls a function it does not load" and "Library function that nothing calls" (`tests/quality/test_code_standards.py`), and keep the test of "New script added" passing against the new skeleton. Delete the library functions the check finds dead.
 
   Verify: the three tests pass, and the check passes on the tree.
-- [ ] 5.5 Make `toolchain-key.sh` hash the modules that `toolchain-build.sh` and `toolchain-pack.sh` load (D8), and update the toolchain key's entry in `tests/verified-elsewhere.toml`.
+- [x] 5.5 Make `toolchain-key.sh` hash the modules that `toolchain-build.sh` and `toolchain-pack.sh` load (D8), and update the toolchain key's entry in `tests/verified-elsewhere.toml`.
 
   Verify: in the VM, the key changes when `seeds.sh` changes, and not when `warnings.sh` does.
-- [ ] 5.6 Describe the shell modules in `docs/conventions.md`: the modules and their domains, `use`, the tree as an argument, where an awk program goes, and D9's order in a module.
+- [x] 5.6 Describe the shell modules in `docs/conventions.md`: the modules and their domains, `use`, the tree as an argument, where an awk program goes, and D9's order in a module.
 
   Verify: the document lists every module of `scripts/lib/`.
 

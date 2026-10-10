@@ -2,17 +2,17 @@
 # toolchain-pack: pack the built host tools and the toolchain of every language into a tarball.
 # Usage: scripts/toolchain-pack.sh <archive.tar.zst>
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
 archive=${1:-}
 [ -n "${archive}" ] || die "usage: toolchain-pack <archive.tar.zst>"
 
 require_linux
-require_workdir
+tree=$(workdir_tree)
 ensure_fhs build "$@"
 
-cd "${TREE}"
+cd "${tree}"
 # The toolchain the tree is configured for, as toolchain-build leaves it; not a
 # directory another configuration left, such as the one buildbot mode stamps
 # before defconfig has run (staging_dir/toolchain-_gcc-_).

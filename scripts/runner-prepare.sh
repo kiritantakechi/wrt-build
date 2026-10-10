@@ -6,8 +6,8 @@
 #  - open PPP and WireGuard to the test sandbox (sandbox-prepare.sh);
 #  - make room on the root disk and create $WRT_WORKDIR on /mnt.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
 require_linux
 [ -n "${GITHUB_ACTIONS:-}" ] || die "runner-prepare changes the host; it only runs in GitHub Actions"

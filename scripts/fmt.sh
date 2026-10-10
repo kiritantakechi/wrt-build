@@ -4,8 +4,8 @@
 # The writing counterpart of the format checks in scripts/check.sh, under the
 # same names: shfmt, nixfmt and ruff-format.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
 formatters='shfmt nixfmt ruff-format'
 requested=$*

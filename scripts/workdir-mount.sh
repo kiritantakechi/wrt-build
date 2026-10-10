@@ -7,8 +7,8 @@
 # repository. The filesystem keeps its owner, so a later mount changes nothing:
 # OrbStack shows the Mac's files as owned by whoever reads them, root included.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
 format=0
 owner=

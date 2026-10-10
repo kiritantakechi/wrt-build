@@ -6,8 +6,8 @@
 # owner's masks: a bit of another owner's mask is a conflict, a bit of no mask is
 # unregistered (r4s-ebpf-datapath design D4).
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
 [ "$#" -gt 0 ] || set -- "${REPO_DIR}/files" "${REPO_DIR}/feed"
 status=0

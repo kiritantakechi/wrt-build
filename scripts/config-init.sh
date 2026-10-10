@@ -10,8 +10,8 @@
 # there if missing: back it up offline (docs/ops.md), as nothing decrypts the
 # secrets without it. Nothing is committed in plain text.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
 [ "$#" -eq 1 ] || die "usage: config-init <directory>"
 repo=$1

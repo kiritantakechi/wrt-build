@@ -5,10 +5,10 @@
 # the generic Linux binaries that uv installs (Python, ruff, ty), so there the
 # script re-executes inside wrt-test-fhs.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
-checks='shfmt shellcheck nixfmt actionlint editorconfig-checker gitleaks forbidden-patterns skeleton marks boards ruff-format ruff-check ty tach spec-coverage'
+checks='shfmt shellcheck nixfmt actionlint editorconfig-checker gitleaks forbidden-patterns skeleton modules marks boards ruff-format ruff-check ty tach spec-coverage'
 requested=$*
 for name in ${requested}; do
 	case " ${checks} " in
@@ -66,7 +66,7 @@ nl='
 '
 # shellcheck disable=SC2016 # the literal lines of the skeleton, not expansions
 skeleton_body='set -eu
-. "$(dirname -- "$0")/lib.sh"'
+. "$(dirname -- "$0")/lib/core.sh"'
 
 # complain <message>: report a skeleton violation of ${where}.
 complain() {
@@ -79,18 +79,20 @@ complain() {
 skeleton() {
 	status=0
 	recipes=$(just --summary)
+	for where in scripts/lib/*.sh; do
+		name=${where#scripts/lib/}
+		name=${name%.sh}
+		header=$(sed -n '1,4p' "${where}")
+		[ ! -x "${where}" ] || complain "a sourced library module must not be executable"
+		case "${header}" in
+			"# ${name}: "*"${nl}# Usage: "*) ;;
+			*) complain "header must be '# ${name}: <purpose>' and '# Usage: ...'" ;;
+		esac
+	done
 	for where in scripts/*.sh; do
 		name=${where#scripts/}
 		name=${name%.sh}
 		header=$(sed -n '1,3p' "${where}")
-		if [ "${name}" = lib ]; then
-			[ ! -x "${where}" ] || complain "a sourced library must not be executable"
-			case "${header}" in
-				"# lib: "*"${nl}# Usage: "*) ;;
-				*) complain "header must be '# lib: <purpose>' and '# Usage: ...'" ;;
-			esac
-			continue
-		fi
 		[ -x "${where}" ] || complain "not executable"
 		case "${header}" in
 			"#!/bin/sh${nl}# ${name}: "*".${nl}# Usage: scripts/${name}.sh"*) ;;
@@ -98,6 +100,15 @@ skeleton() {
 		esac
 		body=$(grep -v '^#' "${where}" | sed -n '1,2p')
 		[ "${body}" = "${skeleton_body}" ] || complain "the body must start with:${nl}${skeleton_body}"
+		# The modules beyond core, loaded by name on the line after core's alone.
+		loads=$(grep -v '^#' "${where}" | grep -n '^[[:space:]]*use ' || true)
+		case "${loads}" in
+			'' | "3:use "*) ;;
+			*) complain "the modules beyond core are loaded with one 'use' line after core's" ;;
+		esac
+		count=$(printf '%s\n' "${loads}" | grep -c . || true)
+		[ "${count}" -le 1 ] ||
+			complain "the modules beyond core are loaded with one 'use' line after core's"
 		case " ${recipes} " in
 			*" ${name} "*) ;;
 			*) complain "no just recipe named ${name}" ;;
@@ -140,6 +151,8 @@ run() {
 	run gitleaks secrets
 	run forbidden-patterns forbidden_patterns
 	run skeleton skeleton
+	# The shell library: every script loads what it calls, and no function is dead.
+	run modules uv run --directory tests --locked lib-check
 	run marks "${REPO_DIR}/scripts/marks-check.sh"
 	run boards uv run --directory tests --locked board-check
 	run ruff-format uv run --directory tests --locked ruff format --check

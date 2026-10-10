@@ -10,8 +10,8 @@
 # environment (gh secret set). The private keys are never printed and never
 # enter the repository.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
 [ "$#" -ge 1 ] || die "usage: release-keys <directory> [--upload]"
 directory=$1

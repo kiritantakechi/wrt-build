@@ -12,12 +12,13 @@
 # any other failure to look it up stops here, rather than let the drill start
 # from the candidate itself.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
+use boards
 
 board=${1:-}
 
-require_workdir
+workdir_tree >/dev/null
 [ -n "${board}" ] || die "usage: drill-base <board>"
 device=$(board_field "${board}" .device)
 ci="${WRT_WORKDIR}/out/${board}/ci"

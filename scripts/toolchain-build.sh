@@ -26,26 +26,27 @@
 # stamp names the last commit of toolchain/ (toolchain/Makefile), and a toolchain
 # built without buildbot mode has none.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
+use boards cache seeds timing toolchain tree
 
 profile=${1:-dev}
 
 require_linux
-require_workdir
+tree=$(workdir_tree)
 ensure_fhs build "$@"
 
-[ -f "${TREE}/feeds.conf" ] || die "no source tree; run 'just fetch' and 'just patch' first"
-link_tree
-write_board_table
+[ -f "${tree}/feeds.conf" ] || die "no source tree; run 'just fetch' and 'just patch' first"
+link_tree "${tree}"
+write_board_table "${tree}"
 wanted="${WRT_WORKDIR}/out/seed-toolchain-${profile}.config"
-compose_seeds "${profile}" "" "${wanted}"
+compose_seeds "${tree}" "${profile}" "" "${wanted}"
 info "make defconfig (toolchain, ${profile})"
-configure_tree "${wanted}"
+configure_tree "${tree}" "${wanted}"
 
-toolchain_dir=$(make -C "${TREE}" -s val.TOOLCHAIN_DIR)
+toolchain_dir=$(make -C "${tree}" -s val.TOOLCHAIN_DIR)
 record="${toolchain_dir}/wrt-toolchain.json"
-cflags=$(make -C "${TREE}" -s val.TARGET_CFLAGS)
+cflags=$(make -C "${tree}" -s val.TARGET_CFLAGS)
 # Rust's standard library has C parts compiled with the target's flags, so it
 # goes with the C toolchain whenever that is built anew.
 if [ -d "${toolchain_dir}" ]; then
@@ -53,15 +54,15 @@ if [ -d "${toolchain_dir}" ]; then
 	libc=$(toolchain_libc "${toolchain_dir}")
 	if [ "${recorded}" != "${cflags} | ${libc}" ] || [ -z "${libc}" ]; then
 		info "the toolchain in ${toolchain_dir} is not the one its record names: building it anew"
-		rm -rf "${toolchain_dir}" "${TREE}"/build_dir/toolchain-*
-		make -C "${TREE}" package/feeds/packages/rust/host/clean >/dev/null
+		rm -rf "${toolchain_dir}" "${tree}"/build_dir/toolchain-*
+		make -C "${tree}" package/feeds/packages/rust/host/clean >/dev/null
 	fi
 fi
 recorded=$(jq -r '.rust_std // ""' "${record}" 2>/dev/null) || recorded=
-rust_std=$(toolchain_rust_std)
+rust_std=$(toolchain_rust_std "${tree}")
 if [ -n "${rust_std}" ] && [ "${rust_std}" != "${recorded}" ]; then
 	info "Rust's standard library is not the one the record names: building it anew"
-	make -C "${TREE}" package/feeds/packages/rust/host/clean >/dev/null
+	make -C "${tree}" package/feeds/packages/rust/host/clean >/dev/null
 fi
 # write_record <rust_std>: what this configuration built, or found built as
 # recorded; Rust's library only once there is one.
@@ -72,37 +73,37 @@ write_record() {
 }
 
 jobs=${WRT_JOBS:-$(nproc)}
-log=$(time_log host)
-start=$(compiler_cache_start)
+log=$(time_log "${tree}" host)
+start=$(compiler_cache_start "${tree}")
 status=0
-BUILD_TIME_LOG="${log}" make -C "${TREE}" -j"${jobs}" tools/install toolchain/install || status=$?
+BUILD_TIME_LOG="${log}" make -C "${tree}" -j"${jobs}" tools/install toolchain/install || status=$?
 if [ "${status}" -eq 0 ]; then
 	[ -d "${toolchain_dir}" ] || die "no toolchain directory at '${toolchain_dir}'"
 	# toolchain/Makefile: $(call stampfile,toolchain,compile) in $(TOOLCHAIN_DIR),
 	# and the version stamp as its buildbot mode writes it.
-	make -C "${TREE}" "${toolchain_dir}/stamp/.toolchain_compile"
-	version=$(git -C "${TREE}" log --no-show-signature --format=%h -1 toolchain)
+	make -C "${tree}" "${toolchain_dir}/stamp/.toolchain_compile"
+	version=$(git -C "${tree}" log --no-show-signature --format=%h -1 toolchain)
 	printf '%s\n' "${version}" | update_file "${toolchain_dir}/stamp/.ver_check"
 	libc=$(toolchain_libc "${toolchain_dir}")
 	[ -n "${libc}" ] || die "the toolchain in ${toolchain_dir} has no C library"
 	# Rust's library is the recorded one here, or none: the checks above removed
 	# any other.
-	rust_std=$(toolchain_rust_std)
+	rust_std=$(toolchain_rust_std "${tree}")
 	write_record "${rust_std}"
 	# The host toolchains of the other languages the firmware is written in, on the
 	# cross toolchain (build-acceleration D2): no board's build compiles them again.
-	BUILD_TIME_LOG="${log}" make -C "${TREE}" -j"${jobs}" \
+	BUILD_TIME_LOG="${log}" make -C "${tree}" -j"${jobs}" \
 		package/feeds/packages/golang/host/compile package/feeds/packages/rust/host/compile || status=$?
 fi
-compiler_cache_report "${start}"
-time_report "${log}"
+compiler_cache_report "${tree}" "${start}"
+time_report "${tree}" "${log}"
 [ "${status}" -eq 0 ] || die "building the host tools and the toolchains failed"
 # WRT_COMPILER_CACHE_TRIM (CI, where the host stage keeps a cache of its own): drop
 # what this build did not use.
 if [ -n "${WRT_COMPILER_CACHE_TRIM:-}" ]; then
-	compiler_cache_trim "${start}"
+	compiler_cache_trim "${tree}" "${start}"
 fi
-rust_std=$(toolchain_rust_std)
+rust_std=$(toolchain_rust_std "${tree}")
 [ -n "${rust_std}" ] || die "no Rust standard library in staging_dir/hostpkg"
 write_record "${rust_std}"
 info "toolchains built with: ${cflags}"

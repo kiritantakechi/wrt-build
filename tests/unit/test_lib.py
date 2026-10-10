@@ -1,17 +1,16 @@
-"""The helpers of scripts/lib.sh: the tree's files, the caches and the toolchain."""
+"""The shell library's modules (scripts/lib/): the tree, the caches, the toolchain and seeds."""
 
 import hashlib
 import os
 import re
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from wrt_tests.model.boards import load_all
+from wrt_tests.model.shell import awk_program, library
 
 REPO = Path(__file__).resolve().parents[2]
-LIB = REPO / "scripts" / "lib.sh"
 PROFILES = [
     line.split(":")[0]
     for line in (REPO / "config" / "profiles").read_text().splitlines()
@@ -23,13 +22,8 @@ def _missing_lines(tmp_path: Path, wanted: str, actual: str) -> list[str]:
     """Return what missing_config_lines finds of ``wanted`` missing from ``actual``."""
     (tmp_path / "wanted").write_text(wanted)
     (tmp_path / "actual").write_text(actual)
-    result = subprocess.run(
-        ["sh", "-c", f'. "{LIB}" && missing_config_lines "$1" "$2"', "sh", "wanted", "actual"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    result = library("tree", 'missing_config_lines "$1" "$2"', "wanted", "actual", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
     return [line.strip() for line in result.stdout.splitlines()]
 
 
@@ -75,29 +69,17 @@ def test_trim_keeps_what_the_build_used(tmp_path: Path) -> None:
         entry.write_text(name)
         os.utime(entry, (mtime, mtime))
     (tree / ".config").touch()
-    subprocess.run(
-        [
-            "sh",
-            "-c",
-            f'TREE="$1" && . "{LIB}" && compiler_cache_trim "$2"',
-            "sh",
-            str(tree),
-            str(start),
-        ],
-        check=True,
-    )
+    result = library("cache", 'compiler_cache_trim "$1" "$2"', str(tree), str(start))
+    assert result.returncode == 0, result.stderr
     kept = {str(path.relative_to(tree)) for path in tree.rglob("*") if path.is_file()}
     assert kept == {".config", "tmp/go-build/aa/used", "tmp/go-build/bb/new", ".sccache/a/used"}
 
 
 def _rust_std(tree: Path) -> str:
     """Return what toolchain_rust_std makes of the Rust libraries in ``tree``."""
-    return subprocess.run(
-        ["sh", "-c", f'TREE="$1" && . "{LIB}" && toolchain_rust_std', "sh", str(tree)],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
+    result = library("toolchain", 'toolchain_rust_std "$1"', str(tree))
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
 
 
 def test_an_uninstalled_rust_has_no_standard_library(tmp_path: Path) -> None:
@@ -132,12 +114,8 @@ def test_toolchain_stages_name_what_only_toolchain_build_builds(tmp_path: Path) 
             )
         )
     )
-    result = subprocess.run(
-        ["sh", "-c", f'. "{LIB}" && toolchain_stages "$1"', "sh", str(log)],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    result = library("toolchain", 'toolchain_stages "$1"', str(log))
+    assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "package/feeds/packages/golang1.27 [compile]",
         "package/feeds/packages/rust [compile]",
@@ -146,9 +124,10 @@ def test_toolchain_stages_name_what_only_toolchain_build_builds(tmp_path: Path) 
     ]
 
 
-def _lib(script: str, *args: str) -> None:
-    """Run ``script`` with scripts/lib.sh sourced; its arguments are ``args``."""
-    subprocess.run(["sh", "-c", f'. "{LIB}" && {script}', "sh", *args], check=True)
+def _tree(command: str, *args: str) -> None:
+    """Run ``command`` with the tree module loaded; its arguments are ``args``."""
+    result = library("tree", command, *args)
+    assert result.returncode == 0, result.stderr
 
 
 OLD = 1_700_000_000
@@ -156,11 +135,11 @@ OLD = 1_700_000_000
 
 def test_an_unchanged_link_keeps_its_time(tmp_path: Path) -> None:
     link = tmp_path / "link"
-    _lib('symlink "$1" "$2"', "target", str(link))
+    _tree('symlink "$1" "$2"', "target", str(link))
     os.utime(link, (OLD, OLD), follow_symlinks=False)
-    _lib('symlink "$1" "$2"', "target", str(link))
+    _tree('symlink "$1" "$2"', "target", str(link))
     assert link.lstat().st_mtime == OLD
-    _lib('symlink "$1" "$2"', "other", str(link))
+    _tree('symlink "$1" "$2"', "other", str(link))
     assert link.readlink() == Path("other")
 
 
@@ -168,9 +147,9 @@ def test_an_unchanged_file_keeps_its_time(tmp_path: Path) -> None:
     file = tmp_path / "file"
     file.write_text("same\n")
     os.utime(file, (OLD, OLD))
-    _lib('printf "same\\n" | update_file "$1"', str(file))
+    _tree('printf "same\\n" | update_file "$1"', str(file))
     assert file.stat().st_mtime == OLD
-    _lib('printf "other\\n" | update_file "$1"', str(file))
+    _tree('printf "other\\n" | update_file "$1"', str(file))
     assert file.read_text() == "other\n"
     assert file.stat().st_mtime > OLD
     assert sorted(path.name for path in tmp_path.iterdir()) == ["file"]
@@ -186,7 +165,7 @@ def test_an_unchanged_configuration_keeps_its_time(tmp_path: Path) -> None:
 
     def configure(text: str) -> float:
         seed.write_text(text)
-        _lib('TREE="$1" && configure_tree "$2"', str(tree), str(seed))
+        _tree('configure_tree "$1" "$2"', str(tree), str(seed))
         return config.stat().st_mtime
 
     board = 'CONFIG_BUILD_SUFFIX="r4s"\nCONFIG_X=y\n'
@@ -222,40 +201,21 @@ def test_go_cache_counts_what_go_compiled(tmp_path: Path) -> None:
             (cache / output / f"{output_id}-d").write_bytes(data)
     for path in cache.rglob("*-[ad]"):
         os.utime(path, (start + 120, start + 120))
-    result = subprocess.run(
-        [
-            "sh",
-            "-c",
-            f'TREE="$1" && . "{LIB}" && go_cache_compiled "$2"',
-            "sh",
-            str(tree),
-            str(start),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    result = library("cache", 'go_cache_compiled "$1" "$2"', str(tree), str(start))
+    assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "1"
 
 
 def _compose(profile: str, board: str, tmp_path: Path) -> str:
-    """Return the seed compose_seeds composes for ``profile`` and ``board`` (none: "")."""
+    """Return the seed compose_seeds composes for ``profile`` and ``board`` (none: "").
+
+    The tree is ``tmp_path``'s openwrt.
+    """
+    tree = tmp_path / "openwrt"
+    tree.mkdir(exist_ok=True)
     output = tmp_path / f"{profile}-{board or 'neutral'}.config"
-    # lib.sh finds the repository from $0, here its own path.
-    subprocess.run(
-        [
-            "sh",
-            "-c",
-            f'. "{LIB}" && TREE=/work/openwrt && compose_seeds "$@"',
-            str(LIB),
-            profile,
-            board,
-            str(output),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    result = library("seeds", 'compose_seeds "$@"', str(tree), profile, board, str(output))
+    assert result.returncode == 0, result.stderr
     return output.read_text()
 
 
@@ -274,13 +234,8 @@ def test_a_later_seed_replaces_an_earlier_line(tmp_path: Path) -> None:
         '# a\nCONFIG_A=y\n# CONFIG_B is not set\nCONFIG_C="-O2"\nCONFIG_D=m\n'
     )
     (tmp_path / "b.seed").write_text('# b\nCONFIG_B=y\nCONFIG_C="-O3"\n')
-    result = subprocess.run(
-        ["sh", "-c", f'. "{LIB}" && merge_seeds a.seed b.seed'],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    result = awk_program("merge-seeds.awk", "a.seed", "b.seed", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
     assert result.stdout == '# a\nCONFIG_A=y\nCONFIG_D=m\n# b\nCONFIG_B=y\nCONFIG_C="-O3"\n'
 
 
@@ -309,7 +264,7 @@ def test_board_only_seeds_build_apart(tmp_path: Path) -> None:
     ]
     assert 'CONFIG_EXTRA_OPTIMIZATION="-fno-caller-saves -fno-plt -O3 -mcpu=' in "\n".join(seed)
     assert 'CONFIG_BUILD_SUFFIX="r4s_ubsan"' in seed
-    assert 'CONFIG_BINARY_FOLDER="/work/openwrt/bin/r4s_ubsan"' in seed
+    assert f'CONFIG_BINARY_FOLDER="{tmp_path / "openwrt"}/bin/r4s_ubsan"' in seed
     assert 'CONFIG_BUILD_SUFFIX="r4s"' in _compose("dev", "r4s", tmp_path).splitlines()
 
 

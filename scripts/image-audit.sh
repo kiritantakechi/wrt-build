@@ -8,17 +8,17 @@
 # Reads the image offline: partition 2 (slot A's root) is extracted with the tree's
 # fsck.erofs and the package database is queried with the tree's apk.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
 
 image=${1:-}
 [ -n "${image}" ] && [ -f "${image}" ] || die "usage: image-audit <factory.img.gz>"
 
 require_linux
-require_workdir
+tree=$(workdir_tree)
 ensure_fhs build "$@"
 
-host_bin="${TREE}/staging_dir/host/bin"
+host_bin="${tree}/staging_dir/host/bin"
 for tool in fsck.erofs apk; do
 	[ -x "${host_bin}/${tool}" ] || die "${host_bin}/${tool} missing; build the tree first"
 done

@@ -7,8 +7,9 @@
 # line, then the old and new SHAs and at most 50 commits of each repository.
 # When none moved, the lock stays as it is and <description> is not written.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
+use upstream
 
 SUMMARY=50
 

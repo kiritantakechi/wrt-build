@@ -6,7 +6,7 @@
 WRT_AB_DIR := $(TOPDIR)/env/uboot
 
 # The boards, each as <U-Boot variant>:<board id>:<environment directory in the
-# U-Boot tree> (scripts/lib.sh writes them from boards/*.json).
+# U-Boot tree> (scripts/lib/boards.sh writes them from boards/*.json).
 include $(TOPDIR)/env/wrt-boards.mk
 
 # The variables the stored environment may set (ENV_WRITEABLE_LIST). U-Boot takes

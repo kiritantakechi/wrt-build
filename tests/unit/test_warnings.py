@@ -1,17 +1,17 @@
 """The UB-indicative warnings, collected and reviewed (toolchain-o3 D4).
 
-The build collects them from its logs (scripts/lib.sh); the system tests check
+The build collects them from its logs (scripts/lib/warnings.sh); the system tests check
 them against the register (wrt_tests.model.undefined_behavior).
 """
 
 import json
 import os
-import subprocess
 from datetime import date
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
+from wrt_tests.model.shell import awk_program, library
 from wrt_tests.model.undefined_behavior import (
     Diagnostic,
     Review,
@@ -21,26 +21,32 @@ from wrt_tests.model.undefined_behavior import (
     unreviewed,
 )
 
-LIB = Path(__file__).resolve().parents[2] / "scripts" / "lib.sh"
+if TYPE_CHECKING:
+    import subprocess
+    from pathlib import Path
+
 BUILD = "/work/openwrt/build_dir/target-aarch64_generic_musl_r4s"
 TOOLCHAIN = "/work/openwrt/staging_dir/toolchain-aarch64_generic_gcc-15.3.0_musl"
 
 
 def _lib(function: str, *args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
-    """Run a function of lib.sh with ``args`` in ``cwd``."""
-    return subprocess.run(
-        ["sh", "-c", f'. "{LIB}" && {function} "$@"', "sh", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    """Run a function of the warnings module with ``args`` in ``cwd``."""
+    return library("warnings", f'{function} "$@"', *args, cwd=cwd)
+
+
+def _ub_warnings() -> str:
+    """Return the UB-indicative options, as the warnings module lists them."""
+    result = library("warnings", 'printf "%s" "${UB_WARNINGS}"')
+    assert result.returncode == 0, result.stderr
+    return result.stdout
 
 
 def _warnings(tmp_path: Path, log: str) -> list[tuple[str, ...]]:
-    """Return what ub_warnings finds in ``log``: option, file, function and line."""
+    """Return what ub-warnings.awk finds in ``log``: option, file, function and line."""
     (tmp_path / "compile.txt").write_text(log)
-    result = _lib("ub_warnings", "compile.txt", cwd=tmp_path)
+    result = awk_program(
+        "ub-warnings.awk", "compile.txt", cwd=tmp_path, env={"UB_WARNINGS": _ub_warnings()}
+    )
     assert result.returncode == 0, result.stderr
     return [tuple(line.split("\t")) for line in result.stdout.splitlines()]
 
@@ -234,7 +240,7 @@ def test_image_packages_map_to_their_build_logs(tmp_path: Path) -> None:
         "libcurl4 - 8.16.0-r1\nppp - 2.5.3-r2\nppp-mod-pppoe - 2.5.3-r2\n"
     )
     (tmp_path / "packageinfo").write_text(PACKAGEINFO)
-    result = _lib("image_logs", "manifest", "packageinfo", cwd=tmp_path)
+    result = awk_program("image-logs.awk", "manifest", "packageinfo", cwd=tmp_path)
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "curl\tpackage/feeds/packages/curl",
@@ -246,7 +252,7 @@ def test_image_packages_map_to_their_build_logs(tmp_path: Path) -> None:
 def test_a_package_without_metadata_fails(tmp_path: Path) -> None:
     (tmp_path / "manifest").write_text("curl - 8.16.0-r1\nlibbpf - 1.6.2-r1\n")
     (tmp_path / "packageinfo").write_text(PACKAGEINFO)
-    result = _lib("image_logs", "manifest", "packageinfo", cwd=tmp_path)
+    result = awk_program("image-logs.awk", "manifest", "packageinfo", cwd=tmp_path)
     assert result.returncode != 0
     assert "no package metadata for libbpf" in result.stderr
 

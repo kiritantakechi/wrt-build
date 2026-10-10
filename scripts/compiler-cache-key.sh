@@ -8,8 +8,9 @@
 # editing them keeps the caches. Go's and sccache's entries name their compiler
 # themselves.
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
+use boards
 
 stage=${1:-}
 

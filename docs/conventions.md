@@ -16,6 +16,7 @@ The "Check name" column in the table below uses the names that `scripts/check.sh
 | No secrets in history or in files about to be committed | `gitleaks` | — |
 | Build steps must not execute or apply downloaded content, and must not modify upstream files in place with `sed -i` | `forbidden-patterns` | — |
 | Script skeleton, and one-to-one naming between scripts and just recipes | `skeleton` | — |
+| Shell library: every script and module loads the modules whose functions it calls, and every library function has a caller | `modules` | — |
 | Packet marks of the configuration templates against `config/marks.tsv` | `marks` | — |
 | Board descriptions against their schema (`boards/*.json`) | `boards` | — |
 | Python format (`tests/`) | `ruff-format` | `ruff format` |
@@ -36,16 +37,17 @@ Every script under `scripts/` is organized in this order:
 # Usage: scripts/<name>.sh [args]
 # (optional further comment lines)
 set -eu
-# shellcheck source=scripts/lib.sh
-. "$(dirname -- "$0")/lib.sh"
+# shellcheck source=scripts/lib/core.sh
+. "$(dirname -- "$0")/lib/core.sh"
+use <module>...   # the library modules it calls beyond core, if any
 
 <argument parsing>
-require_linux; require_workdir; ensure_fhs build "$@"   # only the guards it needs
+require_linux; tree=$(workdir_tree); ensure_fhs build "$@"   # only the guards it needs
 <main>
 ```
 
 - `<name>` matches the file name; the second line ends with a period.
-- Scripts must be executable. `lib.sh` is a sourced library and is not executable; its first two lines are `# lib: ...` and `# Usage: ...`.
+- Scripts must be executable. The library modules under `scripts/lib/` are sourced, not executed, and are not executable; their first two lines are `# <module>: ...` and `# Usage: ...`.
 - The exit status of a command substitution must not be swallowed (shellcheck's `check-extra-masked-returns`): assign it to a variable first, then use the variable.
 - POSIX sh has no local variables. Variable names used inside a function must not clash with the caller's; when isolation is needed, use a subshell.
 
@@ -56,6 +58,27 @@ require_linux; require_workdir; ensure_fhs build "$@"   # only the guards it nee
 - **Paired operations** have symmetric names: `mount`/`unmount`, `pack`/`unpack`, `check`/`fmt`.
 - **Every script has a just recipe of the same name**, and conversely every just recipe (except `default`) has a script of the same name; `skeleton` checks this. Just recipes are grouped into `build`, `image`, `test`, `quality`, `ci` and `workdir`.
 - **Environment variables** all use the `WRT_` prefix.
+
+## Shell library modules
+
+The scripts' shared functions live in `scripts/lib/`, one module per domain. A script loads core by its path and the other modules it calls by name, on one `use` line after core's; a module loads what it depends on with a `use` line of its own, and `use` loads each module once.
+
+| Module | Domain |
+|---|---|
+| `core` | The repository's place (`REPO_DIR`), messages (`die`, `info`), `use` and `loaded_modules`, the host and environment guards (`require_linux`, `ensure_fhs`), the build tree (`workdir_tree`), the repository's files, the tests' virtual environment |
+| `boards` | The board descriptions (`BOARDS_DIR`, `board_ids`, `board_field`) and the table of them the A/B hooks read |
+| `tree` | The build tree's files: links into it, files written only when they change, its configuration, and moving its checkout |
+| `seeds` | A configuration composed from a profile's and a board's seeds |
+| `cache` | The compiler caches the tree links to: running them, their statistics and their trimming |
+| `toolchain` | What a toolchain was built with, and the stages of a build that built any of it |
+| `timing` | A build's time log, and the report of where its time went |
+| `warnings` | The UB-indicative warnings (`UB_WARNINGS`): read from a build's logs, recorded, and gathered for an image |
+| `upstream` | The sources pinned in `upstream.lock` (`LOCK_FILE`), fetched and patched |
+
+- **The tree is an argument.** `workdir_tree` checks `WRT_WORKDIR` and prints the tree's path; a script keeps it in its own variable, `tree=$(workdir_tree)`, and every function that works on a tree takes it first and checks it. The only globals are core's and each module's constants, derived from the repository's place.
+- **A module starts from core**, and says so: `: "${REPO_DIR:?load scripts/lib/core.sh first}"` after its header, before its `use` line.
+- **An awk program of more than ten lines** is a file beside its module (`ub-warnings.awk`, `image-logs.awk`, `merge-seeds.awk`), which the function runs with `awk -f` and the unit tests run directly; a shorter one stays inline.
+- **`modules`** (`lib-check`) fails on a call of a library function that the modules a file loads do not provide, and on a function that no script, module, test, workflow or recipe calls. The toolchain's cache key hashes the modules its scripts load.
 
 ## Test harness layers
 
