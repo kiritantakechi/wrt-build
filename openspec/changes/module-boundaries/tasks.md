@@ -71,11 +71,11 @@
 
 ## 6. Integration
 
-- [ ] 6.0 Leave nothing behind (D9): `git grep` finds no `lib.sh`, `require_workdir`, global `TREE`, or `json.loads`/`tomllib` read of a data file of D7 in the repository, outside the archived changes.
+- [x] 6.0 Leave nothing behind (D9): `git grep` finds no `lib.sh`, `require_workdir`, global `TREE`, or `json.loads`/`tomllib` read of a data file of D7 in the repository, outside the archived changes.
 
   Verify: the grep finds nothing, and the dead-code checks of tasks 3.4 and 5.4 pass.
 
-- [ ] 6.1 Build both boards (`just build r4s dev`, `just build r6s dev`), and compose the ci profile's seeds. Compare them with the baseline of task 1.1.
+- [x] 6.1 Build both boards (`just build r4s dev`, `just build r6s dev`), and compose the ci profile's seeds. Compare them with the baseline of task 1.1.
 
   Verify: the composed seeds, `.config` and each image's package list equal the baseline.
 - [ ] 6.2 Run the full system tests on both boards.
