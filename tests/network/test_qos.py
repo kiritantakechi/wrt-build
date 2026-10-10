@@ -12,15 +12,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.datapath import QOSIFY, hooks
-from wrt_tests.net import DIRECT_TARGET, IPERF_PORTS
-from wrt_tests.poll import until
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.net import DIRECT_TARGET, IPERF_PORTS
+from wrt_tests.services.datapath import QOSIFY, hooks
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from wrt_tests.datapath import Online
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.services.datapath import Online
 
 CAPABILITY = "network/qos"
 DEFAULT_RATE = "100Mbit"

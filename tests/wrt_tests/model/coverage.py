@@ -24,11 +24,11 @@ from typing import override
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from wrt_tests.data import read_toml
-from wrt_tests.specs import Scenario, ScenarioId, capability_of_module, load_scenarios
+from wrt_tests.model.data import read_toml
+from wrt_tests.model.repository import REPO_DIR, TESTS_DIR
+from wrt_tests.model.specs import Scenario, ScenarioId, capability_of_module, load_scenarios
 
-TESTS_DIR = Path(__file__).resolve().parent.parent
-OPENSPEC_DIR = TESTS_DIR.parent / "openspec"
+OPENSPEC_DIR = REPO_DIR / "openspec"
 ELSEWHERE_FILE = "verified-elsewhere.toml"
 UNIT_DOMAIN = "unit"
 
@@ -79,7 +79,14 @@ def collect_tests(tests_dir: Path = TESTS_DIR) -> list[TestRef]:
     with contextlib.redirect_stdout(io.StringIO()):  # pytest's own collection listing
         status = pytest.main(
             [
-                *("--collect-only", "-qq", "-p", "no:cacheprovider", "-p", "wrt_tests.plugin"),
+                *(
+                    "--collect-only",
+                    "-qq",
+                    "-p",
+                    "no:cacheprovider",
+                    "-p",
+                    "wrt_tests.model.markers",
+                ),
                 *("--rootdir", str(tests_dir), str(tests_dir)),
             ],
             plugins=[collector],

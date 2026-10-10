@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from labgrid import Target
     from labgrid.driver import SSHDriver
 
-    from wrt_tests.emu import Emulator
+    from wrt_tests.device.emu import Emulator
 
 SSH_PORT = 22
 # Terminal control in a login session's output: CSI sequences and carriage returns.
@@ -49,6 +49,19 @@ LOGIN_TIMEOUT = 180.0
 CONSOLE_READY = "console-ready"
 CONSOLE_END = "console-end"
 CONSOLE_KNOCK = 15.0
+
+
+def _check(deadline: float, message: str) -> None:
+    if time.monotonic() > deadline:
+        raise TimeoutError(message)
+
+
+def _port_open(address: str, port: int) -> bool:
+    try:
+        with socket.create_connection((address, port), timeout=2):
+            return True
+    except OSError:
+        return False
 
 
 class Router:
@@ -310,16 +323,3 @@ class Router:
         self.disconnect()
         self.emulator.restore()
         self.set_clock()
-
-
-def _port_open(address: str, port: int) -> bool:
-    try:
-        with socket.create_connection((address, port), timeout=2):
-            return True
-    except OSError:
-        return False
-
-
-def _check(deadline: float, message: str) -> None:
-    if time.monotonic() > deadline:
-        raise TimeoutError(message)

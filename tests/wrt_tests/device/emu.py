@@ -29,11 +29,11 @@ from typing import TYPE_CHECKING, Any, Self
 import yaml
 from pexpect import TIMEOUT
 
-from wrt_tests.boards import Board, load
-from wrt_tests.data import DataError, read_json, write_json
-from wrt_tests.image import SECTOR, Fit, FitNode, gunzip_first_member, parse_fit, read_mbr
-from wrt_tests.net import segments, taps
-from wrt_tests.outputs import MANIFEST_FILE, SOURCE_FILE, EmulationSource, Manifest
+from wrt_tests.model.boards import Board, load
+from wrt_tests.model.data import DataError, read_json, write_json
+from wrt_tests.model.image import SECTOR, Fit, FitNode, gunzip_first_member, parse_fit, read_mbr
+from wrt_tests.model.outputs import MANIFEST_FILE, SOURCE_FILE, EmulationSource, Manifest
+from wrt_tests.sandbox.net import segments, taps
 
 if TYPE_CHECKING:
     from labgrid import Target

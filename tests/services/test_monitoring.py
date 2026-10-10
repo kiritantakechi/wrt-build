@@ -12,7 +12,7 @@ import pytest
 from wrt_tests import spec
 
 if TYPE_CHECKING:
-    from wrt_tests.datapath import Online
+    from wrt_tests.services.datapath import Online
 
 CAPABILITY = "services/monitoring"
 LAN_ADDRESS = "10.0.0.1"

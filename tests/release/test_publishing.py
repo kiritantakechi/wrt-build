@@ -17,15 +17,15 @@ import pytest
 import yaml
 
 from wrt_tests import spec
-from wrt_tests.boards import load_all
-from wrt_tests.data import read_json, write_json
-from wrt_tests.outputs import MANIFEST_FILE, RELEASE_FILE, Manifest, Release
-from wrt_tests.trees import linked_copy, replace
+from wrt_tests.model.boards import load_all
+from wrt_tests.model.data import read_json, write_json
+from wrt_tests.model.outputs import MANIFEST_FILE, RELEASE_FILE, Manifest, Release
+from wrt_tests.model.trees import linked_copy, replace
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from wrt_tests.boards import Board
+    from wrt_tests.model.boards import Board
 
 CAPABILITY = "release/publishing"
 REPO = Path(__file__).resolve().parents[2]

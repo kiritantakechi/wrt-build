@@ -1,4 +1,4 @@
-"""Unit tests of wrt_tests.image: reading a sysupgrade image from bytes and listings."""
+"""Unit tests of wrt_tests.model.image: reading a sysupgrade image from bytes and listings."""
 
 import gzip
 import io
@@ -6,7 +6,7 @@ import struct
 
 import pytest
 
-from wrt_tests.image import (
+from wrt_tests.model.image import (
     SECTOR,
     default_environment,
     gunzip_first_member,

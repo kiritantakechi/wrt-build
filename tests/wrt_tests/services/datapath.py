@@ -15,17 +15,17 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self, cast
 
-from wrt_tests.internet import RELEASES
-from wrt_tests.isp import DELEGATED_PREFIX, LOGIN
-from wrt_tests.net import PROXIED_TARGET, PROXY, PROXY_PORT
-from wrt_tests.poll import until
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.internet import RELEASES
+from wrt_tests.sandbox.isp import DELEGATED_PREFIX, LOGIN
+from wrt_tests.sandbox.net import PROXIED_TARGET, PROXY, PROXY_PORT
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from wrt_tests.isp import Isp, Session
-    from wrt_tests.net import Netns, Network
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.sandbox.isp import Isp, Session
+    from wrt_tests.sandbox.net import Netns, Network
 
 ONLINE_TIMEOUT = 180
 DAE_TIMEOUT = 120
@@ -153,6 +153,12 @@ def _session(router: Router, isp: Isp, other_than: Session | None) -> Session | 
     if other_than is not None and peer == other_than.peer:
         return None
     return isp.session(peer)
+
+
+def _wait_session(router: Router, isp: Isp, other_than: Session | None) -> Session:
+    return until(
+        lambda: _session(router, isp, other_than), timeout=ONLINE_TIMEOUT, what="PPP session"
+    )
 
 
 @dataclass
@@ -291,12 +297,6 @@ class Online:
             self.network.renew(name)
             self.asked[name] = time.monotonic()
         return False
-
-
-def _wait_session(router: Router, isp: Isp, other_than: Session | None) -> Session:
-    return until(
-        lambda: _session(router, isp, other_than), timeout=ONLINE_TIMEOUT, what="PPP session"
-    )
 
 
 def dae_start(router: Router, config: str = DAE_CONFIG) -> None:

@@ -18,25 +18,26 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from wrt_tests import releases, spec
-from wrt_tests.ab import boot_area_sha256, slot, slot_sha256
-from wrt_tests.boards import load_all
-from wrt_tests.data import read_json, write_json
-from wrt_tests.internet import RELEASES
-from wrt_tests.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
-from wrt_tests.outputs import RELEASE_FILE, Manifest, Release
-from wrt_tests.storage import MOUNT
-from wrt_tests.trees import linked_copy, replace
+from wrt_tests import spec
+from wrt_tests.device.ab import boot_area_sha256, slot, slot_sha256
+from wrt_tests.device.storage import MOUNT
+from wrt_tests.model.boards import load_all
+from wrt_tests.model.data import read_json, write_json
+from wrt_tests.model.outputs import RELEASE_FILE, Manifest, Release
+from wrt_tests.model.trees import linked_copy, replace
+from wrt_tests.sandbox import releases
+from wrt_tests.sandbox.internet import RELEASES
+from wrt_tests.sandbox.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from wrt_tests.boards import Board
-    from wrt_tests.datapath import Online
-    from wrt_tests.isp import Isp
-    from wrt_tests.keys import Keys
-    from wrt_tests.router import Router
-    from wrt_tests.storage import Disk
+    from wrt_tests.device.router import Router
+    from wrt_tests.device.storage import Disk
+    from wrt_tests.model.boards import Board
+    from wrt_tests.model.keys import Keys
+    from wrt_tests.sandbox.isp import Isp
+    from wrt_tests.services.datapath import Online
 
 CAPABILITY = "release/device-sync"
 PUBLISH = Path(__file__).resolve().parents[2] / "scripts" / "release-publish.sh"

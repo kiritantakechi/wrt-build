@@ -1,4 +1,4 @@
-"""Unit tests of wrt_tests.boards: the board descriptions and their schema."""
+"""Unit tests of wrt_tests.model.boards: the board descriptions and their schema."""
 
 import json
 import shutil
@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from wrt_tests.boards import BOARDS_DIR, Description, load, load_all
-from wrt_tests.data import DataError, read_json
+from wrt_tests.model.boards import BOARDS_DIR, Description, load, load_all
+from wrt_tests.model.data import DataError, read_json
 
 if TYPE_CHECKING:
     from collections.abc import Callable

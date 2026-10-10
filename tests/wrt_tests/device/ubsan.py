@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, override
 import pytest
 
 if TYPE_CHECKING:
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
 
 PROFILE = "ubsan"
 PROBE = "wrt-ubsan-probe"

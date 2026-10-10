@@ -14,14 +14,14 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.datapath import hooks
-from wrt_tests.net import PROXIED_TARGET, PROXY
-from wrt_tests.poll import until
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.net import PROXIED_TARGET, PROXY
+from wrt_tests.services.datapath import hooks
 
 if TYPE_CHECKING:
-    from wrt_tests.datapath import Online
-    from wrt_tests.net import Netns
-    from wrt_tests.vpn import Tailnet, WireGuard
+    from wrt_tests.sandbox.net import Netns
+    from wrt_tests.services.datapath import Online
+    from wrt_tests.services.vpn import Tailnet, WireGuard
 
 CAPABILITY = "services/vpn"
 REPO = Path(__file__).resolve().parents[2]

@@ -14,15 +14,15 @@ import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self, cast
 
-from wrt_tests.internet import HEADSCALE
-from wrt_tests.poll import until
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.internet import HEADSCALE
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from wrt_tests.datapath import Online
-    from wrt_tests.net import Netns, Network
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.sandbox.net import Netns, Network
+    from wrt_tests.services.datapath import Online
 
 LAN_PREFIX = "10.0.0.0/24"
 WG_PORT = 51820
@@ -95,6 +95,49 @@ class WireGuard:
     def disconnect(self) -> None:
         """Remove wg-peer's end; the router's goes back with its snapshot."""
         self.peer.run("ip", "link", "del", "wg0")
+
+
+def _headscale(network: Network, *args: str) -> Any:  # noqa: ANN401 (JSON)
+    config = network.workdir / "inet" / "headscale.yaml"
+    output = network["inet"].run("headscale", f"--config={config}", *args, "--output=json")
+    return json.loads(output) if output.strip() else None
+
+
+def _nodes(network: Network) -> list[dict[str, Any]]:
+    return cast("list[dict[str, Any]]", _headscale(network, "nodes", "list") or [])
+
+
+def _node(network: Network, name: str) -> int:
+    (node,) = (
+        node for node in _nodes(network) if name in (node.get("given_name"), node.get("name"))
+    )
+    return int(node["id"])
+
+
+def clear(network: Network) -> None:
+    """Remove every node from headscale (the tailnet starts empty), routes withdrawn first.
+
+    headscale (0.27) lets go of the routes a node serves when their approval
+    changes or the node goes offline, not when it is deleted: a router deleted
+    while it serves the LAN route would keep the next one from ever serving it.
+    """
+    for node in _nodes(network):
+        identifier = f"--identifier={node['id']}"
+        _headscale(network, "nodes", "approve-routes", identifier, "--routes=")
+        _headscale(network, "nodes", "delete", identifier, "--force")
+
+
+def preauth_key(network: Network) -> str:
+    """Return a new reusable preauth key of the tailnet's user, valid for an hour."""
+    users = cast("list[dict[str, Any]]", _headscale(network, "users", "list") or [])
+    if not any(user["name"] == TAILNET_USER for user in users):
+        _headscale(network, "users", "create", TAILNET_USER)
+        users = cast("list[dict[str, Any]]", _headscale(network, "users", "list"))
+    (user,) = (user for user in users if user["name"] == TAILNET_USER)
+    created = _headscale(
+        network, "preauthkeys", "create", f"--user={user['id']}", "--reusable", "--expiration=1h"
+    )
+    return str(created["key"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,46 +220,3 @@ class Tailnet:
         """Log ts-peer out and remove both nodes from headscale."""
         self.peer_tailscale("logout")
         clear(self.network)
-
-
-def _headscale(network: Network, *args: str) -> Any:  # noqa: ANN401 (JSON)
-    config = network.workdir / "inet" / "headscale.yaml"
-    output = network["inet"].run("headscale", f"--config={config}", *args, "--output=json")
-    return json.loads(output) if output.strip() else None
-
-
-def preauth_key(network: Network) -> str:
-    """Return a new reusable preauth key of the tailnet's user, valid for an hour."""
-    users = cast("list[dict[str, Any]]", _headscale(network, "users", "list") or [])
-    if not any(user["name"] == TAILNET_USER for user in users):
-        _headscale(network, "users", "create", TAILNET_USER)
-        users = cast("list[dict[str, Any]]", _headscale(network, "users", "list"))
-    (user,) = (user for user in users if user["name"] == TAILNET_USER)
-    created = _headscale(
-        network, "preauthkeys", "create", f"--user={user['id']}", "--reusable", "--expiration=1h"
-    )
-    return str(created["key"])
-
-
-def _nodes(network: Network) -> list[dict[str, Any]]:
-    return cast("list[dict[str, Any]]", _headscale(network, "nodes", "list") or [])
-
-
-def clear(network: Network) -> None:
-    """Remove every node from headscale (the tailnet starts empty), routes withdrawn first.
-
-    headscale (0.27) lets go of the routes a node serves when their approval
-    changes or the node goes offline, not when it is deleted: a router deleted
-    while it serves the LAN route would keep the next one from ever serving it.
-    """
-    for node in _nodes(network):
-        identifier = f"--identifier={node['id']}"
-        _headscale(network, "nodes", "approve-routes", identifier, "--routes=")
-        _headscale(network, "nodes", "delete", identifier, "--force")
-
-
-def _node(network: Network, name: str) -> int:
-    (node,) = (
-        node for node in _nodes(network) if name in (node.get("given_name"), node.get("name"))
-    )
-    return int(node["id"])

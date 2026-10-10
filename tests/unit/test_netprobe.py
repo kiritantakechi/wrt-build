@@ -1,4 +1,4 @@
-"""Unit tests of wrt_tests.netprobe: every mode between two plain network namespaces.
+"""Unit tests of wrt_tests.sandbox.netprobe: every mode between two plain network namespaces.
 
 ``solicit-prefix`` needs a DHCPv6 server on a PPP link, and ``solicit-router`` a
 router; test_isp and the network tests cover them.
@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
 
-from wrt_tests.net import Netns, ip
-from wrt_tests.netprobe import BIG, PORT
+from wrt_tests.sandbox.net import Netns, ip
+from wrt_tests.sandbox.netprobe import BIG, PORT
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -49,7 +49,7 @@ def pair(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pair]:
         for address, length in zip(SECOND, (24, 64), strict=True):
             server.run("ip", "addr", "add", f"{address}/{length}", "dev", "eth0", "nodad")
         daemons = [
-            server.spawn(sys.executable, "-m", "wrt_tests.netprobe", "serve"),
+            server.spawn(sys.executable, "-m", "wrt_tests.sandbox.netprobe", "serve"),
             server.spawn(
                 "dnsmasq",
                 "--keep-in-foreground",
@@ -126,7 +126,7 @@ def test_esp_is_answered_with_the_source(client: Netns, family: int) -> None:
 
 
 def test_listen_receives_what_send_sends(pair: Pair) -> None:
-    command = (sys.executable, "-m", "wrt_tests.netprobe", "listen", "--port", "40001")
+    command = (sys.executable, "-m", "wrt_tests.sandbox.netprobe", "listen", "--port", "40001")
     with subprocess.Popen(pair.client.argv(*command), stdout=subprocess.PIPE) as listener:
         while not pair.client.run("ss", "-Hlun", "sport = :40001"):
             time.sleep(0.1)

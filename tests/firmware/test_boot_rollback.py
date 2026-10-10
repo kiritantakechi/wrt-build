@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
-from wrt_tests.ab import (
+from wrt_tests.device.ab import (
     BOOT_DISK,
     ENV_OFFSET,
     ENV_SIZE,
@@ -16,12 +16,12 @@ from wrt_tests.ab import (
     setenv,
     slot,
 )
-from wrt_tests.emu import extract_fit_image, read_fit, run
-from wrt_tests.image import SECTOR, default_environment, read_mbr
+from wrt_tests.device.emu import extract_fit_image, read_fit, run
+from wrt_tests.model.image import SECTOR, default_environment, read_mbr
 
 if TYPE_CHECKING:
-    from wrt_tests.boards import Board
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.model.boards import Board
 
 CAPABILITY = "firmware/boot-rollback"
 UBOOT_DIR = Path(__file__).resolve().parents[2] / "uboot"

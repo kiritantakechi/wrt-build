@@ -8,7 +8,7 @@
 - [ ] 1.2 Move every other user of the directory to `/etc/usign/keys`:
   - wrt-keyring, wrt-sync and `files/lib/upgrade/wrt-release.sh`;
   - `scripts/release-keys.sh` and `scripts/release-sign.sh`;
-  - the tests' keyring (`tests/wrt_tests/keys.py`);
+  - the tests' keyring and the router's trust in it (`tests/wrt_tests/model/keys.py`, `tests/wrt_tests/device/trust.py`);
   - `docs/release-flow.md` and `docs/ops.md`.
 
   Extend the firmware/base-system test "Check installed packages and executables" to require that there is no `/etc/opkg`.

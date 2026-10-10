@@ -5,15 +5,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.ubsan import PROBE, PROFILE, Traps, report
-from wrt_tests.undefined_behavior import load_register, load_report, stale, unreviewed
+from wrt_tests.device.ubsan import PROBE, PROFILE, Traps, report
+from wrt_tests.model.undefined_behavior import load_register, load_report, stale, unreviewed
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from wrt_tests.boards import Board
-    from wrt_tests.outputs import Manifest
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.model.boards import Board
+    from wrt_tests.model.outputs import Manifest
 
 CAPABILITY = "quality/undefined-behavior"
 REVIEWED = "UB-indicative warnings fixed or reviewed"

@@ -10,9 +10,9 @@ dependencies = [
 ]
 
 [project.scripts]
-board-check = "wrt_tests.boards:main"
-emu-prepare = "wrt_tests.emu:main"
-spec-coverage = "wrt_tests.coverage:main"
+board-check = "wrt_tests.model.boards:main"
+emu-prepare = "wrt_tests.device.emu:main"
+spec-coverage = "wrt_tests.model.coverage:main"
 
 [dependency-groups]
 dev = [

@@ -1,13 +1,13 @@
-"""The traps of a ubsan build, read from the kernel log (wrt_tests.ubsan, toolchain-o3 D5)."""
+"""A ubsan build's traps, read from the kernel log (wrt_tests.device.ubsan, toolchain-o3 D5)."""
 
 from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from wrt_tests.ubsan import Trap, Traps, parse, report
+from wrt_tests.device.ubsan import Trap, Traps, parse, report
 
 if TYPE_CHECKING:
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
 
 # What arm64_show_signal logs for a process killed by a UBSan trap, and for one
 # killed by a segmentation fault, with the kernel's time in front.

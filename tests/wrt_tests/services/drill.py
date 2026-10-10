@@ -13,20 +13,21 @@ import re
 import subprocess
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from wrt_tests import pki, releases
-from wrt_tests.ab import slot
-from wrt_tests.internet import RELEASES
-from wrt_tests.keys import install_trust
+from wrt_tests.device.ab import slot
+from wrt_tests.device.trust import trust_ca, trust_keys
+from wrt_tests.model.repository import REPO_DIR
+from wrt_tests.sandbox import releases
+from wrt_tests.sandbox.internet import RELEASES
 
 if TYPE_CHECKING:
-    from wrt_tests.datapath import Online
-    from wrt_tests.keys import Keys
-    from wrt_tests.router import Router
+    from pathlib import Path
 
-REPO_DIR = Path(__file__).resolve().parents[2]
+    from wrt_tests.device.router import Router
+    from wrt_tests.model.keys import Keys
+    from wrt_tests.services.datapath import Online
+
 PUBLISH = REPO_DIR / "scripts" / "release-publish.sh"
 # The candidate's repository at the Releases stand-in.
 REPOSITORY = "wrt-build/drill"
@@ -50,6 +51,20 @@ class Outcome:
     base_slot: str
     slot: str
     confirmed: bool
+
+
+def _console_report(router: Router) -> str:
+    """Return CONSOLE_REPORT as the router's serial console answers it, or why it does not."""
+    try:
+        return router.console(CONSOLE_REPORT)
+    except Exception as error:  # noqa: BLE001 # a report must not hide the drill's own failure
+        return f"(no report: {error!r})"
+
+
+def _status(router: Router) -> dict[str, str]:
+    """Return wrt-slot's status, or nothing while the router cannot be reached."""
+    listed = router.poll("wrt-slot status") or ""
+    return dict(line.split(": ", 1) for line in listed.splitlines() if ": " in line)
 
 
 @dataclass
@@ -109,12 +124,12 @@ class Drill:
         base = slot(router)
         # The sandbox's CA is no configuration of the router's, and an earlier
         # drill's upgrade kept none of it.
-        pki.trust(router, self.online.network.workdir)
+        trust_ca(router, self.online.network.workdir)
         if self.keys is not None:
             # The slot booted from an image of this build, which trusts the
             # build's own keys: in their place the test's release keys, as a
             # release image trusts the release keys.
-            install_trust(router, self.keys)
+            trust_keys(router, self.keys)
         limits = " && ".join(
             f"uci set wrt-ab.healthcheck.{name}={value}" for name, value in HEALTH_LIMITS.items()
         )
@@ -147,17 +162,3 @@ class Drill:
         status = _status(router)
         running = slot(router)
         return Outcome(base, running, running != base and status.get("state") == "confirmed")
-
-
-def _console_report(router: Router) -> str:
-    """Return CONSOLE_REPORT as the router's serial console answers it, or why it does not."""
-    try:
-        return router.console(CONSOLE_REPORT)
-    except Exception as error:  # noqa: BLE001 # a report must not hide the drill's own failure
-        return f"(no report: {error!r})"
-
-
-def _status(router: Router) -> dict[str, str]:
-    """Return wrt-slot's status, or nothing while the router cannot be reached."""
-    listed = router.poll("wrt-slot status") or ""
-    return dict(line.split(": ", 1) for line in listed.splitlines() if ": " in line)

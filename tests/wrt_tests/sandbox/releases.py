@@ -23,8 +23,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, override
 
-from wrt_tests.data import read_json, write_json
-from wrt_tests.outputs import RELEASE_FILE, Release
+from wrt_tests.model.data import read_json, write_json
+from wrt_tests.model.outputs import RELEASE_FILE, Release
 
 PORT = 443
 CHUNK = 1 << 16

@@ -5,12 +5,12 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
-from wrt_tests.oci import extract_root
+from wrt_tests.sandbox.oci import extract_root
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
 
 CAPABILITY = "firmware/base-system"
 DEFAULT_LAN = "10.0.0.1"

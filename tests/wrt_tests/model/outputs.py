@@ -6,7 +6,7 @@ its image comes from. ``emu-prepare`` records what an emulator directory was
 made from (``source.json``), ``scripts/toolchain-build.sh`` what a toolchain was
 built with (``wrt-toolchain.json``), and ``scripts/release-publish.sh`` what a
 release is (``release.json``). Each is read through its model here, strict
-about unknown fields and types (``wrt_tests.data``).
+about unknown fields and types (``wrt_tests.model.data``).
 """
 
 from pathlib import Path

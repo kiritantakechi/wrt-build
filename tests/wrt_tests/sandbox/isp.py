@@ -16,7 +16,7 @@ get the same interface name while the previous session is still going down.
 
 pppd reads its options and secrets from fixed paths under /etc/ppp, and looks
 up root's home for ``~/.ppprc``; the sandbox mounts what ``configure`` writes
-there (``wrt_tests.net``). The scripts stay in the ISP's own directory, named by
+there (``wrt_tests.sandbox.net``). The scripts stay in the ISP's own directory, named by
 the server options, so that a pppd dialing from a test runs none of them.
 """
 
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from wrt_tests.net import Netns
+    from wrt_tests.sandbox.net import Netns
 
 # The account the router dials with; the image carries none (the config push
 # writes the real one).
@@ -112,39 +112,12 @@ class Isp:
             time.sleep(0.2)
 
 
-def configure(etc: Path, workdir: Path) -> None:
-    """Write the ISP's /etc/ppp to ``etc``, and its session scripts to ``workdir``."""
-    etc.mkdir(parents=True)
-    (workdir / "sessions").mkdir(parents=True)
-    scripts = _scripts(workdir)
-    for name, body in scripts.items():
-        script = workdir / name
-        script.write_text(f"#!/bin/sh\n{body}")
-        script.chmod(0o755)
-    (etc / "options").write_text("")
-    secrets = etc / "pap-secrets"
-    secrets.write_text(f"{LOGIN[0]} * {LOGIN[1]} *\n")
-    secrets.chmod(0o600)
-    (etc / "pppoe-server-options").write_text(
-        "\n".join(
-            (
-                "# The ISP's side of every session (pppoe-server -O).",
-                "require-pap",
-                f"mtu {MTU}",
-                f"mru {MTU}",
-                f"ms-dns {DNS[0]}",
-                "lcp-echo-interval 5",
-                "lcp-echo-failure 3",
-                "noccp",
-                "novj",
-                "+ipv6",
-                "debug",
-                f"logfile {workdir / 'pppd.log'}",
-                *(f"{name}-script {workdir / name}" for name in scripts),
-                "",
-            )
-        )
-    )
+def _tool(name: str) -> str:
+    path = shutil.which(name)
+    if path is None:
+        msg = f"{name} is not on PATH (the test environment provides it)"
+        raise FileNotFoundError(msg)
+    return path
 
 
 def _scripts(workdir: Path) -> dict[str, str]:
@@ -229,9 +202,36 @@ def _scripts(workdir: Path) -> dict[str, str]:
     }
 
 
-def _tool(name: str) -> str:
-    path = shutil.which(name)
-    if path is None:
-        msg = f"{name} is not on PATH (the test environment provides it)"
-        raise FileNotFoundError(msg)
-    return path
+def configure(etc: Path, workdir: Path) -> None:
+    """Write the ISP's /etc/ppp to ``etc``, and its session scripts to ``workdir``."""
+    etc.mkdir(parents=True)
+    (workdir / "sessions").mkdir(parents=True)
+    scripts = _scripts(workdir)
+    for name, body in scripts.items():
+        script = workdir / name
+        script.write_text(f"#!/bin/sh\n{body}")
+        script.chmod(0o755)
+    (etc / "options").write_text("")
+    secrets = etc / "pap-secrets"
+    secrets.write_text(f"{LOGIN[0]} * {LOGIN[1]} *\n")
+    secrets.chmod(0o600)
+    (etc / "pppoe-server-options").write_text(
+        "\n".join(
+            (
+                "# The ISP's side of every session (pppoe-server -O).",
+                "require-pap",
+                f"mtu {MTU}",
+                f"mru {MTU}",
+                f"ms-dns {DNS[0]}",
+                "lcp-echo-interval 5",
+                "lcp-echo-failure 3",
+                "noccp",
+                "novj",
+                "+ipv6",
+                "debug",
+                f"logfile {workdir / 'pppd.log'}",
+                *(f"{name}-script {workdir / name}" for name in scripts),
+                "",
+            )
+        )
+    )

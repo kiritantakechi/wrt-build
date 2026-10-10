@@ -18,10 +18,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from wrt_tests import app, spec
-from wrt_tests.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
-from wrt_tests.poll import until
-from wrt_tests.storage import (
+from wrt_tests import spec
+from wrt_tests.device.storage import (
     MOUNT,
     PLUG_TIMEOUT,
     SUBVOLUMES,
@@ -32,13 +30,16 @@ from wrt_tests.storage import (
     subvolumes,
     wait_mounted,
 )
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
+from wrt_tests.services import app
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from wrt_tests.datapath import Online
-    from wrt_tests.emu import Emulator
-    from wrt_tests.router import Router
+    from wrt_tests.device.emu import Emulator
+    from wrt_tests.device.router import Router
+    from wrt_tests.services.datapath import Online
 
 CAPABILITY = "storage/data-disk"
 SERVICES_DOC = Path(__file__).resolve().parents[2] / "docs" / "services.md"

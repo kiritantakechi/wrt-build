@@ -3,14 +3,14 @@
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
-from wrt_tests.ab import boot_area_sha256, setenv, slot, slot_sha256
-from wrt_tests.boards import load_all
+from wrt_tests.device.ab import boot_area_sha256, setenv, slot, slot_sha256
+from wrt_tests.model.boards import load_all
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from wrt_tests.boards import Board
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.model.boards import Board
 
 CAPABILITY = "firmware/ab-upgrade"
 UPGRADE_IMAGE = "/tmp/sysupgrade.tar.gz"  # noqa: S108 (a path on the router)

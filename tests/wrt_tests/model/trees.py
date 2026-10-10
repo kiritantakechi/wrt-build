@@ -4,7 +4,7 @@ The release tests derive many variants of the session's signed build and of its
 release, a few hundred megabytes each, and the work directory is on a slow disk
 that the emulator's disks share: copying them there stalls the emulated router
 while the disk catches up. ``linked_copy`` links a tree's files instead of
-copying them, as the Releases stand-in publishes a release (wrt_tests.releases);
+copying them, as the Releases stand-in publishes a release (wrt_tests.sandbox.releases);
 ``replace`` then gives a file of the copy content of its own, leaving the
 original, and every other link to it, as it was.
 """

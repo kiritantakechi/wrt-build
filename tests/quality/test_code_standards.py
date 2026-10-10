@@ -113,8 +113,8 @@ def test_fmt_then_check_passes(repo: Path) -> None:
     _break_indentation(repo / "scripts" / "fetch.sh")
     flake = repo / "flake.nix"
     flake.write_text(flake.read_text().replace("  outputs =", "  outputs  =", 1))
-    module = repo / "tests" / "wrt_tests" / "markers.py"
-    module.write_text(module.read_text().replace("import pytest\n", "import   pytest\n", 1))
+    module = repo / "tests" / "wrt_tests" / "model" / "data.py"
+    module.write_text(module.read_text().replace("import tomllib\n", "import   tomllib\n", 1))
     formatting = ("shfmt", "nixfmt", "ruff-format")
     assert _run(repo, "check.sh", *formatting).returncode != 0
     assert _run(repo, "fmt.sh", *formatting).returncode == 0

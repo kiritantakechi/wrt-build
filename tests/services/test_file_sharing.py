@@ -10,14 +10,14 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.poll import until
-from wrt_tests.storage import wait_mounted
+from wrt_tests.device.storage import wait_mounted
+from wrt_tests.model.poll import until
 
 if TYPE_CHECKING:
-    from wrt_tests.datapath import Online
-    from wrt_tests.net import Netns
-    from wrt_tests.storage import Disk
-    from wrt_tests.vpn import Tailnet, WireGuard
+    from wrt_tests.device.storage import Disk
+    from wrt_tests.sandbox.net import Netns
+    from wrt_tests.services.datapath import Online
+    from wrt_tests.services.vpn import Tailnet, WireGuard
 
 CAPABILITY = "services/file-sharing"
 SHARE = "shares"

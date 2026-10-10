@@ -23,7 +23,7 @@
 
 ## 3. The harness in layers (design D5)
 
-- [ ] 3.1 Move the modules into `model/`, `sandbox/`, `device/` and `services/` with `git mv`, as D5 lays out:
+- [x] 3.1 Move the modules into `model/`, `sandbox/`, `device/` and `services/` with `git mv`, as D5 lays out:
   - split `keys` into signing (`model/keys.py`) and `install_trust`, and `pki` into the CA (`sandbox/pki.py`) and `trust`; both of these go to `device/trust.py`;
   - the package root re-exports only `spec`, and `plugin.py` joins `model/markers.py`;
   - update every import (tests, conftests), the entry points (`board-check`, `emu-prepare`, `spec-coverage`) and `tests/pytest.toml`'s `-p`.
@@ -81,7 +81,7 @@
 - [ ] 6.2 Run the full system tests on both boards.
 
   Verify: `just test r4s dev` and `just test r6s dev` pass, and `spec-coverage --change module-boundaries` reports no uncovered scenario.
-- [ ] 6.3 Point `device-modernization`'s proposal and tasks to the new paths of the trust anchors' code (`model/keys.py`, `device/trust.py`).
+- [x] 6.3 Point `device-modernization`'s proposal and tasks to the new paths of the trust anchors' code (`model/keys.py`, `device/trust.py`).
 
   Verify: `git grep -n 'wrt_tests/keys.py' openspec/changes/device-modernization` finds nothing.
 - [ ] 6.4 Get a green CI run for both boards.

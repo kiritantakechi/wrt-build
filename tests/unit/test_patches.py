@@ -1,6 +1,6 @@
-"""The patch checks of tests/wrt_tests/patches.py, on made-up patches and write-ups."""
+"""The patch checks of tests/wrt_tests/model/patches.py, on made-up patches and write-ups."""
 
-from wrt_tests.patches import unstated, upstream_status, without_patch, without_write_up
+from wrt_tests.model.patches import unstated, upstream_status, without_patch, without_write_up
 
 
 def test_the_trailer_is_read_from_either_kind_of_patch() -> None:

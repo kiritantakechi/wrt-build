@@ -1,7 +1,7 @@
 """The UB-indicative warnings, collected and reviewed (toolchain-o3 D4).
 
 The build collects them from its logs (scripts/lib.sh); the system tests check
-them against the register (wrt_tests.undefined_behavior).
+them against the register (wrt_tests.model.undefined_behavior).
 """
 
 import json
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from wrt_tests.undefined_behavior import (
+from wrt_tests.model.undefined_behavior import (
     Diagnostic,
     Review,
     load_register,

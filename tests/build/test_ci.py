@@ -6,12 +6,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
-from wrt_tests.boards import load
-from wrt_tests.emu import sha256
+from wrt_tests.device.emu import sha256
+from wrt_tests.model.boards import load
 
 if TYPE_CHECKING:
-    from wrt_tests.outputs import Manifest
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.model.outputs import Manifest
 
 CAPABILITY = "build/ci"
 REPO = Path(__file__).resolve().parents[2]

@@ -14,13 +14,13 @@ import pytest
 import yaml
 
 from wrt_tests import spec
-from wrt_tests.keys import APK_KEYS, FIRMWARE_KEYS, Keys, sign
-from wrt_tests.oci import extract_root
-from wrt_tests.trees import linked_copy, replace
+from wrt_tests.model.keys import APK_KEYS, FIRMWARE_KEYS, Keys, sign
+from wrt_tests.model.trees import linked_copy, replace
+from wrt_tests.sandbox.oci import extract_root
 
 if TYPE_CHECKING:
-    from wrt_tests.outputs import EmulationSource
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.model.outputs import EmulationSource
 
 CAPABILITY = "release/signing"
 REPO = Path(__file__).resolve().parents[2]

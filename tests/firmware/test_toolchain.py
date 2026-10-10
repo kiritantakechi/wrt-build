@@ -11,8 +11,8 @@ from wrt_tests import spec
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from wrt_tests.boards import Board
-    from wrt_tests.outputs import Manifest
+    from wrt_tests.model.boards import Board
+    from wrt_tests.model.outputs import Manifest
 
 CAPABILITY = "firmware/toolchain"
 PATCHES = Path(__file__).resolve().parents[2] / "patches" / "openwrt"

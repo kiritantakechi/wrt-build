@@ -1,7 +1,7 @@
 """build/upstream-pinning: every patch states its upstream status, with write-ups in step."""
 
 from wrt_tests import spec
-from wrt_tests.patches import (
+from wrt_tests.model.patches import (
     DOC,
     repository_patches,
     unstated,

@@ -9,7 +9,7 @@ wrote without stopping the emulator.
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
 
 # The emulator's boot disk, an SD card or an eMMC on its SD host controller.
 BOOT_DISK = "/dev/mmcblk0"

@@ -16,9 +16,9 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from wrt_tests.data import DataError, read_json
+from wrt_tests.model.data import DataError, read_json
+from wrt_tests.model.repository import REPO_DIR
 
-REPO_DIR = Path(__file__).resolve().parents[2]
 BOARDS_DIR = REPO_DIR / "boards"
 
 

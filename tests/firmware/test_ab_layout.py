@@ -6,13 +6,13 @@ from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
-from wrt_tests.ab import getenv, setenv, slot
-from wrt_tests.image import SECTOR, read_mbr
+from wrt_tests.device.ab import getenv, setenv, slot
+from wrt_tests.model.image import SECTOR, read_mbr
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
 
 CAPABILITY = "firmware/ab-layout"
 MIB = 1 << 20

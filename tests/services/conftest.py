@@ -12,17 +12,17 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from wrt_tests.net import PROXIED_TARGET
-from wrt_tests.poll import until
-from wrt_tests.vpn import LAN_PREFIX, Tailnet, WireGuard
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.net import PROXIED_TARGET
+from wrt_tests.services.vpn import LAN_PREFIX, Tailnet, WireGuard
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from wrt_tests.datapath import Online
-    from wrt_tests.net import Netns, Network
-    from wrt_tests.router import Router
-    from wrt_tests.storage import Disk
+    from wrt_tests.device.router import Router
+    from wrt_tests.device.storage import Disk
+    from wrt_tests.sandbox.net import Netns, Network
+    from wrt_tests.services.datapath import Online
 
 SMB_USER = ("smbuser", "smb-secret-1")
 SMB_TIMEOUT = 60
@@ -32,7 +32,7 @@ SMB_TIMEOUT = 60
 def lan_host(network: Network) -> Iterator[Netns]:
     """Run a probe server on client-a, a host of the LAN."""
     client = network["client-a"]
-    server = client.spawn(sys.executable, "-m", "wrt_tests.netprobe", "serve")
+    server = client.spawn(sys.executable, "-m", "wrt_tests.sandbox.netprobe", "serve")
     yield client
     server.terminate()
     server.wait()

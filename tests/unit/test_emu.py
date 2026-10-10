@@ -1,13 +1,13 @@
-"""Unit tests of wrt_tests.emu: the machine that stands in for each board (board-model D7)."""
+"""Unit tests of wrt_tests.device.emu: the machine standing in for each board (board-model D7)."""
 
 import shlex
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from wrt_tests.boards import Board, load_all
-from wrt_tests.emu import BOOT_DISKS, Machine
-from wrt_tests.net import segments, taps
+from wrt_tests.device.emu import BOOT_DISKS, Machine
+from wrt_tests.model.boards import Board, load_all
+from wrt_tests.sandbox.net import segments, taps
 
 if TYPE_CHECKING:
     from pathlib import Path

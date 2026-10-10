@@ -3,7 +3,8 @@
 A release is signed with an apk key (EC P-256, package indexes) and a firmware
 key (usign, images and the manifest). ``Keys.make`` creates both and a keyring
 that mirrors the image's trust anchors (etc/apk/keys, etc/opkg/keys), as
-wrt-keyring holds the production ones; ``install_trust`` puts it on a router.
+wrt-keyring holds the production ones; ``wrt_tests.device.trust`` puts it on a
+router.
 ``sign`` runs scripts/release-sign.sh, the script CI signs releases with, on a
 build with these keys.
 """
@@ -12,12 +13,10 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import Self
 
-if TYPE_CHECKING:
-    from wrt_tests.router import Router
+from wrt_tests.model.repository import REPO_DIR
 
-REPO_DIR = Path(__file__).resolve().parents[2]
 RELEASE_SIGN = REPO_DIR / "scripts" / "release-sign.sh"
 APK_KEYS = Path("etc/apk/keys")
 FIRMWARE_KEYS = Path("etc/opkg/keys")
@@ -75,14 +74,6 @@ class Keys:
         for anchors in (APK_KEYS, FIRMWARE_KEYS):
             for key in (other.keyring / anchors).iterdir():
                 shutil.copy(key, self.keyring / anchors / key.name)
-
-
-def install_trust(router: Router, keys: Keys) -> None:
-    """Make ``keys`` the router's only trust anchors, in place of the image's own."""
-    router.run(f"rm -f /{APK_KEYS}/* /{FIRMWARE_KEYS}/* && mkdir -p /{APK_KEYS} /{FIRMWARE_KEYS}")
-    for anchors in (APK_KEYS, FIRMWARE_KEYS):
-        for key in (keys.keyring / anchors).iterdir():
-            router.put(key, f"/{anchors}/{key.name}")
 
 
 def sign(build: Path, signed: Path, keys: Keys) -> Path:

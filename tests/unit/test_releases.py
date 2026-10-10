@@ -1,4 +1,4 @@
-"""Unit tests of wrt_tests.releases: the Releases API stand-in on the emulated internet."""
+"""Unit tests of wrt_tests.sandbox.releases: the Releases API stand-in on the emulated internet."""
 
 import json
 import subprocess
@@ -6,15 +6,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from wrt_tests import releases
-from wrt_tests.data import write_json
-from wrt_tests.internet import RELEASES
-from wrt_tests.outputs import RELEASE_FILE, Release
+from wrt_tests.model.data import write_json
+from wrt_tests.model.outputs import RELEASE_FILE, Release
+from wrt_tests.sandbox import releases
+from wrt_tests.sandbox.internet import RELEASES
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from wrt_tests.net import Network
+    from wrt_tests.sandbox.net import Network
 
 REPOSITORY = "owner/repository"
 API = f"https://{RELEASES[0]}/repos/{REPOSITORY}"

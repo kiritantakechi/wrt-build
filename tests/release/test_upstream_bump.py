@@ -18,14 +18,14 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.boards import load_all
-from wrt_tests.data import read_json, write_json
-from wrt_tests.outputs import MANIFEST_FILE, Manifest
+from wrt_tests.model.boards import load_all
+from wrt_tests.model.data import read_json, write_json
+from wrt_tests.model.outputs import MANIFEST_FILE, Manifest
 
 if TYPE_CHECKING:
-    from wrt_tests.boards import Board
-    from wrt_tests.datapath import Online
-    from wrt_tests.drill import Drill
+    from wrt_tests.model.boards import Board
+    from wrt_tests.services.datapath import Online
+    from wrt_tests.services.drill import Drill
 
 CAPABILITY = "release/upstream-bump"
 REPO = Path(__file__).resolve().parents[2]

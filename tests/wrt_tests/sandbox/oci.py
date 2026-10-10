@@ -18,12 +18,12 @@ import tarfile
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
-from wrt_tests.image import SECTOR, read_mbr
+from wrt_tests.model.image import SECTOR, read_mbr
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from wrt_tests.net import Netns
+    from wrt_tests.sandbox.net import Netns
 
 IMAGE = "wrt/app"
 TAG = "1"

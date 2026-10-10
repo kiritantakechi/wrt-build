@@ -32,13 +32,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Self, cast, override
 
-from wrt_tests import internet, isp, netprobe
+from wrt_tests.sandbox import internet, isp, netprobe
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from types import TracebackType
 
-    from wrt_tests.boards import Board
+    from wrt_tests.model.boards import Board
 
 UDHCPC_SCRIPT = Path(__file__).with_name("udhcpc.sh")
 RUNNER_ADDRESS = "10.0.0.2"
@@ -153,7 +153,14 @@ UPSTREAM = (
         ),
         routes=tuple(f"default via {gateway}" for gateway in INET_GATEWAY),
         daemons=(
-            (sys.executable, "-m", "wrt_tests.netprobe", "serve", "--port", str(netprobe.PORT)),
+            (
+                sys.executable,
+                "-m",
+                "wrt_tests.sandbox.netprobe",
+                "serve",
+                "--port",
+                str(netprobe.PORT),
+            ),
             (
                 "dnsmasq",
                 "--keep-in-foreground",
@@ -184,7 +191,7 @@ UPSTREAM = (
             ("registry", "serve", "{workdir}/registry.yml"),
             ("headscale", "serve", "--config", "{workdir}/headscale.yaml"),
             (
-                *(sys.executable, "-m", "wrt_tests.releases", "{workdir}/releases"),
+                *(sys.executable, "-m", "wrt_tests.sandbox.releases", "{workdir}/releases"),
                 *("--address", internet.RELEASES[1], "--name", internet.RELEASES[0]),
                 "--certificate={workdir}/../pki/server.crt",
                 "--key={workdir}/../pki/server.key",
@@ -343,7 +350,9 @@ class Netns(AbstractContextManager["Netns"]):
 
     def probe(self, *args: str, timeout: float = 30) -> netprobe.Seen:
         """Run a netprobe client inside the namespace and return what it printed."""
-        output = self.run(sys.executable, "-m", "wrt_tests.netprobe", *args, timeout=timeout)
+        output = self.run(
+            sys.executable, "-m", "wrt_tests.sandbox.netprobe", *args, timeout=timeout
+        )
         return cast("netprobe.Seen", json.loads(output))
 
     @override

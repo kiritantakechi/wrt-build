@@ -9,11 +9,11 @@ wrt-containers starts it once the data disk is mounted.
 import shlex
 from typing import TYPE_CHECKING
 
-from wrt_tests.poll import until
-from wrt_tests.storage import MOUNT
+from wrt_tests.device.storage import MOUNT
+from wrt_tests.model.poll import until
 
 if TYPE_CHECKING:
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
 
 POD = "web"
 CONTAINER = f"{POD}-httpd"

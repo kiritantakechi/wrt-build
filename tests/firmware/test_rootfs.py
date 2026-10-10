@@ -4,14 +4,14 @@ import re
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
-from wrt_tests.emu import boot_files, extract_fit_image, read_fit, run
-from wrt_tests.image import SECTOR, default_environment, read_mbr
+from wrt_tests.device.emu import boot_files, extract_fit_image, read_fit, run
+from wrt_tests.model.image import SECTOR, default_environment, read_mbr
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from wrt_tests.boards import Board
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.model.boards import Board
 
 CAPABILITY = "firmware/rootfs"
 # Digest of every file of the read-only root, independent of the overlay above it.

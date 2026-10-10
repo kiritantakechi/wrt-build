@@ -14,16 +14,16 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.datapath import EINAT, hooks
-from wrt_tests.net import DIRECT_TARGET, PROXIED_TARGET
-from wrt_tests.netprobe import HTTP_PORT
-from wrt_tests.poll import until
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.net import DIRECT_TARGET, PROXIED_TARGET
+from wrt_tests.sandbox.netprobe import HTTP_PORT
+from wrt_tests.services.datapath import EINAT, hooks
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from wrt_tests.datapath import Online
-    from wrt_tests.net import Netns
+    from wrt_tests.sandbox.net import Netns
+    from wrt_tests.services.datapath import Online
 
 CAPABILITY = "network/nat"
 # einat's public ports (its UCI default) and the kernel's local ephemeral ports.
@@ -42,7 +42,7 @@ class Listener:
         """Start listening and wait until the socket is bound."""
         command = ("listen", "--port", str(port), "--timeout", str(timeout))
         self.process = subprocess.Popen(
-            client.argv(sys.executable, "-m", "wrt_tests.netprobe", *command),
+            client.argv(sys.executable, "-m", "wrt_tests.sandbox.netprobe", *command),
             stdout=subprocess.PIPE,
         )
         until(lambda: client.run("ss", "-Hlun", f"sport = :{port}"), timeout=10, what="listener")

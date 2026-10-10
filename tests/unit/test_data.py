@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Annotated
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
-from wrt_tests.data import DataError, read_json, read_toml, write_json
+from wrt_tests.model.data import DataError, read_json, read_toml, write_json
 
 if TYPE_CHECKING:
     from pathlib import Path

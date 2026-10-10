@@ -2,10 +2,10 @@
 
 import re
 import subprocess
-from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-DOC = REPO / "docs" / "patches.md"
+from wrt_tests.model.repository import REPO_DIR
+
+DOC = REPO_DIR / "docs" / "patches.md"
 # OpenEmbedded's vocabulary (docs/patches.md).
 STATUS = re.compile(r"Pending|Submitted \[.+\]|Backport \[.+\]|Inappropriate \[.+\]")
 MEANT_FOR_UPSTREAM = ("Pending", "Submitted")
@@ -71,13 +71,13 @@ def without_patch(patches: dict[str, str | None], titles: dict[str, str]) -> lis
 def repository_patches() -> dict[str, str | None]:
     """Return every patch file of the repository and its status."""
     listed = subprocess.run(
-        ["git", "-C", str(REPO), "ls-files", "-z", "*.patch", "*.diff"],
+        ["git", "-C", str(REPO_DIR), "ls-files", "-z", "*.patch", "*.diff"],
         capture_output=True,
         text=True,
         check=True,
     ).stdout
     return {
-        path: upstream_status((REPO / path).read_text())
+        path: upstream_status((REPO_DIR / path).read_text())
         for path in sorted(listed.split("\0"))
         if path
     }

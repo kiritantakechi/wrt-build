@@ -1,4 +1,4 @@
-"""Unit tests of wrt_tests.isp: a pppd in the sandbox dials the emulated ISP.
+"""Unit tests of wrt_tests.sandbox.isp: a pppd in the sandbox dials the emulated ISP.
 
 The dialer uses PPPoE in user mode as the ISP does (the host has no pppoe.ko);
 the router dials the same ISP with the kernel's PPPoE.
@@ -10,15 +10,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from wrt_tests.isp import DELEGATED_PREFIX, DNS, LOGIN, POOL_SIZE, POOL_START
-from wrt_tests.net import Namespace, Port
-from wrt_tests.poll import until
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.isp import DELEGATED_PREFIX, DNS, LOGIN, POOL_SIZE, POOL_START
+from wrt_tests.sandbox.net import Namespace, Port
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from wrt_tests.isp import Isp
-    from wrt_tests.net import Netns, Network
+    from wrt_tests.sandbox.isp import Isp
+    from wrt_tests.sandbox.net import Netns, Network
 
 UP_TIMEOUT = 30
 

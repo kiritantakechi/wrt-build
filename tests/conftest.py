@@ -28,21 +28,23 @@ from typing import TYPE_CHECKING, cast, override
 
 import pytest
 
-from wrt_tests import app, boards, pki
-from wrt_tests.data import read_json
-from wrt_tests.datapath import Online, dae_start
-from wrt_tests.emu import Emulator
-from wrt_tests.internet import REGISTRY
-from wrt_tests.isp import Isp
-from wrt_tests.keys import Keys, install_trust, sign
-from wrt_tests.net import RUNNER_ADDRESS, Network, topology
-from wrt_tests.oci import IMAGE, TAG, extract_root, image_layout, push
-from wrt_tests.outputs import MANIFEST_FILE, SOURCE_FILE, EmulationSource, Manifest
-from wrt_tests.poll import until
-from wrt_tests.router import Router
-from wrt_tests.storage import Disk, initialize, wait_mounted
-from wrt_tests.ubsan import PROFILE as UBSAN
-from wrt_tests.ubsan import Traps, report
+from wrt_tests.device.emu import Emulator
+from wrt_tests.device.router import Router
+from wrt_tests.device.storage import Disk, initialize, wait_mounted
+from wrt_tests.device.trust import trust_ca, trust_keys
+from wrt_tests.device.ubsan import PROFILE as UBSAN
+from wrt_tests.device.ubsan import Traps, report
+from wrt_tests.model import boards
+from wrt_tests.model.data import read_json
+from wrt_tests.model.keys import Keys, sign
+from wrt_tests.model.outputs import MANIFEST_FILE, SOURCE_FILE, EmulationSource, Manifest
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.internet import REGISTRY
+from wrt_tests.sandbox.isp import Isp
+from wrt_tests.sandbox.net import RUNNER_ADDRESS, Network, topology
+from wrt_tests.sandbox.oci import IMAGE, TAG, extract_root, image_layout, push
+from wrt_tests.services import app
+from wrt_tests.services.datapath import Online, dae_start
 
 UPGRADE_IMAGE = "targets/*-sysupgrade.tar.gz"
 SIGNED_ENV = "WRT_SIGNED"
@@ -112,7 +114,7 @@ def booted_router(
     router.wait_ready()
     router.put(harness_key.with_suffix(".pub"), "/etc/dropbear/authorized_keys")
     if release_keys is not None:
-        install_trust(router, release_keys)
+        trust_keys(router, release_keys)
     router.disconnect()
     emulator.save()
     return router
@@ -240,7 +242,7 @@ def app_image(
 @pytest.fixture(scope="module")
 def trusted_ca(internet_zone: Online) -> Online:
     """Have the router resolve and trust the emulated internet's servers (test CA)."""
-    pki.trust(internet_zone.router, internet_zone.network.workdir)
+    trust_ca(internet_zone.router, internet_zone.network.workdir)
     return internet_zone
 
 

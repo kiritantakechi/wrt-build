@@ -16,10 +16,10 @@ import pytest
 import yaml
 
 from wrt_tests import spec
-from wrt_tests.boards import BOARDS_DIR, Board, Description, load_all
-from wrt_tests.data import read_json, write_json
-from wrt_tests.emu import sha256
-from wrt_tests.outputs import MANIFEST_FILE, TOOLCHAIN_FILE, Manifest, ToolchainRecord
+from wrt_tests.device.emu import sha256
+from wrt_tests.model.boards import BOARDS_DIR, Board, Description, load_all
+from wrt_tests.model.data import read_json, write_json
+from wrt_tests.model.outputs import MANIFEST_FILE, TOOLCHAIN_FILE, Manifest, ToolchainRecord
 
 CAPABILITY = "build/boards"
 REPO = Path(__file__).resolve().parents[2]

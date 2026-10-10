@@ -1,4 +1,4 @@
-"""Unit tests of wrt_tests.keys: release keys made for the test, and their keyring."""
+"""Unit tests of wrt_tests.model.keys: release keys made for the test, and their keyring."""
 
 import shutil
 import subprocess
@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from wrt_tests.keys import APK_KEYS, FIRMWARE_KEYS, Keys
+from wrt_tests.model.keys import APK_KEYS, FIRMWARE_KEYS, Keys
 
 if TYPE_CHECKING:
     from pathlib import Path

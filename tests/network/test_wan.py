@@ -12,17 +12,17 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.isp import DELEGATED_PREFIX, POOL_SIZE, POOL_START
-from wrt_tests.net import DIRECT_TARGET, IPERF_PORTS
-from wrt_tests.poll import until
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.isp import DELEGATED_PREFIX, POOL_SIZE, POOL_START
+from wrt_tests.sandbox.net import DIRECT_TARGET, IPERF_PORTS
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from wrt_tests.boards import Board
-    from wrt_tests.datapath import Online
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.model.boards import Board
+    from wrt_tests.services.datapath import Online
 
 CAPABILITY = "network/wan"
 UPGRADE_IMAGE = "/tmp/sysupgrade.tar.gz"  # noqa: S108 (a path on the router)
@@ -101,7 +101,7 @@ def test_lan_host_gets_ipv6(online: Online) -> None:
 def test_inbound_ipv6_is_rejected(online: Online) -> None:
     _, ipv6 = online.addresses()
     client = online.client()
-    server = client.spawn(sys.executable, "-m", "wrt_tests.netprobe", "serve")
+    server = client.spawn(sys.executable, "-m", "wrt_tests.sandbox.netprobe", "serve")
     try:
         until(lambda: client.run("ss", "-Hltn", "sport = :8007"), timeout=10, what="netprobe")
         # The LAN reaches the server; the internet does not.

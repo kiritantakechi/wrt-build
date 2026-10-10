@@ -16,19 +16,20 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from wrt_tests import pki, spec
-from wrt_tests.config import ConfigRepository
-from wrt_tests.datapath import DAE, DAE_CONFIG, hooks
-from wrt_tests.isp import LOGIN
-from wrt_tests.poll import until
-from wrt_tests.vpn import HEADSCALE_URL, clear, key_pair, preauth_key
+from wrt_tests import spec
+from wrt_tests.device.trust import trust_ca
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.isp import LOGIN
+from wrt_tests.services.config import ConfigRepository
+from wrt_tests.services.datapath import DAE, DAE_CONFIG, hooks
+from wrt_tests.services.vpn import HEADSCALE_URL, clear, key_pair, preauth_key
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from wrt_tests.datapath import Online
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.services.datapath import Online
 
 CAPABILITY = "ops/config-push"
 SHARE_USER = {"name": "pushed", "password": "pushed-secret-1"}
@@ -232,7 +233,7 @@ def test_the_configuration_survives_an_upgrade(pushed: Pushed, upgrade_image: Pa
     pushed.online.reconnected()
     # The sandbox's CA is no configuration of the router's, and the upgrade
     # kept none of it: it comes again, and tailscaled, which reads it once, anew.
-    pki.trust(router, pushed.online.network.workdir)
+    trust_ca(router, pushed.online.network.workdir)
     router.run("/etc/init.d/tailscale restart")
     user, password = LOGIN
     assert router.run("uci get network.wan.username") == user

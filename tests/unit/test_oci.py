@@ -1,4 +1,4 @@
-"""Unit tests of wrt_tests.oci: the test app image from the firmware's own programs."""
+"""Unit tests of wrt_tests.sandbox.oci: the test app image from the firmware's own programs."""
 
 import gzip
 import io
@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from wrt_tests.internet import REGISTRY
-from wrt_tests.oci import IMAGE, PROGRAMS, TAG, extract_root, image_layout, needed, push
+from wrt_tests.sandbox.internet import REGISTRY
+from wrt_tests.sandbox.oci import IMAGE, PROGRAMS, TAG, extract_root, image_layout, needed, push
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from wrt_tests.net import Network
+    from wrt_tests.sandbox.net import Network
 
 
 @pytest.fixture(scope="module")

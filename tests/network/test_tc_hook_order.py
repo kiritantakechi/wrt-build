@@ -10,14 +10,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
-from wrt_tests.datapath import DAE, EINAT, QOSIFY, hooks
-from wrt_tests.net import DIRECT_TARGET
-from wrt_tests.netprobe import BIG
-from wrt_tests.poll import until
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.net import DIRECT_TARGET
+from wrt_tests.sandbox.netprobe import BIG
+from wrt_tests.services.datapath import DAE, EINAT, QOSIFY, hooks
 
 if TYPE_CHECKING:
-    from wrt_tests.datapath import Online
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.services.datapath import Online
 
 CAPABILITY = "network/tc-hook-order"
 MARKS_CHECK = Path(__file__).resolve().parents[2] / "scripts" / "marks-check.sh"

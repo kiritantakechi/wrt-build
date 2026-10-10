@@ -7,10 +7,10 @@ emulator directory emu-prepare made from it, and a release assembled from it.
 
 from pathlib import Path
 
-from wrt_tests.boards import load
-from wrt_tests.data import read_json, write_json
-from wrt_tests.outputs import EmulationSource, Manifest, Release, ToolchainRecord
-from wrt_tests.undefined_behavior import Diagnostic
+from wrt_tests.model.boards import load
+from wrt_tests.model.data import read_json, write_json
+from wrt_tests.model.outputs import EmulationSource, Manifest, Release, ToolchainRecord
+from wrt_tests.model.undefined_behavior import Diagnostic
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 

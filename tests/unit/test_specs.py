@@ -1,8 +1,8 @@
-"""Unit tests of wrt_tests.specs: reading scenarios from OpenSpec deltas."""
+"""Unit tests of wrt_tests.model.specs: reading scenarios from OpenSpec deltas."""
 
 from pathlib import Path
 
-from wrt_tests.specs import (
+from wrt_tests.model.specs import (
     ScenarioId,
     capability_of_module,
     load_scenarios,

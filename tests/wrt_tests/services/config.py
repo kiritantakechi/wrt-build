@@ -10,10 +10,13 @@ import json
 import os
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
-REPO_DIR = Path(__file__).resolve().parents[2]
+from wrt_tests.model.repository import REPO_DIR
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
 SCRIPTS = REPO_DIR / "scripts"
 PUSH_TIMEOUT = 900
 GIT_IDENTITY = ("-c", "user.name=wrt-build", "-c", "user.email=wrt-build@localhost")

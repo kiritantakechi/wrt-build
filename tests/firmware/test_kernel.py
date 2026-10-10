@@ -6,11 +6,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
-from wrt_tests.ab import BOOT_DISK
+from wrt_tests.device.ab import BOOT_DISK
 
 if TYPE_CHECKING:
-    from wrt_tests.boards import Board
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.model.boards import Board
 
 CAPABILITY = "firmware/kernel"
 PATCHES = Path(__file__).resolve().parents[2] / "patches" / "openwrt"

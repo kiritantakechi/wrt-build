@@ -10,15 +10,18 @@ GCC finds can depend on the optimization, and so on the board's ``-mcpu``.
 """
 
 from datetime import date
-from pathlib import Path
-from typing import Annotated, override
+from typing import TYPE_CHECKING, Annotated, override
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from wrt_tests import boards
-from wrt_tests.data import read_json, read_toml
+from wrt_tests.model import boards
+from wrt_tests.model.data import read_json, read_toml
+from wrt_tests.model.repository import TESTS_DIR
 
-REGISTER = Path(__file__).resolve().parents[1] / "reviewed-warnings.toml"
+if TYPE_CHECKING:
+    from pathlib import Path
+
+REGISTER = TESTS_DIR / "reviewed-warnings.toml"
 REPORT_FILE = "warnings.json"
 
 type Key = tuple[str, str, str, str]

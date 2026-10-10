@@ -1,6 +1,6 @@
 """network/transparent-proxy: dae on the LAN side, splitting by rule into direct and proxied.
 
-dae runs with the test configuration (wrt_tests.datapath.DAE_CONFIG): the socks5
+dae runs with the test configuration (wrt_tests.services.datapath.DAE_CONFIG): the socks5
 exit on the emulated internet is its only node, PROXIED_TARGET goes through it,
 everything else goes direct.
 """
@@ -14,17 +14,17 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.datapath import DAE, DAE_TIMEOUT, PROXIED, dae_config, dae_start, hooks
-from wrt_tests.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
-from wrt_tests.netprobe import HTTP_PORT
-from wrt_tests.poll import until
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
+from wrt_tests.sandbox.netprobe import HTTP_PORT
+from wrt_tests.services.datapath import DAE, DAE_TIMEOUT, PROXIED, dae_config, dae_start, hooks
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from wrt_tests.boards import Board
-    from wrt_tests.datapath import Online
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.model.boards import Board
+    from wrt_tests.services.datapath import Online
 
 CAPABILITY = "network/transparent-proxy"
 HEALTHCHECK = "/etc/healthcheck.d/50-dae"

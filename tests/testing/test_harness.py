@@ -13,11 +13,11 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.boards import BOARDS_DIR, Description
-from wrt_tests.coverage import VerifiedElsewhere
-from wrt_tests.data import DataError, read_json, read_toml
-from wrt_tests.outputs import EmulationSource, Manifest, Release, ToolchainRecord
-from wrt_tests.undefined_behavior import Diagnostic, Review
+from wrt_tests.model.boards import BOARDS_DIR, Description
+from wrt_tests.model.coverage import VerifiedElsewhere
+from wrt_tests.model.data import DataError, read_json, read_toml
+from wrt_tests.model.outputs import EmulationSource, Manifest, Release, ToolchainRecord
+from wrt_tests.model.undefined_behavior import Diagnostic, Review
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -74,7 +74,7 @@ def demo(tmp_path: Path) -> tuple[Path, Path]:
 
 def _coverage(openspec: Path, tests: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return _python(
-        *("-m", "wrt_tests.coverage"),
+        *("-m", "wrt_tests.model.coverage"),
         *("--openspec", str(openspec), "--tests", str(tests)),
         *args,
         cwd=tests,

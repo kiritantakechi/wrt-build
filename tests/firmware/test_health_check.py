@@ -5,10 +5,10 @@ import re
 from typing import TYPE_CHECKING, cast
 
 from wrt_tests import spec
-from wrt_tests.ab import getenv, setenv, slot
+from wrt_tests.device.ab import getenv, setenv, slot
 
 if TYPE_CHECKING:
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
 
 CAPABILITY = "firmware/health-check"
 RESULT = "/var/run/wrt-healthcheck.json"

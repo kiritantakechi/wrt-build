@@ -62,7 +62,7 @@ None.
   - `tests/network/test_tc_hook_order.py`;
   - `tests/network/test_qos.py`: DNS name, ingress shaping;
   - `tests/firmware/test_base_system.py`;
-  - `tests/wrt_tests/keys.py`;
+  - `tests/wrt_tests/model/keys.py` and `tests/wrt_tests/device/trust.py`;
   - the code-standards check and its test.
 - **Docs**: `docs/release-flow.md`, `docs/ops.md`, `docs/patches.md`.
 - **Order**: the fourth of four changes, after the archived `board-model`: `build-acceleration`, then `toolchain-o3`, then `module-boundaries`, then `device-modernization`. It takes `toolchain-o3`'s patch convention and the audit of qosify's earlier patches as given, and puts its scripts and tests in `module-boundaries`' structure: the shell library's modules and the test harness's layers.

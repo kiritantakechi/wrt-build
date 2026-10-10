@@ -5,7 +5,7 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "--import-mode=importlib",
-    "-p", "wrt_tests.plugin",
+    "-p", "wrt_tests.model.markers",
 ]
 testpaths = ["."]
 # pytest skips build/ and dist/ by default; here build/ holds the build/* specs.

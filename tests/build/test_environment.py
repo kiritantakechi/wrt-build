@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.boards import load_all
+from wrt_tests.model.boards import load_all
 
 CAPABILITY = "build/environment"
 REPO = Path(__file__).resolve().parents[2]

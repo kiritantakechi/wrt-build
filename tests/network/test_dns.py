@@ -14,14 +14,14 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.datapath import DAE_CONFIG, dae_start
-from wrt_tests.net import DIRECT_TARGET
-from wrt_tests.poll import until
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.net import DIRECT_TARGET
+from wrt_tests.services.datapath import DAE_CONFIG, dae_start
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from wrt_tests.datapath import Online
+    from wrt_tests.services.datapath import Online
 
 CAPABILITY = "network/dns"
 DAE_DNS_PORT = 5353

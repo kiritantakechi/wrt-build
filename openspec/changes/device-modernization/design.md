@@ -142,7 +142,7 @@ DNS learning:       AF_PACKET (SOCK_DGRAM) on each managed WAN device, filtered 
 - The directory is named after the tool whose keys it holds, as `/etc/apk/keys` is. usign reads them, and so does ucert, which builds on them.
 - `/etc/sysupgrade/keys` was considered and rejected: wrt-sync checks release manifests with the same keys.
 - base-files' `fwtool.sh` reads `/etc/usign/keys`, or `/etc/opkg/keys` when the new directory does not exist, so the patch stays harmless for upstream's images. It is meant for upstream: its trailer says `Upstream-Status: Pending`, and its write-up goes into `docs/patches.md`.
-- wrt-keyring, wrt-sync, `wrt-release.sh`, `release-keys.sh`, `release-sign.sh` and the tests' keyring (`wrt_tests.keys`) move together.
+- wrt-keyring, wrt-sync, `wrt-release.sh`, `release-keys.sh`, `release-sign.sh` and the tests' keyring and the router's trust in it (`wrt_tests.model.keys`, `wrt_tests.device.trust`) move together.
 
 ### D6. The code-standards check
 

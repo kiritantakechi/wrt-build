@@ -1,6 +1,6 @@
 """services/containers: podman on the data disk, behind fw4, einat and dae like the LAN.
 
-The app Pod (wrt_tests.app) runs from the test image in the emulated internet's
+The app Pod (wrt_tests.services.app) runs from the test image in the emulated internet's
 registry: uhttpd serving a page of the data disk, at a fixed address. Probes
 from inside it use busybox's nc against the probe servers.
 """
@@ -12,18 +12,19 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from wrt_tests import app, spec
-from wrt_tests.datapath import DAE, hooks
-from wrt_tests.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
-from wrt_tests.netprobe import HTTP_PORT, PORT
-from wrt_tests.poll import until
-from wrt_tests.storage import MOUNT
+from wrt_tests import spec
+from wrt_tests.device.storage import MOUNT
+from wrt_tests.model.poll import until
+from wrt_tests.sandbox.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
+from wrt_tests.sandbox.netprobe import HTTP_PORT, PORT
+from wrt_tests.services import app
+from wrt_tests.services.datapath import DAE, hooks
 
 if TYPE_CHECKING:
-    from wrt_tests.datapath import Online
-    from wrt_tests.net import Netns
-    from wrt_tests.netprobe import Seen
-    from wrt_tests.storage import Disk
+    from wrt_tests.device.storage import Disk
+    from wrt_tests.sandbox.net import Netns
+    from wrt_tests.sandbox.netprobe import Seen
+    from wrt_tests.services.datapath import Online
 
 CAPABILITY = "services/containers"
 STORAGE = f"{MOUNT}/containers/storage"

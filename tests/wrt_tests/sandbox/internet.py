@@ -2,7 +2,7 @@
 
 inet also serves a container registry (distribution), a tailnet's control
 server (headscale, with its embedded DERP relay) and a stand-in for GitHub's
-Releases API (wrt_tests.releases), all over TLS with a certificate of the
+Releases API (wrt_tests.sandbox.releases), all over TLS with a certificate of the
 sandbox's test CA. ``configure`` writes their configuration,
 the CA, and the sandbox's own hosts file, which names them for the processes of
 the sandbox (the router resolves them over DNS like any other name).
@@ -11,7 +11,7 @@ the sandbox (the router resolves them over DNS like any other name).
 import json
 from typing import TYPE_CHECKING
 
-from wrt_tests import pki
+from wrt_tests.sandbox import pki
 
 if TYPE_CHECKING:
     from pathlib import Path

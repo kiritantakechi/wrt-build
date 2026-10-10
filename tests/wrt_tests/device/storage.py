@@ -11,13 +11,13 @@ import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Self
 
-from wrt_tests.poll import until
+from wrt_tests.model.poll import until
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from wrt_tests.emu import Emulator
-    from wrt_tests.router import Router
+    from wrt_tests.device.emu import Emulator
+    from wrt_tests.device.router import Router
 
 MOUNT = "/mnt/data"
 SUBVOLUMES = ("containers", "downloads", "shares", "logs")

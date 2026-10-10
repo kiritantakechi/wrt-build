@@ -9,15 +9,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.emu import boot_files, extract_fit_image, read_fit, sha256
-from wrt_tests.poll import until
-from wrt_tests.storage import PLUG_TIMEOUT, Disk, device
+from wrt_tests.device.emu import boot_files, extract_fit_image, read_fit, sha256
+from wrt_tests.device.storage import PLUG_TIMEOUT, Disk, device
+from wrt_tests.model.poll import until
 
 if TYPE_CHECKING:
-    from wrt_tests.boards import Board
-    from wrt_tests.net import Netns, Network
-    from wrt_tests.outputs import EmulationSource, Manifest
-    from wrt_tests.router import Router
+    from wrt_tests.device.router import Router
+    from wrt_tests.model.boards import Board
+    from wrt_tests.model.outputs import EmulationSource, Manifest
+    from wrt_tests.sandbox.net import Netns, Network
 
 CAPABILITY = "testing/emulation"
 DHCP_TIMEOUT = 60.0
