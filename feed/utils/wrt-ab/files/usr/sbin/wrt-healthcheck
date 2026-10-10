@@ -1,112 +1,125 @@
-#!/bin/sh
-# wrt-healthcheck: decide whether this boot of the slot is healthy (r4s-ab-rollback D5).
-# Usage: wrt-healthcheck   (once per boot, from /etc/init.d/wrt-healthcheck)
-# Checks until all pass or the total time is up, then records the result. During
-# a trial boot a pass confirms the slot, and a failure reboots so that U-Boot
-# counts the boot; on a confirmed slot a failure is only recorded. WAN state is
-# never a criterion: an ISP outage says nothing about the system. No set -eu:
-# jshn is not written for it.
-# shellcheck source=../../lib/functions/wrt-ab.sh
-. /lib/functions/wrt-ab.sh
-# shellcheck source=/dev/null # part of libubox on the router
-. /usr/share/libubox/jshn.sh
+#!/usr/bin/ucode
+// wrt-healthcheck: decide whether this boot of the slot is healthy (r4s-ab-rollback D5).
+// Usage: wrt-healthcheck   (once per boot, from /etc/init.d/wrt-healthcheck)
+// Checks until all pass or the total time is up, then records the result. During
+// a trial boot a pass confirms the slot, and a failure reboots so that U-Boot
+// counts the boot; on a confirmed slot a failure is only recorded. WAN state is
+// never a criterion: an ISP outage says nothing about the system.
+'use strict';
 
-RESULT=/var/run/wrt-healthcheck.json
-CHECKS=/etc/healthcheck.d
+import { access, lsdir, readfile, writefile } from 'fs';
+import { cursor } from 'uci';
+import * as ubus from 'ubus';
+import { getenv, setenv, slot } from 'wrt.ab';
 
-# setting <name> <default>: a time limit from /etc/config/wrt-ab, in seconds.
-setting() {
-	uci -q get "wrt-ab.healthcheck.$1" || echo "$2"
+const RESULT = '/var/run/wrt-healthcheck.json';
+const CHECKS = '/etc/healthcheck.d';
+
+// setting(name, fallback): a time limit from /etc/config/wrt-ab, in seconds.
+function setting(name, fallback) {
+	return +(cursor().get('wrt-ab', 'healthcheck', name) ?? fallback);
 }
 
-log() {
-	logger -t wrt-healthcheck -p "daemon.$1" "$2"
+function log(level, message) {
+	system(['logger', '-t', 'wrt-healthcheck', '-p', `daemon.${level}`, message]);
 }
 
-# listening <port> <IPv4 address>: a TCP socket listens on the port, on that
-# address or on every address (IPv4 or IPv6).
-listening() {
-	port=$(printf '%04X' "$1")
-	octets=$(echo "$2" | tr . ' ')
-	# shellcheck disable=SC2086 # the four octets
-	set -- ${octets}
-	hex=$(printf '%02X%02X%02X%02X' "$4" "$3" "$2" "$1")
-	awk -v port="${port}" -v address="${hex}" '
-		$4 == "0A" && split($2, local, ":") == 2 && local[2] == port &&
-			(local[1] == address || local[1] ~ /^0+$/) { found = 1 }
-		END { exit !found }' /proc/net/tcp /proc/net/tcp6
+// quoted(word): word as one argument of a shell command line.
+function quoted(word) {
+	return `'${replace(word, "'", "'\\''")}'`;
 }
 
-# The built-in checks, then every executable in /etc/healthcheck.d, which gets
-# the per-check time limit and passes by exiting 0.
-check_ready() {
-	ubus -t 5 call system board >/dev/null
-}
-check_lan() {
-	lan=$(ifstatus lan) || return 1
-	up=$(echo "${lan}" | jsonfilter -e '@.up')
-	address=$(echo "${lan}" | jsonfilter -e '@["ipv4-address"][0].address')
-	[ "${up}" = true ] && [ -n "${address}" ]
-}
-check_ssh() {
-	listening 22 "${address:-0.0.0.0}"
-}
-check_web() {
-	listening 80 "${address:-0.0.0.0}"
+// listening(port, address): a TCP socket listens on the port, on that IPv4
+// address or on every address (IPv4 or IPv6).
+function listening(port, address) {
+	let octets = map(split(address, '.'), (octet) => +octet);
+	let wanted = sprintf('%02X%02X%02X%02X', octets[3], octets[2], octets[1], octets[0]);
+	let local_port = sprintf('%04X', port);
+
+	for (let table in ['/proc/net/tcp', '/proc/net/tcp6']) {
+		for (let line in split(readfile(table) ?? '', '\n')) {
+			let fields = split(trim(line), /\s+/);
+			let local = split(fields[1] ?? '', ':');
+
+			if (fields[3] == '0A' && length(local) == 2 && local[1] == local_port &&
+				(local[0] == wanted || match(local[0], /^0+$/)))
+				return true;
+		}
+	}
+
+	return false;
 }
 
-run_checks() {
-	failed=
-	address=
-	for name in ready lan ssh web; do
-		"check_${name}" || failed="${failed} ${name}"
-	done
-	for check in "${CHECKS}"/*; do
-		[ -x "${check}" ] || continue
-		timeout "${timeout}" "${check}" >/dev/null 2>&1 || failed="${failed} ${check##*/}"
-	done
+// run_checks(timeout): the names of the checks that failed: the built-in ones
+// (ubus answers, the LAN is up with an address, SSH and the web server listen
+// on it), then every executable in /etc/healthcheck.d, which gets the per-check
+// time limit and passes by exiting 0.
+function run_checks(timeout) {
+	let failed = [];
+	let connection = ubus.connect(null, 5);
+	let lan = connection?.call('network.interface.lan', 'status');
+	let address = lan?.['ipv4-address']?.[0]?.address;
+
+	if (connection?.call('system', 'board') == null)
+		push(failed, 'ready');
+
+	if (!lan?.up || !address)
+		push(failed, 'lan');
+
+	if (!listening(22, address ?? '0.0.0.0'))
+		push(failed, 'ssh');
+
+	if (!listening(80, address ?? '0.0.0.0'))
+		push(failed, 'web');
+
+	connection?.disconnect();
+
+	for (let name in sort(lsdir(CHECKS) ?? [])) {
+		let check = `${CHECKS}/${name}`;
+
+		if (access(check, 'x') &&
+			system(`timeout ${timeout} ${quoted(check)} >/dev/null 2>&1`) != 0)
+			push(failed, name);
+	}
+
+	return failed;
 }
 
-record() {
-	now=$(date +%s)
-	json_init
-	json_add_int time "${now}"
-	json_add_string slot "${slot}"
-	json_add_string result "$1"
-	json_add_array failed
-	for name in ${failed}; do
-		json_add_string "" "${name}"
-	done
-	json_close_array
-	json_dump >"${RESULT}"
+function record(running, result, failed) {
+	writefile(RESULT, sprintf('%J\n', { time: time(), slot: running, result: result, failed: failed }));
 }
 
-total=$(setting total 300)
-interval=$(setting interval 10)
-timeout=$(setting timeout 30)
-slot=$(wrt_ab_slot)
-trial=$(wrt_ab_getenv upgrade_available 0)
+let total = setting('total', 300);
+let interval = setting('interval', 10);
+let timeout = setting('timeout', 30);
+let running = slot();
+let trial = getenv('upgrade_available', '0') == '1';
+let start = time();
+let failed;
 
-start=$(date +%s)
-while :; do
-	run_checks
-	[ -n "${failed}" ] || break
-	now=$(date +%s)
-	[ "$((now - start))" -lt "${total}" ] || break
-	sleep "${interval}"
-done
+while (true) {
+	failed = run_checks(timeout);
 
-if [ -z "${failed}" ]; then
-	record pass
-	if [ "${trial}" = 1 ]; then
-		wrt_ab_setenv boot_slot "${slot}" upgrade_available 0 bootcount 0
-		log notice "slot ${slot} passed its trial boot and is confirmed"
-	fi
-elif [ "${trial}" = 1 ]; then
-	record fail
-	log err "slot ${slot} failed its trial boot:${failed}; rebooting"
-	reboot
-else
-	record fail
-	log err "slot ${slot} is unhealthy:${failed}"
-fi
+	if (!length(failed) || time() - start >= total)
+		break;
+
+	sleep(interval * 1000);
+}
+
+if (!length(failed)) {
+	record(running, 'pass', failed);
+
+	if (trial) {
+		setenv({ boot_slot: running, upgrade_available: 0, bootcount: 0 });
+		log('notice', `slot ${running} passed its trial boot and is confirmed`);
+	}
+}
+else if (trial) {
+	record(running, 'fail', failed);
+	log('err', `slot ${running} failed its trial boot: ${join(' ', failed)}; rebooting`);
+	system(['reboot']);
+}
+else {
+	record(running, 'fail', failed);
+	log('err', `slot ${running} is unhealthy: ${join(' ', failed)}`);
+}

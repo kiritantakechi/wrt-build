@@ -35,7 +35,7 @@ case "$#:${1:-}" in
 esac
 config=${WRT_CONFIG_DIR:-}
 [ -n "${config}" ] && [ -d "${config}" ] || die "WRT_CONFIG_DIR does not name the configuration repository"
-device="$(dirname -- "$0")/config-push.d/device.sh"
+device="$(dirname -- "$0")/config-push.d/device.uc"
 
 # From here on "$@" is ssh's way to the router: authenticated by a key alone.
 set -- -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
@@ -107,13 +107,13 @@ done
 tar -C "${new}" -cf - . | ssh "$@" 'rm -rf /tmp/wrt-push && mkdir -p /tmp/wrt-push/new &&
 	umask 077 && tar -xf - -C /tmp/wrt-push/new' ||
 	die "cannot log in to ${host} with a key"
-if ! ssh "$@" sh -s -- validate <"${device}"; then
+if ! ssh "$@" ucode - validate <"${device}"; then
 	ssh "$@" 'rm -rf /tmp/wrt-push'
 	die "the configuration does not validate; ${host} is unchanged"
 fi
 info "the configuration validates"
 
-ssh "$@" sh -s -- hashes <"${device}" >"${work}/pushed"
+ssh "$@" ucode - hashes <"${device}" >"${work}/pushed"
 status=0
 for service in "${new}"/*/; do
 	service=${service%/}
@@ -123,7 +123,7 @@ for service in "${new}"/*/; do
 		info "${name}: unchanged"
 		continue
 	fi
-	if ssh "$@" sh -s -- apply "${name}" <"${device}"; then
+	if ssh "$@" ucode - apply "${name}" <"${device}"; then
 		info "${name}: pushed"
 	else
 		status=1

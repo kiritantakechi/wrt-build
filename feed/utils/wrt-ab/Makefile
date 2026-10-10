@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=wrt-ab
 PKG_VERSION:=1
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_MAINTAINER:=kiritantakechi <kiritantakechi@gmail.com>
 PKG_LICENSE:=GPL-2.0-only
@@ -13,7 +13,7 @@ define Package/wrt-ab
   SECTION:=utils
   CATEGORY:=Utilities
   TITLE:=A/B slots: upgrade, health check, slot switch
-  DEPENDS:=@TARGET_rockchip +uboot-envtools +jsonfilter
+  DEPENDS:=@TARGET_rockchip +uboot-envtools +ucode +ucode-mod-fs +ucode-mod-ubus +ucode-mod-uci
   PKGARCH:=all
 endef
 

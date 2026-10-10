@@ -1,72 +1,164 @@
-#!/bin/sh
-# fetch: download the newest release of a channel (runs in wrt-sync's container).
-# Usage: fetch <api> <repository> <stable|candidate> <device> <releases> <incoming>
-# Prints the release's tag. A release already in <releases> is not downloaded
-# again; of a new one, what the router uses goes to <incoming>/<tag>, whose files
-# the host verifies. That is the asset set of the router's device alone
-# (board-model D10): its signed manifest and package repository, named after the
-# device (<device>-manifest.json, ...), and the upgrade image the manifest names;
-# never the factory image, which only a first flash needs. Every request is
-# tried a few times: the first may leave before dae holds the bridge.
-set -eu
+#!/usr/bin/ucode
+// fetch: download the newest release of a channel (runs in wrt-sync's container).
+// Usage: fetch <api> <repository> <stable|candidate> <device> <releases> <incoming>
+// Prints the release's tag. A release already in <releases> is not downloaded
+// again; of a new one, what the router uses goes to <incoming>/<tag>, whose files
+// the host verifies. That is the asset set of the router's device alone
+// (board-model D10): its signed manifest and package repository, named after the
+// device (<device>-manifest.json, ...), and the upgrade image the manifest names;
+// never the factory image, which only a first flash needs. Every request is
+// tried a few times: the first may leave before dae holds the bridge.
+'use strict';
 
-api=$1
-repository=$2
-channel=$3
-device=$4
-releases=$5
-incoming=$6
-MANIFEST=/usr/libexec/wrt-sync/manifest
-TRIES=5
+import { glob, mkdir, open, popen, stat } from 'fs';
+import * as uclient from 'uclient';
+import * as uloop from 'uloop';
 
-# get <url> <file>: fetch with retries.
-get() {
-	try=1
-	until uclient-fetch -q -T 30 -O "$2" "$1"; do
-		[ "${try}" -lt "${TRIES}" ] || return 1
-		try=$((try + 1))
-		sleep 3
-	done
+const MANIFEST = '/usr/libexec/wrt-sync/manifest';
+const CERTIFICATES = '/etc/ssl/certs/*.crt';
+const TRIES = 5;
+const TIMEOUT_MS = 30000;
+const REDIRECTS = 10;
+
+function fail(message) {
+	warn(`fetch: ${message}\n`);
+	exit(1);
 }
 
-case "${channel}" in
-	stable)
-		get "${api}/repos/${repository}/releases/latest" /tmp/release.json
-		release=@
-		;;
-	candidate)
-		get "${api}/repos/${repository}/releases?per_page=1" /tmp/release.json
-		release='@[0]'
-		;;
-	*)
-		echo "fetch: unknown channel ${channel}" >&2
-		exit 1
-		;;
-esac
-tag=$(jsonfilter -i /tmp/release.json -e "${release}.tag_name")
-[ -n "${tag}" ] || {
-	echo "fetch: no ${channel} release" >&2
-	exit 1
-}
-urls=$(jsonfilter -i /tmp/release.json -e "${release}.assets[*].browser_download_url")
+// request(url, write): one GET of url, following redirects, its body handed to
+// write in pieces; true when it got the whole body of a 200 answer.
+function request(url, write) {
+	let complete = false;
+	let redirects = 0;
+	let client;
 
-# asset <name> <file>: download the release's asset <name> as <file> of the release.
-asset() {
-	for url in ${urls}; do
-		[ "${url##*/}" = "$1" ] || continue
-		get "${url}" "${incoming}/${tag}/$2"
-		return
-	done
-	echo "fetch: ${tag} has no $1" >&2
-	exit 1
+	client = uclient.new(url, null, {
+		header_done: () => {
+			let status = client.status();
+
+			// redirect() cannot tell a redirect from a failure: the timeout ends either.
+			if (status.redirect && redirects++ < REDIRECTS)
+				client.redirect();
+			else if (status.status != 200)
+				uloop.end();
+		},
+		data_read: () => {
+			let wanted = client.status().status == 200;
+			let data;
+
+			while (length(data = client.read()) > 0)
+				if (wanted)
+					write(data);
+		},
+		data_eof: () => {
+			complete = client.status().status == 200;
+			uloop.end();
+		},
+		error: () => uloop.end(),
+	});
+
+	if (client.ssl_init({ ca_files: glob(CERTIFICATES) ?? [] }) &&
+		client.set_timeout(TIMEOUT_MS) && client.connect() && client.request('GET'))
+		uloop.run();
+
+	client.free();
+
+	return complete;
 }
 
-if [ ! -d "${releases}/${tag}" ]; then
-	mkdir -p "${incoming}/${tag}"
-	for file in manifest.json manifest.json.sig repo.tar; do
-		asset "${device}-${file}" "${file}"
-	done
-	image=$("${MANIFEST}" image "${incoming}/${tag}/manifest.json" "${device}")
-	asset "${image}" "${image}"
-fi
-echo "${tag}"
+// get(url, write, restart): request url, a few times; restart() comes before
+// each try, to drop what an earlier one wrote.
+function get(url, write, restart) {
+	for (let attempt = 1; attempt <= TRIES; attempt++) {
+		restart();
+
+		if (request(url, write))
+			return true;
+
+		if (attempt < TRIES)
+			sleep(3000);
+	}
+
+	return false;
+}
+
+// release(url): the release that the API answers url with.
+function release(url) {
+	let parts;
+
+	if (!get(url, (data) => push(parts, data), () => parts = []))
+		fail(`${url} did not answer`);
+
+	return json(join('', parts));
+}
+
+// asset(found, name, path): download the release's asset name as path.
+function asset(found, name, path) {
+	let url = filter(map(found.assets ?? [], (a) => a.browser_download_url),
+		(u) => match(u, /[^\/]+$/)?.[0] == name)[0];
+
+	if (!url)
+		fail(`${found.tag_name} has no ${name}`);
+
+	let file;
+	let written = get(url, (data) => file.write(data), () => {
+		file?.close();
+		file = open(path, 'w') ?? fail(`cannot write ${path}`);
+	});
+
+	file.close();
+
+	if (!written)
+		fail(`downloading ${name} of ${found.tag_name} failed`);
+}
+
+// image(manifest, device): the upgrade image the manifest names (the manifest helper).
+function image(manifest, device) {
+	let helper = popen(`${MANIFEST} image '${manifest}' '${device}'`);
+	let name = trim(helper.read('all') ?? '');
+
+	if (helper.close() != 0 || !length(name))
+		fail(`${manifest} names no upgrade image for ${device}`);
+
+	return name;
+}
+
+if (length(ARGV) != 6)
+	fail('usage: fetch <api> <repository> <stable|candidate> <device> <releases> <incoming>');
+
+let api = ARGV[0], repository = ARGV[1], channel = ARGV[2];
+let device = ARGV[3], releases = ARGV[4], incoming = ARGV[5];
+let found;
+
+switch (channel) {
+case 'stable':
+	found = release(`${api}/repos/${repository}/releases/latest`);
+	break;
+
+case 'candidate':
+	found = release(`${api}/repos/${repository}/releases?per_page=1`)?.[0];
+	break;
+
+default:
+	fail(`unknown channel ${channel}`);
+}
+
+let tag = found?.tag_name;
+
+if (!length(tag))
+	fail(`no ${channel} release`);
+
+if (!stat(`${releases}/${tag}`)) {
+	let directory = `${incoming}/${tag}`;
+
+	mkdir(directory);
+
+	for (let file in ['manifest.json', 'manifest.json.sig', 'repo.tar'])
+		asset(found, `${device}-${file}`, `${directory}/${file}`);
+
+	let name = image(`${directory}/manifest.json`, device);
+
+	asset(found, name, `${directory}/${name}`);
+}
+
+print(tag, '\n');
