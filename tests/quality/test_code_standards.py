@@ -103,6 +103,17 @@ def test_an_import_from_a_higher_layer_fails(repo: Path) -> None:
     assert "wrt_tests.device.router" in result.stderr, result.stderr
 
 
+@spec(CAPABILITY, "No dead code in the host-side code", "Harness module that nothing imports")
+def test_a_harness_module_that_nothing_imports_fails(repo: Path) -> None:
+    orphan = repo / "tests" / "wrt_tests" / "model" / "orphan.py"
+    orphan.write_text('"""A module that nothing imports."""\n')
+    result = _run(repo, "check.sh", "spec-coverage")
+    assert result.returncode != 0
+    assert "FAIL  spec-coverage" in result.stdout
+    output = result.stdout + result.stderr
+    assert "wrt_tests/model/orphan.py: no harness module or test imports it" in output, output
+
+
 @spec(CAPABILITY, "Symmetric naming", "Unpaired operation")
 def test_paired_operations_are_complete() -> None:
     recipes = set(

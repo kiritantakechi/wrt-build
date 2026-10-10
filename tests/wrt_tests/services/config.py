@@ -69,10 +69,6 @@ class ConfigRepository:
         """Replace a file of dae's configuration."""
         self._encrypt(f"dae/{name}.dae.enc", text.encode())
 
-    def write_template(self, name: str, text: str) -> None:
-        """Replace a uci template."""
-        (self.directory / "uci" / f"{name}.uci.tmpl").write_text(text)
-
     def commit(self, message: str) -> None:
         """Commit everything, as the administrator does after an edit."""
         git = ("git", "-C", str(self.directory), *GIT_IDENTITY)

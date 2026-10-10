@@ -6,15 +6,20 @@ The report lists, for each scenario, the test that verifies it, or the job named
 * a ``@spec`` marker naming a scenario that does not exist;
 * a scenario with more than one test, or with a test and an entry elsewhere;
 * a spec test outside ``<domain>/test_<capability>.py``, a module test without
-  exactly one ``@spec`` of that module's capability, or a ``@spec`` in ``unit/``.
+  exactly one ``@spec`` of that module's capability, or a ``@spec`` in ``unit/``;
+* a harness module that no other harness module or test imports, that no string
+  names (``python -m``) and that the tests' configuration does not name as an
+  entry point or a plugin (module-boundaries D5).
 
 Every scenario of the archived specs (``openspec/specs``, the system as built)
 must be covered; with ``--change NAME`` so must those of that change in flight.
 """
 
 import argparse
+import ast
 import contextlib
 import io
+import re
 import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -31,6 +36,9 @@ from wrt_tests.model.specs import Scenario, ScenarioId, capability_of_module, lo
 OPENSPEC_DIR = REPO_DIR / "openspec"
 ELSEWHERE_FILE = "verified-elsewhere.toml"
 UNIT_DOMAIN = "unit"
+HARNESS = "wrt_tests"
+# A module named in the tests' configuration: an entry point, or a pytest plugin.
+CONFIGURED = re.compile(rf"\b({HARNESS}(?:\.\w+)+)\b")
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +137,54 @@ def structure_errors(tests: list[TestRef]) -> list[str]:
     return errors
 
 
+def _sources(tests_dir: Path, suffix: str) -> list[Path]:
+    """Return the files of ``tests_dir`` with ``suffix``, outside its environments and caches."""
+    return [
+        path
+        for path in sorted(tests_dir.rglob(f"*{suffix}"))
+        if not any(part.startswith(".venv") or part == "__pycache__" for part in path.parts)
+    ]
+
+
+def _named(source: Path) -> set[str]:
+    """Return the modules ``source`` imports, or names as a whole string (``-m``)."""
+    named: set[str] = set()
+    for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+        match node:
+            case ast.Import(names=aliases):
+                named |= {alias.name for alias in aliases}
+            case ast.ImportFrom(module=str(module), names=aliases):
+                named |= {module, *(f"{module}.{alias.name}" for alias in aliases)}
+            case ast.Constant(value=str(value)) if value.startswith(f"{HARNESS}."):
+                named.add(value)
+            case _:
+                pass
+    return named
+
+
+def unused_modules(tests_dir: Path = TESTS_DIR) -> list[str]:
+    """Harness modules that nothing imports, names or configures (module-boundaries D5)."""
+    harness = tests_dir / HARNESS
+    modules = {
+        ".".join(path.relative_to(tests_dir).with_suffix("").parts): path
+        for path in _sources(harness, ".py")
+        if path.name != "__init__.py"
+    }
+    used = {
+        name
+        for source in _sources(tests_dir, ".toml")
+        for name in CONFIGURED.findall(source.read_text(encoding="utf-8"))
+    }
+    for source in _sources(tests_dir, ".py"):
+        own = ".".join(source.relative_to(tests_dir).with_suffix("").parts)
+        used |= _named(source) - {own}
+    return [
+        f"{path.relative_to(tests_dir).as_posix()}: no harness module or test imports it"
+        for name, path in sorted(modules.items())
+        if name not in used
+    ]
+
+
 def coverage_errors(
     scenarios: list[Scenario], tests: list[TestRef], elsewhere: dict[ScenarioId, str]
 ) -> tuple[list[str], dict[ScenarioId, list[TestRef]]]:
@@ -176,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"no such change with specs: {', '.join(unknown)}")
     tests = collect_tests(args.tests.resolve())
     elsewhere = load_elsewhere(args.tests)
-    errors = structure_errors(tests)
+    errors = structure_errors(tests) + unused_modules(args.tests)
     duplicate_errors, by_scenario = coverage_errors(scenarios, tests, elsewhere)
     errors += duplicate_errors
 

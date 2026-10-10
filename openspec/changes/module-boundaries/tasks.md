@@ -35,7 +35,7 @@
 - [x] 3.3 Describe the layers in `docs/conventions.md`: what each holds, what it may import, and where a new module goes; and the order and naming of D9, which every moved module follows.
 
   Verify: the document names the four layers, tach's config and D9's order, and `just check` (editorconfig, links) passes.
-- [ ] 3.4 Extend `spec-coverage`'s structure check with D5's unused modules, and add the test of the quality/code-standards scenario "Harness module that nothing imports" (`tests/quality/test_code_standards.py`). Delete the harness modules and functions it finds unused.
+- [x] 3.4 Extend `spec-coverage`'s structure check with D5's unused modules, and add the test of the quality/code-standards scenario "Harness module that nothing imports" (`tests/quality/test_code_standards.py`). Delete the harness modules and functions it finds unused.
 
   Verify: the test passes and names the module; the check passes on the tree.
 
