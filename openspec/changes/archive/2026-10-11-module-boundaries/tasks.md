@@ -84,6 +84,6 @@
 - [x] 6.3 Point `device-modernization`'s proposal and tasks to the new paths of the trust anchors' code (`model/keys.py`, `device/trust.py`).
 
   Verify: `git grep -n 'wrt_tests/keys.py' openspec/changes/device-modernization` finds nothing.
-- [ ] 6.4 Get a green CI run for both boards.
+- [x] 6.4 Get a green CI run for both boards.
 
   Verify: its host stage rebuilt once under the new toolchain key, from its compiler cache. Record the run in `docs/ci.md`.
