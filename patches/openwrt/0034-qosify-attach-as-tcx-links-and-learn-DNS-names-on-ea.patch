@@ -1,0 +1,896 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Sun, 11 Oct 2026 09:47:46 +0800
+Subject: [PATCH] qosify: attach as tcx links, and learn DNS names on each
+ device
+
+qosify attached its classifiers as cls_bpf filters under clsact, and
+redirected DNS replies to ifb-dns and the ingress to the interface's
+ifb with tc filters: legacy filters on the WAN port beside einat's tcx
+programs, which a qosify killed outright left behind. Its DNS learning
+read the redirected packets as Ethernet frames, so that on pppoe-wan,
+which has no link-layer header, it learnt nothing.
+
+Carry two qosify patches. The first learns DNS names from a packet
+socket on each device, without ifb-dns and its filters. The second
+attaches the classifiers as tcx links after the programs there, has the
+ingress classifier redirect to the ifb itself, and keeps cls_bpf under
+clsact for kernels without tcx, or for the new defaults option tcx set
+to 0, which the init script passes on. Both are meant for qosify
+upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/network/config/qosify/Makefile        |   2 +-
+ .../network/config/qosify/files/qosify.init   |   1 +
+ ...-from-a-packet-socket-on-each-device.patch | 364 ++++++++++++++
+ ...-attach-the-classifiers-as-tcx-links.patch | 463 ++++++++++++++++++
+ 4 files changed, 829 insertions(+), 1 deletion(-)
+ create mode 100644 package/network/config/qosify/patches/102-dns-learn-from-a-packet-socket-on-each-device.patch
+ create mode 100644 package/network/config/qosify/patches/103-interface-attach-the-classifiers-as-tcx-links.patch
+
+diff --git a/package/network/config/qosify/Makefile b/package/network/config/qosify/Makefile
+index 8087bd3..9d4383e 100644
+--- a/package/network/config/qosify/Makefile
++++ b/package/network/config/qosify/Makefile
+@@ -14,7 +14,7 @@ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_DATE:=2026-06-22
+ PKG_SOURCE_VERSION:=beeb87ec1f16aaf5d99ff8060c2455971d9d400e
+ PKG_MIRROR_HASH:=c9ef0ad68daedb7e18e4959884a40cc0c64849dbd17bf6fdadeed8bdd8d49358
+-PKG_RELEASE:=4
++PKG_RELEASE:=5
+ 
+ PKG_LICENSE:=GPL-2.0
+ PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
+diff --git a/package/network/config/qosify/files/qosify.init b/package/network/config/qosify/files/qosify.init
+index 170ee27..726fbde 100644
+--- a/package/network/config/qosify/files/qosify.init
++++ b/package/network/config/qosify/files/qosify.init
+@@ -42,6 +42,7 @@ add_defaults() {
+ 	add_option string dscp_icmp
+ 	add_option string dscp_default_udp
+ 	add_option string dscp_default_tcp
++	add_option boolean tcx
+ }
+ 
+ add_interface() {
+diff --git a/package/network/config/qosify/patches/102-dns-learn-from-a-packet-socket-on-each-device.patch b/package/network/config/qosify/patches/102-dns-learn-from-a-packet-socket-on-each-device.patch
+new file mode 100644
+index 0000000..3d1d3ab
+--- /dev/null
++++ b/package/network/config/qosify/patches/102-dns-learn-from-a-packet-socket-on-each-device.patch
+@@ -0,0 +1,364 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] dns: learn from a packet socket on each device
++
++qosify learnt DNS names from the replies that four u32 filters on each
++device's ingress mirrored to ifb-dns, where a raw packet socket read
++them as Ethernet frames. The packets of a device without a link-layer
++header, such as pppoe-wan, reach ifb-dns without one: the parser took
++their IP header for an Ethernet header, and learnt nothing. The filters
++and ifb-dns stayed behind when qosify was killed.
++
++Open a packet socket on each device qosify sets up instead. It is a
++SOCK_DGRAM socket, so that each packet starts with its IP header
++whatever the device's link layer, and sll_protocol says which. Its
++classic BPF filter passes UDP from port 53, over IPv4 (not a later
++fragment) or IPv6, and PACKET_IGNORE_OUTGOING keeps out what the
++device sends. The socket gets a copy of each reply, which goes on
++untouched, and it goes with the device's setup and with the process.
++
++The IP header now starts the buffer, which is four-byte aligned, as
++struct ip and struct ip6_hdr must be.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++ dns.c       | 137 +++++++++++++++++++++++++---------------------------
++ interface.c |  27 ++---------
++ qosify.h    |   5 +-
++ 3 files changed, 73 insertions(+), 96 deletions(-)
++
++diff --git a/dns.c b/dns.c
++index d0b2f7a..d309939 100644
++--- a/dns.c
+++++ b/dns.c
++@@ -1,10 +1,10 @@
+++#include <linux/filter.h>
++ #include <netinet/if_ether.h>
++ #include <netinet/in.h>
++ #include <netinet/ip.h>
++ #include <netinet/ip6.h>
++ #include <netinet/udp.h>
++ #include <netpacket/packet.h>
++-#include <net/if.h>
++ #include <sys/socket.h>
++ #include <sys/types.h>
++ #include <errno.h>
++@@ -37,7 +37,6 @@
++ 
++ #include "qosify.h"
++ 
++-static struct uloop_fd ufd;
++ static struct uloop_timeout cname_gc_timer;
++ static AVL_TREE(cname_cache, avl_strcmp, false, NULL);
++ 
++@@ -45,11 +44,6 @@ static uint64_t dns_cache_hits;
++ static uint64_t dns_cache_misses;
++ static uint32_t dns_cache_entry_count;
++ 
++-struct vlan_hdr {
++-	uint16_t tci;
++-	uint16_t proto;
++-};
++-
++ struct packet {
++ 	void *buffer;
++ 	unsigned int len;
++@@ -122,12 +116,6 @@ static int pkt_pull_name(struct packet *pkt, const void *hdr, char *dest)
++ 	return 0;
++ }
++ 
++-static bool
++-proto_is_vlan(uint16_t proto)
++-{
++-	return proto == ETH_P_8021Q || proto == ETH_P_8021AD;
++-}
++-
++ static void
++ cname_cache_set(const char *name, uint8_t dscp, uint32_t seq, uint32_t pattern_id)
++ {
++@@ -273,27 +261,10 @@ qosify_dns_data_cb(struct packet *pkt)
++ }
++ 
++ static void
++-qosify_dns_packet_cb(struct packet *pkt)
+++qosify_dns_packet_cb(struct packet *pkt, uint16_t proto)
++ {
++-	struct ethhdr *eth;
++ 	struct ip6_hdr *ip6;
++ 	struct ip *ip;
++-	uint16_t proto;
++-
++-	eth = pkt_pull(pkt, sizeof(*eth));
++-	if (!eth)
++-		return;
++-
++-	proto = be16_to_cpu(eth->h_proto);
++-	if (proto_is_vlan(proto)) {
++-		struct vlan_hdr *vlan;
++-
++-		vlan = pkt_pull(pkt, sizeof(*vlan));
++-		if (!vlan)
++-			return;
++-
++-		proto = be16_to_cpu(vlan->proto);
++-	}
++ 
++ 	switch (proto) {
++ 	case ETH_P_IP:
++@@ -330,18 +301,20 @@ static void
++ qosify_dns_socket_cb(struct uloop_fd *fd, unsigned int events)
++ {
++ 	/*
++-	 * Received two bytes into a four-byte aligned buffer, as NET_IP_ALIGN
++-	 * does: the IP header after the Ethernet header, and after a VLAN tag,
++-	 * is then four-byte aligned, as struct ip and struct ip6_hdr must be.
+++	 * The packet starts with its IP header, which is read through a struct
+++	 * ip or struct ip6_hdr: four-byte aligned, as those must be.
++ 	 */
++-	static uint8_t buf[2 + 8192] __attribute__((aligned(4)));
+++	static uint8_t buf[8192] __attribute__((aligned(4)));
++ 	struct packet pkt = {
++-		.buffer = buf + 2,
+++		.buffer = buf,
++ 	};
+++	struct sockaddr_ll sll;
+++	socklen_t sll_len = sizeof(sll);
++ 	int len;
++ 
++ retry:
++-	len = recvfrom(fd->fd, buf + 2, sizeof(buf) - 2, MSG_DONTWAIT, NULL, NULL);
+++	len = recvfrom(fd->fd, buf, sizeof(buf), MSG_DONTWAIT,
+++		       (struct sockaddr *)&sll, &sll_len);
++ 	if (len < 0) {
++ 		if (errno == EINTR)
++ 			goto retry;
++@@ -352,7 +325,7 @@ retry:
++ 		return;
++ 
++ 	pkt.len = len;
++-	qosify_dns_packet_cb(&pkt);
+++	qosify_dns_packet_cb(&pkt, be16_to_cpu(sll.sll_protocol));
++ }
++ 
++ static void
++@@ -372,43 +345,77 @@ qosify_cname_cache_gc(struct uloop_timeout *timeout)
++ 	uloop_timeout_set(timeout, 1000);
++ }
++ 
++-static int
++-qosify_open_dns_socket(void)
+++/*
+++ * Learn from the DNS replies that reach the device ifindex: a packet socket on
+++ * it gets a copy of each, from its IP header on, while the reply itself goes on
+++ * untouched. Its filter passes UDP from port 53, over IPv4 (not a later
+++ * fragment) or IPv6, and nothing the device sends.
+++ */
+++int qosify_dns_open(struct uloop_fd *fd, unsigned int ifindex)
++ {
+++	static struct sock_filter code[] = {
+++		BPF_STMT(BPF_LD | BPF_W | BPF_ABS, SKF_AD_OFF + SKF_AD_PROTOCOL),
+++		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, ETH_P_IPV6, 8, 0),
+++		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, ETH_P_IP, 0, 12),
+++		/* IPv4: UDP, the first fragment, from port 53 */
+++		BPF_STMT(BPF_LD | BPF_B | BPF_ABS, offsetof(struct ip, ip_p)),
+++		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, IPPROTO_UDP, 0, 10),
+++		BPF_STMT(BPF_LD | BPF_H | BPF_ABS, offsetof(struct ip, ip_off)),
+++		BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, IP_OFFMASK, 8, 0),
+++		BPF_STMT(BPF_LDX | BPF_B | BPF_MSH, 0),
+++		BPF_STMT(BPF_LD | BPF_H | BPF_IND, offsetof(struct udphdr, uh_sport)),
+++		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 53, 4, 5),
+++		/* IPv6: UDP from port 53 */
+++		BPF_STMT(BPF_LD | BPF_B | BPF_ABS, offsetof(struct ip6_hdr, ip6_nxt)),
+++		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, IPPROTO_UDP, 0, 3),
+++		BPF_STMT(BPF_LD | BPF_H | BPF_ABS,
+++			 sizeof(struct ip6_hdr) + offsetof(struct udphdr, uh_sport)),
+++		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 53, 0, 1),
+++		BPF_STMT(BPF_RET | BPF_K, UINT32_MAX),
+++		BPF_STMT(BPF_RET | BPF_K, 0),
+++	};
+++	struct sock_fprog prog = {
+++		.len = ARRAY_SIZE(code),
+++		.filter = code,
+++	};
++ 	struct sockaddr_ll sll = {
++ 		.sll_family = AF_PACKET,
++ 		.sll_protocol = htons(ETH_P_ALL),
+++		.sll_ifindex = ifindex,
++ 	};
+++	int one = 1;
++ 	int sock;
++ 
++-	sock = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
++-	if (sock == -1) {
++-		ULOG_ERR("failed to create raw socket: %s\n", strerror(errno));
+++	/* No protocol until bind(): nothing arrives before the filter is set. */
+++	sock = socket(AF_PACKET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+++	if (sock < 0) {
+++		ULOG_ERR("failed to create packet socket: %s\n", strerror(errno));
++ 		return -1;
++ 	}
++ 
++-	sll.sll_ifindex = if_nametoindex(QOSIFY_DNS_IFNAME);
++-	if (bind(sock, (struct sockaddr *)&sll, sizeof(sll))) {
++-		ULOG_ERR("failed to bind socket to "QOSIFY_DNS_IFNAME": %s\n",
++-			 strerror(errno));
++-		goto error;
+++	if (setsockopt(sock, SOL_SOCKET, SO_ATTACH_FILTER, &prog, sizeof(prog)) ||
+++	    setsockopt(sock, SOL_PACKET, PACKET_IGNORE_OUTGOING, &one, sizeof(one)) ||
+++	    bind(sock, (struct sockaddr *)&sll, sizeof(sll))) {
+++		ULOG_ERR("failed to set up the DNS socket on device %u: %s\n",
+++			 ifindex, strerror(errno));
+++		close(sock);
+++		return -1;
++ 	}
++ 
++-	ufd.fd = sock;
++-	ufd.cb = qosify_dns_socket_cb;
++-	uloop_fd_add(&ufd, ULOOP_READ);
+++	fd->fd = sock;
+++	fd->cb = qosify_dns_socket_cb;
+++	uloop_fd_add(fd, ULOOP_READ);
++ 
++ 	return 0;
++-
++-error:
++-	close(sock);
++-	return -1;
++ }
++ 
++-static void
++-qosify_dns_del_ifb(void)
+++void qosify_dns_close(struct uloop_fd *fd)
++ {
++-	qosify_run_cmd("ip link del ifb-dns type ifb", true);
+++	if (!fd->registered)
+++		return;
+++
+++	uloop_fd_delete(fd);
+++	close(fd->fd);
++ }
++ 
++ int qosify_dns_init(void)
++@@ -416,13 +423,6 @@ int qosify_dns_init(void)
++ 	cname_gc_timer.cb = qosify_cname_cache_gc;
++ 	qosify_cname_cache_gc(&cname_gc_timer);
++ 
++-	qosify_dns_del_ifb();
++-
++-	if (qosify_run_cmd("ip link add ifb-dns type ifb", false) ||
++-	    qosify_run_cmd("ip link set dev ifb-dns up", false) ||
++-	    qosify_open_dns_socket())
++-		return -1;
++-
++ 	return 0;
++ }
++ 
++@@ -430,13 +430,6 @@ void qosify_dns_stop(void)
++ {
++ 	struct cname_entry *e, *tmp;
++ 
++-	if (ufd.registered) {
++-		uloop_fd_delete(&ufd);
++-		close(ufd.fd);
++-	}
++-
++-	qosify_dns_del_ifb();
++-
++ 	avl_remove_all_elements(&cname_cache, e, node, tmp)
++ 		free(e);
++ 
++diff --git a/interface.c b/interface.c
++index 033154a..32874be 100644
++--- a/interface.c
+++++ b/interface.c
++@@ -62,6 +62,8 @@ struct qosify_iface {
++ 	unsigned int ifindex;
++ 	bool active;
++ 
+++	struct uloop_fd dns;
+++
++ 	bool device;
++ 	struct blob_attr *config_data;
++ 	struct qosify_iface_config config;
++@@ -306,27 +308,6 @@ cmd_add_ingress(struct qosify_iface *iface, bool eth)
++ 
++ 	cmd_add_bpf_filter(iface->ifname, prio++, false, eth);
++ 
++-	ofs = prepare_filter_cmd(buf, sizeof(buf), iface->ifname, prio++, true, false);
++-	APPEND(buf, ofs, " protocol ip u32 match ip sport 53 0xffff "
++-			 "flowid 1:1 action mirred egress redirect dev " QOSIFY_DNS_IFNAME);
++-	qosify_run_cmd(buf, false);
++-
++-	ofs = prepare_filter_cmd(buf, sizeof(buf), iface->ifname, prio++, true, false);
++-	APPEND(buf, ofs, " protocol 802.1Q u32 offset plus 4 match ip sport 53 0xffff "
++-			 "flowid 1:1 action mirred egress redirect dev " QOSIFY_DNS_IFNAME);
++-	qosify_run_cmd(buf, false);
++-
++-	ofs = prepare_filter_cmd(buf, sizeof(buf), iface->ifname, prio++, true, false);
++-	APPEND(buf, ofs, " protocol ipv6 u32 match ip6 sport 53 0xffff "
++-			 "flowid 1:1 action mirred egress redirect dev " QOSIFY_DNS_IFNAME);
++-	qosify_run_cmd(buf, false);
++-
++-	ofs = prepare_filter_cmd(buf, sizeof(buf), iface->ifname, prio++, true, false);
++-	APPEND(buf, ofs, " protocol ipv6 u32 offset plus 4 match ip6 sport 53 0xffff "
++-			 "flowid 1:1 action mirred egress redirect dev " QOSIFY_DNS_IFNAME);
++-	qosify_run_cmd(buf, false);
++-
++-
++ 	if (!iface->config.ingress)
++ 		return 0;
++ 
++@@ -363,7 +344,7 @@ interface_clear_qdisc(struct qosify_iface *iface)
++ 	prepare_qdisc_cmd(buf, sizeof(buf), iface->ifname, false, "root");
++ 	qosify_run_cmd(buf, true);
++ 
++-	for (i = 0; i < 6; i++) {
+++	for (i = 0; i < 2; i++) {
++ 		prepare_filter_cmd(buf, sizeof(buf), iface->ifname, QOSIFY_PRIO_BASE + i, false, false);
++ 		qosify_run_cmd(buf, true);
++ 	}
++@@ -400,6 +381,7 @@ interface_start(struct qosify_iface *iface)
++ 	interface_clear_qdisc(iface);
++ 	cmd_add_egress(iface, eth);
++ 	cmd_add_ingress(iface, eth);
+++	qosify_dns_open(&iface->dns, iface->ifindex);
++ 
++ 	iface->active = true;
++ }
++@@ -413,6 +395,7 @@ interface_stop(struct qosify_iface *iface)
++ 	ULOG_INFO("stop interface %s\n", iface->ifname);
++ 	iface->active = false;
++ 
+++	qosify_dns_close(&iface->dns);
++ 	interface_clear_qdisc(iface);
++ }
++ 
++diff --git a/qosify.h b/qosify.h
++index cd904ee..6de6cc9 100644
++--- a/qosify.h
+++++ b/qosify.h
++@@ -17,6 +17,7 @@
++ #include <libubox/avl.h>
++ #include <libubox/blobmsg.h>
++ #include <libubox/ulog.h>
+++#include <libubox/uloop.h>
++ 
++ #include <netinet/in.h>
++ 
++@@ -24,8 +25,6 @@
++ #define CLASSIFY_PIN_PATH	"/sys/fs/bpf/qosify"
++ #define CLASSIFY_DATA_PATH	"/sys/fs/bpf/qosify_data"
++ 
++-#define QOSIFY_DNS_IFNAME "ifb-dns"
++-
++ #define QOSIFY_PRIO_BASE	0x110
++ 
++ enum qosify_map_id {
++@@ -118,6 +117,8 @@ void qosify_iface_stop(void);
++ 
++ int qosify_dns_init(void);
++ void qosify_dns_stop(void);
+++int qosify_dns_open(struct uloop_fd *fd, unsigned int ifindex);
+++void qosify_dns_close(struct uloop_fd *fd);
++ void qosify_dns_get_stats(struct blob_buf *b, bool reset);
++ 
++ uint32_t qosify_map_get_ebpf_entry_count(void);
+diff --git a/package/network/config/qosify/patches/103-interface-attach-the-classifiers-as-tcx-links.patch b/package/network/config/qosify/patches/103-interface-attach-the-classifiers-as-tcx-links.patch
+new file mode 100644
+index 0000000..3deb196
+--- /dev/null
++++ b/package/network/config/qosify/patches/103-interface-attach-the-classifiers-as-tcx-links.patch
+@@ -0,0 +1,463 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] interface: attach the classifiers as tcx links
++
++qosify attached its classifiers as cls_bpf filters under clsact, which
++the kernel runs after every tcx program on the device, and redirected
++the ingress to the interface's ifb with a mirred filter. Programs that
++attach as tcx links, such as einat's, ran first whatever either asked
++for, and a qosify killed outright left its filters behind.
++
++Attach the classifiers as tcx links with BPF_F_AFTER, after every
++program attached so far. A program that must run first asks for it
++with BPF_F_BEFORE, and the order holds whichever starts first. The
++links belong to the process, and go with it however it ends, or with
++the device.
++
++A tcx link has no name of its own, as a cls_bpf filter has, so the
++program's name is what tells qosify's apart from the others on the
++device: call it qosify_classify.
++
++The ingress classifier hands the packets to the ifb itself, with
++bpf_redirect(), once the ifb's index is in the new ingress_ifb map,
++which qosify writes as it creates the ifb. An ifb takes link-layer
++frames: a packet of a device without a link-layer header, such as
++pppoe-wan, first gets an Ethernet header, which the ifb strips again as
++it returns the packet. At ingress, bpf_skb_change_head() has no MTU
++limit.
++
++A kernel without tcx refuses the link (EINVAL or EOPNOTSUPP), and
++qosify then attaches as before, as a cls_bpf filter under clsact, which
++it adds only for that. The config option tcx, true by default, set to
++false makes it do so on any kernel.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++ interface.c  | 114 +++++++++++++++++++++++++++++++++++++++++++--------
++ loader.c     |   2 +-
++ map.c        |  23 +++++++++++
++ qosify-bpf.c |  59 +++++++++++++++++++++++---
++ qosify.h     |   4 ++
++ ubus.c       |   5 +++
++ 6 files changed, 185 insertions(+), 22 deletions(-)
++
++diff --git a/interface.c b/interface.c
++index 32874be..d5ffbab 100644
++--- a/interface.c
+++++ b/interface.c
++@@ -34,6 +34,7 @@ static VLIST_TREE(devices, avl_strcmp, interface_update_cb, true, false);
++ static VLIST_TREE(interfaces, avl_strcmp, interface_update_cb, true, false);
++ static int socket_fd;
++ static struct nl_sock *rtnl_sock;
+++static bool tcx_enabled = true;
++ 
++ #define APPEND(_buf, _ofs, _format, ...) _ofs += snprintf(_buf + _ofs, sizeof(_buf) - _ofs, _format, ##__VA_ARGS__)
++ 
++@@ -62,6 +63,7 @@ struct qosify_iface {
++ 	unsigned int ifindex;
++ 	bool active;
++ 
+++	int links[2];	/* the classifiers' tcx links: ingress, egress */
++ 	struct uloop_fd dns;
++ 
++ 	bool device;
++@@ -273,9 +275,6 @@ cmd_add_qdisc(struct qosify_iface *iface, const char *ifname, bool egress, bool
++ 	char buf[512];
++ 	int ofs;
++ 
++-	ofs = prepare_qdisc_cmd(buf, sizeof(buf), ifname, true, "clsact");
++-	qosify_run_cmd(buf, true);
++-
++ 	ofs = prepare_qdisc_cmd(buf, sizeof(buf), ifname, true, "root cake");
++ 	if (bw)
++ 		APPEND(buf, ofs, " bandwidth %s", bw);
++@@ -298,15 +297,70 @@ cmd_add_qdisc(struct qosify_iface *iface, const char *ifname, bool egress, bool
++ 	return qosify_run_cmd(buf, false);
++ }
++ 
+++/*
+++ * Attach the classifier of one direction to iface's device: as a tcx link,
+++ * after every program attached there, or, when tcx is off or the kernel has
+++ * none, as a cls_bpf filter under clsact, which runs after all tcx programs.
+++ * The links belong to the process: they go when it does, however it ends.
+++ */
+++static int
+++interface_attach(struct qosify_iface *iface, bool egress, bool eth)
+++{
+++	LIBBPF_OPTS(bpf_link_create_opts, opts, .flags = BPF_F_AFTER);
+++	char buf[64];
+++	int prog_fd;
+++	int fd;
+++
+++	if (tcx_enabled) {
+++		if (!qosify_get_program(!egress * QOSIFY_INGRESS + !eth * QOSIFY_IP_ONLY, &prog_fd))
+++			return -1;
+++
+++		fd = bpf_link_create(prog_fd, iface->ifindex,
+++				     egress ? BPF_TCX_EGRESS : BPF_TCX_INGRESS, &opts);
+++		if (fd >= 0) {
+++			iface->links[egress] = fd;
+++			return 0;
+++		}
+++
+++		if (fd != -EINVAL && fd != -EOPNOTSUPP) {
+++			ULOG_ERR("failed to attach to %s: %s\n", iface->ifname, strerror(-fd));
+++			return -1;
+++		}
+++
+++		ULOG_INFO("no tcx on %s, attaching with clsact\n", iface->ifname);
+++	}
+++
+++	prepare_qdisc_cmd(buf, sizeof(buf), iface->ifname, true, "clsact");
+++	qosify_run_cmd(buf, true);
+++
+++	return cmd_add_bpf_filter(iface->ifname, QOSIFY_PRIO_BASE, egress, eth);
+++}
+++
+++static void
+++interface_detach(struct qosify_iface *iface)
+++{
+++	int i;
+++
+++	for (i = 0; i < ARRAY_SIZE(iface->links); i++) {
+++		if (iface->links[i] < 0)
+++			continue;
+++
+++		close(iface->links[i]);
+++		iface->links[i] = -1;
+++	}
+++}
+++
+++/*
+++ * The ingress classifier hands the packets to the ifb itself, once the ifb's
+++ * index is in its map: no filter redirects them.
+++ */
++ static int
++ cmd_add_ingress(struct qosify_iface *iface, bool eth)
++ {
++ 	const char *ifbdev = interface_ifb_name(iface);
++ 	char buf[256];
++-	int prio = QOSIFY_PRIO_BASE;
++-	int ofs;
++ 
++-	cmd_add_bpf_filter(iface->ifname, prio++, false, eth);
+++	interface_attach(iface, false, eth);
++ 
++ 	if (!iface->config.ingress)
++ 		return 0;
++@@ -319,10 +373,7 @@ cmd_add_ingress(struct qosify_iface *iface, bool eth)
++ 	snprintf(buf, sizeof(buf), "ip link set dev '%s' up", ifbdev);
++ 	qosify_run_cmd(buf, false);
++ 
++-	ofs = prepare_filter_cmd(buf, sizeof(buf), iface->ifname, prio++, true, false);
++-	APPEND(buf, ofs, " protocol all u32 match u32 0 0 flowid 1:1"
++-			 " action mirred egress redirect dev '%s'", ifbdev);
++-	return qosify_run_cmd(buf, false);
+++	return qosify_map_set_ingress_ifb(iface->ifindex, if_nametoindex(ifbdev));
++ }
++ 
++ static int cmd_add_egress(struct qosify_iface *iface, bool eth)
++@@ -332,26 +383,26 @@ static int cmd_add_egress(struct qosify_iface *iface, bool eth)
++ 
++ 	cmd_add_qdisc(iface, iface->ifname, true, eth);
++ 
++-	return cmd_add_bpf_filter(iface->ifname, QOSIFY_PRIO_BASE, true, eth);
+++	return interface_attach(iface, true, eth);
++ }
++ 
++ static void
++ interface_clear_qdisc(struct qosify_iface *iface)
++ {
++ 	char buf[64];
++-	int i;
++ 
++ 	prepare_qdisc_cmd(buf, sizeof(buf), iface->ifname, false, "root");
++ 	qosify_run_cmd(buf, true);
++ 
++-	for (i = 0; i < 2; i++) {
++-		prepare_filter_cmd(buf, sizeof(buf), iface->ifname, QOSIFY_PRIO_BASE + i, false, false);
++-		qosify_run_cmd(buf, true);
++-	}
+++	/* The clsact fallback's filters, of this run or an earlier one */
+++	prepare_filter_cmd(buf, sizeof(buf), iface->ifname, QOSIFY_PRIO_BASE, false, false);
+++	qosify_run_cmd(buf, true);
++ 
++ 	prepare_filter_cmd(buf, sizeof(buf), iface->ifname, QOSIFY_PRIO_BASE, false, true);
++ 	qosify_run_cmd(buf, true);
++ 
+++	qosify_map_del_ingress_ifb(iface->ifindex);
+++
++ 	snprintf(buf, sizeof(buf), "ip link del '%s'", interface_ifb_name(iface));
++ 	qosify_run_cmd(buf, true);
++ }
++@@ -396,9 +447,20 @@ interface_stop(struct qosify_iface *iface)
++ 	iface->active = false;
++ 
++ 	qosify_dns_close(&iface->dns);
+++	interface_detach(iface);
++ 	interface_clear_qdisc(iface);
++ }
++ 
+++static void
+++interface_restart(struct qosify_iface *iface)
+++{
+++	if (!iface->active)
+++		return;
+++
+++	interface_stop(iface);
+++	interface_start(iface);
+++}
+++
++ static void
++ interface_set_config(struct qosify_iface *iface, struct blob_attr *config)
++ {
++@@ -460,9 +522,29 @@ interface_create(struct blob_attr *attr, bool device)
++ 	strcpy(name_buf, blobmsg_name(attr));
++ 	iface->config_data = attr;
++ 	iface->device = device;
+++	iface->links[0] = iface->links[1] = -1;
++ 	vlist_add(device ? &devices : &interfaces, &iface->node, name_buf);
++ }
++ 
+++/*
+++ * Attach the classifiers as tcx links where the kernel has them, or always
+++ * with clsact. The interfaces already set up are set up anew the other way.
+++ */
+++void qosify_iface_set_tcx(bool enabled)
+++{
+++	struct qosify_iface *iface;
+++
+++	if (enabled == tcx_enabled)
+++		return;
+++
+++	tcx_enabled = enabled;
+++
+++	vlist_for_each_element(&devices, iface, node)
+++		interface_restart(iface);
+++	vlist_for_each_element(&interfaces, iface, node)
+++		interface_restart(iface);
+++}
+++
++ void qosify_iface_config_update(struct blob_attr *ifaces, struct blob_attr *devs)
++ {
++ 	struct blob_attr *cur;
++diff --git a/loader.c b/loader.c
++index 64797f0..52e004a 100644
++--- a/loader.c
+++++ b/loader.c
++@@ -85,7 +85,7 @@ qosify_create_program(int idx)
++ 		return -1;
++ 	}
++ 
++-	prog = bpf_object__find_program_by_name(obj, "classify");
+++	prog = bpf_object__find_program_by_name(obj, "qosify_classify");
++ 	if (!prog) {
++ 		fprintf(stderr, "Can't find classifier prog\n");
++ 		return -1;
++diff --git a/map.c b/map.c
++index faccacd..d1f84d9 100644
++--- a/map.c
+++++ b/map.c
++@@ -58,6 +58,7 @@ static const struct {
++ 	[CL_MAP_DNS] = { "dns", "dns" },
++ 	[CL_MAP_DSCP_STATS] = { "dscp_stats", "dscp_stats" },
++ 	[CL_MAP_PATTERN_STATS] = { "pattern_stats", "pattern_stats" },
+++	[CL_MAP_INGRESS_IFB] = { "ingress_ifb", "ingress_ifb" },
++ };
++ 
++ static const struct {
++@@ -211,6 +212,24 @@ void qosify_map_set_dscp_default(enum qosify_map_id id, uint8_t val)
++ 	__qosify_map_set_dscp_default(id, qosify_dscp_default[udp]);
++ }
++ 
+++/*
+++ * Have the ingress classifier of the device ifindex hand its packets to the
+++ * ifb ifb_ifindex, whose cake shapes them, or no longer.
+++ */
+++int qosify_map_set_ingress_ifb(unsigned int ifindex, unsigned int ifb_ifindex)
+++{
+++	uint32_t key = ifindex, val = ifb_ifindex;
+++
+++	return bpf_map_update_elem(qosify_map_fds[CL_MAP_INGRESS_IFB], &key, &val, BPF_ANY);
+++}
+++
+++void qosify_map_del_ingress_ifb(unsigned int ifindex)
+++{
+++	uint32_t key = ifindex;
+++
+++	bpf_map_delete_elem(qosify_map_fds[CL_MAP_INGRESS_IFB], &key);
+++}
+++
++ int qosify_map_init(void)
++ {
++ 	int i;
++@@ -229,6 +248,10 @@ int qosify_map_init(void)
++ 	if (qosify_map_fds[CL_MAP_PATTERN_STATS] < 0)
++ 		return -1;
++ 
+++	qosify_map_fds[CL_MAP_INGRESS_IFB] = qosify_map_get_fd(CL_MAP_INGRESS_IFB);
+++	if (qosify_map_fds[CL_MAP_INGRESS_IFB] < 0)
+++		return -1;
+++
++ 	qosify_map_clear_list(CL_MAP_IPV4_ADDR);
++ 	qosify_map_clear_list(CL_MAP_IPV6_ADDR);
++ 	qosify_map_reset_config();
++diff --git a/qosify-bpf.c b/qosify-bpf.c
++index 4dd04ab..ebc6c8c 100644
++--- a/qosify-bpf.c
+++++ b/qosify-bpf.c
++@@ -112,6 +112,15 @@ struct {
++ 	__uint(max_entries, QOSIFY_PATTERN_STATS_MAX);
++ } pattern_stats SEC(".maps");
++ 
+++/* The ifb that shapes a device's ingress, by the device's index */
+++struct {
+++	__uint(type, BPF_MAP_TYPE_HASH);
+++	__uint(pinning, 1);
+++	__type(key, __u32);
+++	__type(value, __u32);
+++	__uint(max_entries, 64);
+++} ingress_ifb SEC(".maps");
+++
++ static struct qosify_config *get_config(void)
++ {
++ 	__u32 key = 0;
++@@ -483,8 +492,8 @@ dscp_lookup_class(uint8_t *dscp, bool ingress, struct qosify_class **out_class,
++ 	return 0;
++ }
++ 
++-SEC("tc")
++-int classify(struct __sk_buff *skb)
+++static __always_inline void
+++classify_packet(struct __sk_buff *skb)
++ {
++ 	struct skb_parser_info info;
++ 	bool ingress = module_flags & QOSIFY_INGRESS;
++@@ -499,7 +508,7 @@ int classify(struct __sk_buff *skb)
++ 
++ 	config = get_config();
++ 	if (!config)
++-		return TC_ACT_UNSPEC;
+++		return;
++ 
++ 	skb_parse_init(&info, skb);
++ 	if (module_flags & QOSIFY_IP_ONLY) {
++@@ -509,7 +518,7 @@ int classify(struct __sk_buff *skb)
++ 		skb_parse_vlan(&info);
++ 		type = info.proto;
++ 	} else {
++-		return TC_ACT_UNSPEC;
+++		return;
++ 	}
++ 
++ 	iph_offset = info.offset;
++@@ -518,7 +527,7 @@ int classify(struct __sk_buff *skb)
++ 	else if (type == bpf_htons(ETH_P_IPV6))
++ 		ip_val = parse_ipv6(config, &info, ingress, &dscp);
++ 	else
++-		return TC_ACT_UNSPEC;
+++		return;
++ 
++ 	if (ip_val) {
++ 		if (!ip_val->seen)
++@@ -550,6 +559,46 @@ out:
++ 		dscp = ipv6_get_dscp(skb, iph_offset);
++ 
++ 	account_dscp(dscp, packets, skb->len);
+++}
+++
+++/*
+++ * Hand an ingress packet to the ifb that shapes the device's ingress, if it has
+++ * one. An ifb takes link-layer frames: an IP-only device's packet first gets an
+++ * Ethernet header, which the ifb strips again as it returns the packet.
+++ */
+++static __always_inline int
+++redirect_ingress(struct __sk_buff *skb)
+++{
+++	struct ethhdr eth = {
+++		.h_proto = (__be16)skb->protocol,
+++	};
+++	__u32 key = skb->ifindex;
+++	__u32 *ifb, ifindex;
+++
+++	ifb = bpf_map_lookup_elem(&ingress_ifb, &key);
+++	if (!ifb)
+++		return TC_ACT_UNSPEC;
+++
+++	ifindex = *ifb;
+++	if ((module_flags & QOSIFY_IP_ONLY) &&
+++	    (bpf_skb_change_head(skb, sizeof(eth), 0) ||
+++	     bpf_skb_store_bytes(skb, 0, &eth, sizeof(eth), 0)))
+++		return TC_ACT_UNSPEC;
+++
+++	return bpf_redirect(ifindex, 0);
+++}
+++
+++/*
+++ * A tcx link has no name of its own, as a cls_bpf filter has: the program's is
+++ * what tells qosify's from the others on a device.
+++ */
+++SEC("tc")
+++int qosify_classify(struct __sk_buff *skb)
+++{
+++	classify_packet(skb);
+++
+++	if (module_flags & QOSIFY_INGRESS)
+++		return redirect_ingress(skb);
++ 
++ 	return TC_ACT_UNSPEC;
++ }
++diff --git a/qosify.h b/qosify.h
++index 6de6cc9..79060d4 100644
++--- a/qosify.h
+++++ b/qosify.h
++@@ -37,6 +37,7 @@ enum qosify_map_id {
++ 	CL_MAP_DNS,
++ 	CL_MAP_DSCP_STATS,
++ 	CL_MAP_PATTERN_STATS,
+++	CL_MAP_INGRESS_IFB,
++ 	__CL_MAP_MAX,
++ };
++ 
++@@ -107,9 +108,12 @@ int qosify_map_add_dns_host(char *host, const char *addr, const char *type, int
++ int map_parse_flow_config(struct qosify_flow_config *cfg, struct blob_attr *attr,
++ 			  bool reset);
++ int map_fill_dscp_value(uint8_t *dest, struct blob_attr *attr, bool reset);
+++int qosify_map_set_ingress_ifb(unsigned int ifindex, unsigned int ifb_ifindex);
+++void qosify_map_del_ingress_ifb(unsigned int ifindex);
++ 
++ int qosify_iface_init(void);
++ void qosify_iface_config_update(struct blob_attr *ifaces, struct blob_attr *devs);
+++void qosify_iface_set_tcx(bool enabled);
++ void qosify_iface_check(void);
++ void qosify_iface_status(struct blob_buf *b);
++ void qosify_iface_get_devices(struct blob_buf *b);
++diff --git a/ubus.c b/ubus.c
++index 91df393..0eacecf 100644
++--- a/ubus.c
+++++ b/ubus.c
++@@ -133,6 +133,7 @@ enum {
++ 	CL_CONFIG_INTERFACES,
++ 	CL_CONFIG_DEVICES,
++ 	CL_CONFIG_CLASSES,
+++	CL_CONFIG_TCX,
++ 	__CL_CONFIG_MAX
++ };
++ 
++@@ -146,6 +147,7 @@ static const struct blobmsg_policy qosify_config_policy[__CL_CONFIG_MAX] = {
++ 	[CL_CONFIG_INTERFACES] = { "interfaces", BLOBMSG_TYPE_TABLE },
++ 	[CL_CONFIG_DEVICES] = { "devices", BLOBMSG_TYPE_TABLE },
++ 	[CL_CONFIG_CLASSES] = { "classes", BLOBMSG_TYPE_TABLE },
+++	[CL_CONFIG_TCX] = { "tcx", BLOBMSG_TYPE_BOOL },
++ };
++ 
++ static int
++@@ -192,6 +194,9 @@ qosify_ubus_config(struct ubus_context *ctx, struct ubus_object *obj,
++ 
++ 	qosify_map_update_config();
++ 
+++	if ((cur = tb[CL_CONFIG_TCX]) != NULL || reset)
+++		qosify_iface_set_tcx(cur ? blobmsg_get_bool(cur) : true);
+++
++ 	qosify_iface_config_update(tb[CL_CONFIG_INTERFACES], tb[CL_CONFIG_DEVICES]);
++ 
++ 	qosify_iface_check();

@@ -35,7 +35,8 @@ See proposal.md for why. The current state:
 - The order with einat holds because the kernel runs tcx before tc.
 - A qosify killed with `SIGKILL` (procd does this when `SIGTERM` is not enough in time) leaves its filters attached.
 - einat 0.1.11 attaches its programs with `TcxOrder(LinkOrder::first())`.
-- The pinned libbpf (1.7.0) has `bpf_program__attach_tcx`.
+- The pinned libbpf (1.7.0) creates tcx links (`bpf_link_create()` with `BPF_TCX_INGRESS` or `BPF_TCX_EGRESS`).
+- qosify's DNS learning reads the mirrored packets as Ethernet frames. The packets of pppoe-wan, which has no link-layer header, reach `ifb-dns` without one, so no DNS name is learnt on the PPPoE WAN.
 - Patch 0010 makes qosify set an interface up anew on a device replaced under the same name.
 
 **Key directory.**
@@ -103,13 +104,13 @@ DNS learning:       AF_PACKET (SOCK_DGRAM) on each managed WAN device, filtered 
 ```
 
 **Attach.**
-- qosify attaches each classifier with `bpf_program__attach_tcx` and `BPF_F_AFTER` with no anchor, so it runs after every program attached so far.
+- qosify attaches each classifier as a tcx link with `BPF_F_AFTER` and no anchor (`bpf_link_create()` on the loaded program, which it keeps by file descriptor), so it runs after every program attached so far.
 - einat asks to run first. The order thus holds whichever starts first, and after any restart.
 - The kernel keeps it, and the test "After restarting components" checks it.
 
 **Kernels without tcx.**
 - When the kernel refuses a tcx link (`EINVAL` or `EOPNOTSUPP`), qosify attaches as it does today: `cls_bpf` under `clsact`, at a priority after einat's. The patch keeps every kernel upstream's qosify supports working.
-- A setting, `qosify.global.tcx` (`auto`, the default, or `off`), forces the fallback, so that a test can exercise it on a kernel that has tcx.
+- An option of qosify's `defaults` section, `tcx` (1, the default, or 0), forces the fallback, so that a test can exercise it on a kernel that has tcx. The init script passes it on with the other defaults, and a change sets the interfaces up anew.
 
 **Lifetime.**
 - The links belong to the daemon's process.
@@ -117,13 +118,14 @@ DNS learning:       AF_PACKET (SOCK_DGRAM) on each managed WAN device, filtered 
 - A replaced device loses its link with the device, and patch 0010's device tracking attaches anew.
 
 **DNS learning.**
-- A packet socket bound to each WAN device that qosify manages, with a classic BPF socket filter that accepts UDP and TCP from port 53 over IPv4 and IPv6.
+- A packet socket bound to each WAN device that qosify manages, with a classic BPF socket filter that accepts UDP from port 53 over IPv4 (not a later fragment) and IPv6, and `PACKET_IGNORE_OUTGOING`. The parser takes UDP alone, as it did; DNS over TCP is not learnt.
 - It sees a copy of each reply, which itself goes on untouched.
-- The DNS parser takes network-layer packets (`SOCK_DGRAM`) instead of Ethernet frames.
+- The DNS parser takes network-layer packets (`SOCK_DGRAM`) instead of Ethernet frames, so that it learns on pppoe-wan too. The IP header starts the aligned buffer, where patch 0032 received two bytes in.
 - This replaces `ifb-dns` and its four u32 filters.
 
 **Ingress shaping.**
 - When an interface has ingress shaping, its ingress classifier ends with `bpf_redirect()` to the interface's ifb. The ifb's index sits in a map entry per interface, which the daemon writes when it creates the ifb.
+- An ifb takes link-layer frames, and the kernel drops a redirect of a packet without a link-layer header to it. On a device without one, such as pppoe-wan, the classifier first gives the packet an Ethernet header (`bpf_skb_change_head()`, which has no MTU limit at ingress), which the ifb strips as it returns the packet.
 - The ifb returns the packets to the stack after cake, as with the mirred filter.
 - Without ingress shaping, the map has no entry and nothing is redirected.
 
@@ -155,7 +157,7 @@ DNS learning:       AF_PACKET (SOCK_DGRAM) on each managed WAN device, filtered 
 
 - [ucode code paths fail silently where the shell ones failed loudly, for example a missing module or a misread file] → Every script runs `'use strict'`, and checks the result of each call that can fail. Each snippet is first tried with the host ucode. The existing tests hold the behavior: health check, slot status, device sync and config push.
 - [qosify's DNS learning sees replies before einat's reverse translation] → DNS learning reads only the DNS payload, which address translation does not change. The new "Classify by DNS name" test checks it.
-- [qosify on tcx diverges from upstream qosify] → One patch, meant for upstream: it keeps the `clsact` path for kernels without tcx, which a test exercises through `qosify.global.tcx=off`.
+- [qosify on tcx diverges from upstream qosify] → One patch, meant for upstream: it keeps the `clsact` path for kernels without tcx, which a test exercises through qosify's `tcx` option set to 0.
 - [The ingress shaping path is new code that the image's configuration never uses] → The "Enable ingress shaping" test exercises it in the emulator.
 - [Two implementations of the slot facts drift apart] → They are small, and the A/B suites test both. A comment in each names the other.
 

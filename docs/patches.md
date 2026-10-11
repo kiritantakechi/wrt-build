@@ -431,7 +431,7 @@ Problem: `qosify_dns_socket_cb()` receives each packet at the start of its buffe
 
 Why it matters here: the `ubsan` profile's second R6S run trapped here once, when a DNS reply reached qosify's DNS socket during a trial boot.
 
-What the patch does: the packets are received two bytes into a four-byte aligned buffer, as the kernel's `NET_IP_ALIGN` does, so the IP header is aligned, with a VLAN tag or without. DNS learning on a packet socket of its own (`device-modernization`) receives through the same function.
+What the patch does: the packets are received two bytes into a four-byte aligned buffer, as the kernel's `NET_IP_ALIGN` does, so the IP header is aligned, with a VLAN tag or without. It is the least change that fixes today's qosify; patch 0034's DNS sockets, which receive each packet from its IP header on, start the aligned buffer with it instead.
 
 Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
 
@@ -446,6 +446,20 @@ Why it matters here: the image has no opkg left, and no `/etc/opkg` (`device-mod
 What the patch does: `fwtool_check_signature()` reads `/etc/usign/keys`, named after the tool whose keys they are as `/etc/apk/keys` is, and `/etc/opkg/keys` on an image without that directory, so upstream's images check their signatures as before.
 
 Verification log: the firmware/ab-upgrade tests take a signed upgrade and refuse an unsigned one on both boards.
+
+### qosify: tcx links, and DNS names learnt on each device
+
+Patch: `patches/openwrt/0034-qosify-attach-as-tcx-links-and-learn-DNS-names-on-ea.patch` (adds the qosify patches `package/network/config/qosify/patches/102-dns-learn-from-a-packet-socket-on-each-device.patch` and `103-interface-attach-the-classifiers-as-tcx-links.patch`, and passes the `defaults` option `tcx` on in the init script), for git.openwrt.org/project/qosify, carried by openwrt/openwrt until then.
+
+Problem: qosify attaches its classifiers as `cls_bpf` filters under `clsact`, and redirects with tc filters: four u32 filters mirror DNS replies to `ifb-dns`, and a mirred filter sends the ingress to the interface's ifb when it is shaped. All of them stay on the device when qosify is killed. A program attached as a tcx link runs before them whatever either asks for. DNS learning reads the mirrored packets from a raw socket on `ifb-dns` as Ethernet frames, but the packets of a device without a link-layer header, such as pppoe-wan, come without one, so qosify learns no name there.
+
+Why it matters here: einat runs as tcx links on pppoe-wan, so qosify's filters were the only legacy filters on the WAN port, and their order after einat held by the kernel's rule that tcx runs first rather than by anything either asked for (`device-modernization` D4). A rule by DNS name never matched on the PPPoE WAN.
+
+What the patches do:
+- 102: DNS learning opens a packet socket on each device qosify sets up: `SOCK_DGRAM`, so that each packet starts with its IP header whatever the link layer, with a classic BPF filter for UDP from port 53 over IPv4 (not a later fragment) or IPv6, and `PACKET_IGNORE_OUTGOING`. It gets a copy of each reply, which goes on untouched. `ifb-dns` and its four filters go, and the socket goes with the device's setup and with the process. DNS over TCP was never learnt (the parser takes UDP alone), and still is not.
+- 103: the classifiers attach as tcx links with `BPF_F_AFTER` (`bpf_link_create()` on the loaded program); einat asks to run first (`BPF_F_BEFORE`), so the order holds whichever starts first. The program is named `qosify_classify`, as a tcx link has no name of its own to tell it from einat's. The links go with the process, however it ends, and with the device; patch 0010's start anew on a replaced device attaches anew. The ingress classifier redirects to the interface's ifb itself (`bpf_redirect()`), when the ifb's index is in the `ingress_ifb` map, which qosify writes as it creates the ifb; on a device without a link-layer header, the packet first gets an Ethernet header, which the ifb strips as it returns the packet (an ifb takes link-layer frames, and at ingress `bpf_skb_change_head()` has no MTU limit). A kernel that refuses a tcx link (`EINVAL` or `EOPNOTSUPP`) gets `cls_bpf` under `clsact`, which runs after every tcx program, as does the `defaults` option `tcx` set to 0 on any kernel; qosify adds `clsact` only then.
+
+Verification log: the network/tc-hook-order and network/qos tests on both boards: einat's tcx programs first and qosify's after them, with no legacy filter and no ifb; a `dns:` rule classifying a flow on pppoe-wan; ingress shaping through the ifb; and the `clsact` fallback with `tcx` set to 0.
 
 ### wsdd2: the random seed without overflow
 

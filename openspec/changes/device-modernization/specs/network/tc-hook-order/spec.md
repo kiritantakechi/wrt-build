@@ -10,5 +10,5 @@ On both ingress and egress of the WAN interface, einat's program SHALL run first
 - **THEN** tcx ingress and egress each hold einat's program followed by qosify's classifier, and no legacy tc filter is attached
 
 #### Scenario: Kernel without tcx
-- **WHEN** qosify cannot use tcx links (`qosify.global.tcx=off` stands in for such a kernel) and the WAN port is inspected
+- **WHEN** qosify cannot use tcx links (qosify's `defaults` option `tcx` set to 0 stands in for such a kernel) and the WAN port is inspected
 - **THEN** each direction runs einat's tcx program first and qosify's classifier on `clsact` after it, and qosify still classifies traffic
