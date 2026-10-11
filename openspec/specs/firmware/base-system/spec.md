@@ -65,8 +65,8 @@ The image MUST NOT contain any preset root password hash. The administrator SHAL
 - **THEN** the root entry has no password hash
 
 ### Requirement: Excluded components
-The image MUST NOT contain the following components: UPX-compressed executables, LRNG, urngd, shortcut-fe, natflow, the PCRE1 library, opkg.
+The image MUST NOT contain the following components: UPX-compressed executables, LRNG, urngd, shortcut-fe, natflow, the PCRE1 library, opkg, nor any `/etc/opkg` directory.
 
 #### Scenario: Check installed packages and executables
 - **WHEN** the packages in the image are listed and its executables are scanned
-- **THEN** none of the components above are present, and no executable carries a UPX marker
+- **THEN** none of the components above are present, no executable carries a UPX marker, and there is no `/etc/opkg`

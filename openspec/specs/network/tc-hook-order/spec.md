@@ -6,11 +6,15 @@ Define the attach order and return-value constraints for multiple eBPF/tc progra
 ## Requirements
 
 ### Requirement: Programs and order on the WAN port
-On both ingress and egress of the WAN interface, einat SHALL be the first program to run, followed by qosify's filters. Components other than these two MUST NOT attach tc or tcx programs to the WAN interface.
+On both ingress and egress of the WAN interface, einat's program SHALL run first and qosify's classifier after it, both attached as tcx links. Components other than these two MUST NOT attach tc or tcx programs to the WAN interface, and no legacy tc filter SHALL be attached to it. On a kernel that refuses tcx links, qosify SHALL attach its classifiers with `clsact` instead, still after einat's program.
 
 #### Scenario: Check the WAN port
-- **WHEN** all BPF programs attached to pppoe-wan are inspected
-- **THEN** only einat is on tcx ingress and egress; the legacy tc filters are only qosify's, namely the BPF classifiers in both directions and the ingress filters that redirect DNS replies to `ifb-dns`
+- **WHEN** all BPF programs and tc filters attached to pppoe-wan are inspected
+- **THEN** tcx ingress and egress each hold einat's program followed by qosify's classifier, and no legacy tc filter is attached
+
+#### Scenario: Kernel without tcx
+- **WHEN** qosify cannot use tcx links (qosify's `defaults` option `tcx` set to 0 stands in for such a kernel) and the WAN port is inspected
+- **THEN** each direction runs einat's tcx program first and qosify's classifier on `clsact` after it, and qosify still classifies traffic
 
 ### Requirement: Pass-through returns continue the chain
 When a program attached to a shared hook passes a packet, it MUST return "continue to the next program", not a terminating verdict. The only exception is when it intentionally drops or redirects the packet.
