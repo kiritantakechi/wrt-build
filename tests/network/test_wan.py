@@ -97,6 +97,28 @@ def test_lan_host_gets_ipv6(online: Online) -> None:
     assert online.client().probe("tcp", DIRECT_TARGET[1])["address"] == ipv6
 
 
+def _lan_state(online: Online, address: str) -> str:
+    """Return what the LAN clients make of ``address``, for a LAN probe that was refused.
+
+    CI's run 38102368454, and an R4S run before it, had client-b refused once
+    by the server on client-a, which was listening.
+    """
+    server, client = online.client(), online.client("client-b")
+    commands = (
+        (server, ("ip", "-6", "addr", "show", "dev", "eth0")),
+        (server, ("ss", "-Hltnp")),
+        (client, ("ip", "-6", "route", "get", address)),
+        (client, ("ip", "-6", "neigh", "show", "dev", "eth0")),
+    )
+    shown = []
+    for namespace, command in commands:
+        try:
+            shown.append(f"{namespace.name}$ {' '.join(command)}\n{namespace.run(*command)}")
+        except subprocess.CalledProcessError as error:
+            shown.append(f"{namespace.name}$ {' '.join(command)}: {error}")
+    return "\n".join(shown)
+
+
 @spec(CAPABILITY, "IPv6 inbound firewall", "External host connects to an internal IPv6 address")
 def test_inbound_ipv6_is_rejected(online: Online) -> None:
     _, ipv6 = online.addresses()
@@ -105,7 +127,11 @@ def test_inbound_ipv6_is_rejected(online: Online) -> None:
     try:
         until(lambda: client.run("ss", "-Hltn", "sport = :8007"), timeout=10, what="netprobe")
         # The LAN reaches the server; the internet does not.
-        assert online.client("client-b").probe("tcp", ipv6)["address"]
+        try:
+            assert online.client("client-b").probe("tcp", ipv6)["address"]
+        except subprocess.CalledProcessError as error:
+            error.add_note(_lan_state(online, ipv6))
+            raise
         with pytest.raises(subprocess.CalledProcessError):
             online.network["inet"].probe("tcp", ipv6)
     finally:
