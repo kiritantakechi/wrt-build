@@ -77,6 +77,6 @@
 - [x] 6.1 Run the full system tests on both boards (dev profile).
 
   Verify: all tests pass on both boards, and `spec-coverage --change device-modernization` reports no uncovered scenario.
-- [ ] 6.2 Get a green CI run for both boards.
+- [x] 6.2 Get a green CI run for both boards.
 
   Verify: record the run and its per-board timings in `docs/ci.md`.
