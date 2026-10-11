@@ -159,7 +159,12 @@ def dhcp_leases(router: Router) -> dict[str, int]:
 
 
 def _session(router: Router, isp: Isp, other_than: Session | None) -> Session | None:
-    status = interface(router, "wan")
+    # ifup reloads netifd first, which can leave a slow router's netifd without
+    # an answer for a while (CI's run 38138320189): no answer is no session yet.
+    shown = router.poll("ifstatus wan")
+    if shown is None:
+        return None
+    status = cast("dict[str, Any]", json.loads(shown))
     addresses = status.get("ipv4-address") or []
     if not status.get("up") or not addresses:
         return None
