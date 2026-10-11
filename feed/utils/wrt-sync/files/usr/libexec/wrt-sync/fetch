@@ -50,8 +50,11 @@ function request(url, write) {
 				if (wanted)
 					write(data);
 		},
+		// The connection ends a cut body too; only data_eof says it all came.
 		data_eof: () => {
-			complete = client.status().status == 200;
+			let status = client.status();
+
+			complete = status.status == 200 && status.data_eof;
 			uloop.end();
 		},
 		error: () => uloop.end(),
