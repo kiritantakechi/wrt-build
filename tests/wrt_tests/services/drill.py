@@ -37,11 +37,18 @@ HEALTH_LIMITS = {"total": 20, "interval": 5, "timeout": 5}
 BOOT_LIMIT = 3
 SYNC_TIMEOUT = 600
 DRILL_TIMEOUT = 3600
+# What wrt-update said, on the router: kept in RAM (/var), which the upgrade's
+# reboot empties, for a drill whose upgrade never started.
+UPDATE_LOG = "/var/log/wrt-update.log"
 # What the router's own console tells of a drill that ended neither way: the
-# slot's state, what still runs (the health check starts after every other
-# service), the end of the log and the addresses. CI's run 37126344220 had a
-# trial slot that booted and then answered neither ssh nor the drill.
-CONSOLE_REPORT = "wrt-slot status; ps w | grep -v ' \\['; logread | tail -n 80; ip -o addr"
+# slot's state, wrt-update's output, what still runs (the health check starts
+# after every other service), the end of the log without tailscaled's chatter,
+# and the addresses. CI's run 37126344220 had a trial slot that booted and then
+# answered neither ssh nor the drill.
+CONSOLE_REPORT = (
+    f"wrt-slot status; cat {UPDATE_LOG} 2>/dev/null; ps w | grep -v ' \\['"
+    "; logread | grep -v tailscaled | tail -n 80; ip -o addr"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,7 +148,7 @@ class Drill:
         assert f"{tag} is current" in synced, synced  # noqa: S101
         console = router.emulator.console
         since = console.mark()
-        router.detach("sleep 1; wrt-update")
+        router.detach(f"sleep 1; wrt-update >{UPDATE_LOG} 2>&1")
         # The other slot boots on trial: it is confirmed, or U-Boot rolls back
         # after the boot limit.
         rolled_back = re.compile(rf"Bootlimit \({BOOT_LIMIT}\) exceeded")
