@@ -33,7 +33,7 @@ def _register(router: Router, name: str, body: str) -> None:
 @spec(CAPABILITY, "Built-in checks", "WAN down, everything else healthy")
 def test_wan_is_not_a_criterion(router: Router) -> None:
     router.run("ifdown wan")
-    assert router.run("ifstatus wan | jsonfilter -e '@.up'") == "false"
+    assert json.loads(router.run("ifstatus wan"))["up"] is False
     result = _check(router)
     assert (result["result"], result["failed"]) == ("pass", [])
 

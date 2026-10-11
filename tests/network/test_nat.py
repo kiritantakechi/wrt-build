@@ -17,7 +17,7 @@ from wrt_tests import spec
 from wrt_tests.model.poll import until
 from wrt_tests.sandbox.net import DIRECT_TARGET, PROXIED_TARGET
 from wrt_tests.sandbox.netprobe import HTTP_PORT
-from wrt_tests.services.datapath import EINAT, hooks
+from wrt_tests.services.datapath import EINAT, QOSIFY, WAN, hooks, tc_programs
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -93,9 +93,9 @@ def _einat_rules(online: Online) -> bool:
 def _einat_attached(online: Online) -> None:
     try:
         until(
-            lambda: hooks(online.router, "pppoe-wan").get("tcx/ingress") == EINAT["tcx/ingress"],
+            lambda: hooks(online.router, "pppoe-wan") == WAN,
             timeout=RECOVERY,
-            what="einat on pppoe-wan",
+            what="einat on pppoe-wan, before qosify",
         )
     except TimeoutError as error:
         error.add_note(f"pppoe-wan holds {hooks(online.router, 'pppoe-wan')}")
@@ -204,9 +204,9 @@ def test_stopping_einat_falls_back_to_masquerade(online: Online, einat_restored:
     del einat_restored
     online.router.run("/etc/init.d/einat stop")
     # procd only signals einat: its programs go with it as it exits, which can
-    # be a moment after the init script returns.
+    # be a moment after the init script returns. qosify's stay.
     until(
-        lambda: "tcx/ingress" not in hooks(online.router, "pppoe-wan"),
+        lambda: hooks(online.router, "pppoe-wan") == QOSIFY,
         timeout=RECOVERY,
         what="einat's programs detached",
     )
@@ -280,6 +280,9 @@ def test_health_check(online: Online, einat_restored: Online) -> None:
     assert router.returncode(HEALTHCHECK) != 0
     router.run("/etc/init.d/einat start")
     until(lambda: router.returncode(HEALTHCHECK) == 0, timeout=RECOVERY, what="einat attached")
-    for link in re.findall(r"link_id (\d+)", router.run("bpftool net show dev pppoe-wan")):
-        router.run(f"bpftool link detach id {link}")
+    # einat's links alone: qosify's are on the same hooks.
+    einat = {name for names in EINAT.values() for name in names}
+    for program in tc_programs(router, "pppoe-wan"):
+        if program["name"] in einat:
+            router.run(f"bpftool link detach id {program['link_id']}")
     assert router.returncode(HEALTHCHECK) != 0

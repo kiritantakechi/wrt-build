@@ -1,7 +1,7 @@
 """network/tc-hook-order: who attaches where on the ports, and who owns which mark bits.
 
 The emulator tests run with dae on, so all three components hold their hooks:
-einat on tcx and qosify's legacy filters on pppoe-wan, dae alone on br-lan.
+einat and then qosify on tcx on pppoe-wan, dae alone on br-lan.
 """
 
 import json
@@ -9,13 +9,18 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 from wrt_tests import spec
 from wrt_tests.model.poll import until
 from wrt_tests.sandbox.net import DIRECT_TARGET
 from wrt_tests.sandbox.netprobe import BIG
-from wrt_tests.services.datapath import DAE, EINAT, QOSIFY, hooks
+from wrt_tests.services import qos
+from wrt_tests.services.datapath import DAE, EINAT, QOSIFY_CLSACT, WAN, hooks, tc_programs
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from wrt_tests.device.router import Router
     from wrt_tests.services.datapath import Online
 
@@ -23,21 +28,30 @@ CAPABILITY = "network/tc-hook-order"
 MARKS_CHECK = Path(__file__).resolve().parents[2] / "scripts" / "marks-check.sh"
 # The bit dae keeps for its own sockets (config/marks.tsv).
 DAE_BIT = "0x00000100"
-# qosify's classifier on both directions, and its four u32 filters that send DNS
-# replies (source port 53, TCP and UDP, IPv4 and IPv6) to ifb-dns.
-DNS_REDIRECTS = 4
-WAN = {**EINAT, **QOSIFY}
+# pppoe-wan when qosify falls back to clsact: einat on tcx, qosify's filters after.
+FALLBACK = {**EINAT, **QOSIFY_CLSACT}
 SETTLE = 60
 
 
-def _ports(router: Router) -> tuple[dict[str, list[str]], int, dict[str, list[str]]]:
-    """Return what sits on the ports: pppoe-wan's programs and DNS redirects, br-lan's programs."""
-    redirects = router.run("tc filter show dev pppoe-wan ingress").count("ifb-dns")
-    return hooks(router, "pppoe-wan"), redirects, hooks(router, "br-lan")
+def _filters(router: Router) -> str:
+    """Return the legacy tc filters on pppoe-wan, of both directions."""
+    shown = "tc filter show dev pppoe-wan ingress; tc filter show dev pppoe-wan egress"
+    return router.run(shown).strip()
 
 
 def _in_order(router: Router) -> bool:
-    return _ports(router) == (WAN, DNS_REDIRECTS, DAE)
+    return (hooks(router, "pppoe-wan"), _filters(router), hooks(router, "br-lan")) == (
+        WAN,
+        "",
+        DAE,
+    )
+
+
+def _set_tcx(router: Router, value: str) -> None:
+    """Set (or, given "", delete) qosify's defaults option tcx, and reload qosify."""
+    option = "qosify.@defaults[0].tcx"
+    change = f"uci set {option}={value}" if value else f"uci -q delete {option}"
+    router.run(f"{change} ; uci commit qosify && /etc/init.d/qosify reload")
 
 
 def _qosify_runs(router: Router, direction: str) -> int:
@@ -46,16 +60,34 @@ def _qosify_runs(router: Router, direction: str) -> int:
     qosify's own counters (ubus get_stats) add up both directions, so this reads
     the run count of the program instance on the hook (kernel.bpf_stats_enabled).
     """
-    shown = router.run("bpftool net show dev pppoe-wan").splitlines()
-    (program,) = [line.split()[-1] for line in shown if f"clsact/{direction}" in line]
+    (program,) = [
+        found["prog_id"]
+        for found in tc_programs(router, "pppoe-wan")
+        if (found["kind"], found["name"]) == (f"tcx/{direction}", "qosify_classify")
+    ]
     return int(json.loads(router.run(f"bpftool -j prog show id {program}")).get("run_cnt", 0))
+
+
+@pytest.fixture
+def without_tcx(dae: Online, internet_zone: Online) -> Iterator[Online]:
+    """Have qosify attach with clsact, as on a kernel without tcx, for the test."""
+    del internet_zone  # the names a dns: rule sends to a class resolve to the LAN
+    router = dae.router
+    _set_tcx(router, "0")
+    try:
+        until(
+            lambda: hooks(router, "pppoe-wan") == FALLBACK, timeout=SETTLE, what="qosify on clsact"
+        )
+        yield dae
+    finally:
+        _set_tcx(router, "")
+        until(lambda: _in_order(router), timeout=SETTLE, what="qosify on tcx again")
 
 
 @spec(CAPABILITY, "Programs and order on the WAN port", "Check the WAN port")
 def test_wan_port_runs_einat_then_qosify(dae: Online) -> None:
-    programs, redirects, _ = _ports(dae.router)
-    assert programs == WAN
-    assert redirects == DNS_REDIRECTS
+    assert hooks(dae.router, "pppoe-wan") == WAN
+    assert _filters(dae.router) == ""
 
 
 @spec(CAPABILITY, "Only dae on the LAN port", "Check the LAN port")
@@ -109,3 +141,13 @@ def test_overlapping_mark_is_reported(tmp_path: Path) -> None:
         [MARKS_CHECK, tmp_path / "feed"], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, result.stderr
+
+
+@spec(CAPABILITY, "Programs and order on the WAN port", "Kernel without tcx")
+def test_qosify_falls_back_to_clsact(without_tcx: Online) -> None:
+    router = without_tcx.router
+    assert hooks(router, "pppoe-wan") == FALLBACK
+    with qos.rules(router, f"dns:{qos.VOICE_NAMES}\tvoice"):
+        before = qos.voice_packets(router)
+        qos.send_by_name(without_tcx, 20)
+        assert qos.voice_packets(router) >= before + 20

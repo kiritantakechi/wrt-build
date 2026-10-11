@@ -31,7 +31,12 @@ ONLINE_TIMEOUT = 180
 DAE_TIMEOUT = 120
 # The programs of each component, as bpftool names them.
 EINAT = {"tcx/ingress": ["ingress_rev_snat"], "tcx/egress": ["egress_snat"]}
-QOSIFY = {"clsact/ingress": ["qosify_ingress_ip"], "clsact/egress": ["qosify_egress_ip"]}
+QOSIFY = {"tcx/ingress": ["qosify_classify"], "tcx/egress": ["qosify_classify"]}
+# qosify without tcx (its option tcx set to 0): cls_bpf filters under clsact,
+# which bpftool shows by the filters' names.
+QOSIFY_CLSACT = {"clsact/ingress": ["qosify_ingress_ip"], "clsact/egress": ["qosify_egress_ip"]}
+# pppoe-wan's programs in run order: einat's first, then qosify's.
+WAN = {hook: [*EINAT[hook], *QOSIFY[hook]] for hook in EINAT}
 # dae on a bridge (br-lan, podman0) runs the L2 variants of its LAN programs.
 DAE = {"tcx/ingress": ["tproxy_lan_ingress_l2"], "tcx/egress": ["tproxy_lan_egress_l2"]}
 # The fw4 rules einat's instance brings (feed/net/einat/files/init): its nat rule
@@ -104,13 +109,22 @@ routing {{
 DAE_CONFIG = dae_config()
 
 
+def tc_programs(router: Router, device: str) -> list[dict[str, Any]]:
+    """Return bpftool's records of the BPF programs on ``device``'s tc hooks, in run order.
+
+    Each names its hook ("kind": "tcx/ingress", "clsact/egress", ...) and its
+    program ("name", a cls_bpf filter's own), with the program's id ("prog_id"
+    on tcx, "id" on clsact).
+    """
+    (shown,) = json.loads(router.run(f"bpftool -j net show dev {device}"))
+    return cast("list[dict[str, Any]]", shown["tc"])
+
+
 def hooks(router: Router, device: str) -> dict[str, list[str]]:
     """Return the BPF programs on ``device`` by hook ("tcx/ingress", ...), in run order."""
     found: dict[str, list[str]] = defaultdict(list)
-    for line in router.run(f"bpftool net show dev {device}").splitlines():
-        fields = line.split()
-        if len(fields) >= 3 and fields[0].startswith(f"{device}("):  # noqa: PLR2004
-            found[fields[1]].append(fields[2])
+    for program in tc_programs(router, device):
+        found[program["kind"]].append(program["name"])
     return dict(found)
 
 
@@ -248,7 +262,7 @@ class Online:
         start = time.monotonic()
         try:
             until(
-                lambda: hooks(self.router, "pppoe-wan") == {**EINAT, **QOSIFY},
+                lambda: hooks(self.router, "pppoe-wan") == WAN,
                 timeout=ONLINE_TIMEOUT,
                 what="einat and qosify on pppoe-wan",
             )

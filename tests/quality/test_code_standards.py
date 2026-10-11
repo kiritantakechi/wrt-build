@@ -76,6 +76,19 @@ def test_shellcheck_warning_fails(repo: Path) -> None:
     assert "SC2250" in result.stdout
 
 
+@spec(CAPABILITY, "Device code handles structured data in ucode", "jsonfilter in a device script")
+def test_jsonfilter_in_device_code_fails(repo: Path) -> None:
+    script = repo / "files" / "etc" / "uci-defaults" / "91-wrt-datapath"
+    with script.open("a") as appended:
+        appended.write("up=$(ifstatus wan | jsonfilter -e @.up)\n")
+    line = len(script.read_text().splitlines())
+    result = _run(repo, "check.sh", "forbidden-patterns")
+    assert result.returncode != 0
+    assert "FAIL  forbidden-patterns" in result.stdout
+    assert f"files/etc/uci-defaults/91-wrt-datapath:{line}:" in result.stdout
+    assert "no jsonfilter, jshn or /etc/opkg" in result.stderr
+
+
 @spec(CAPABILITY, "Common script skeleton", "New script added")
 def test_new_script_without_skeleton_fails(repo: Path) -> None:
     script = repo / "scripts" / "thing-probe.sh"

@@ -28,10 +28,18 @@ shell_files=$(printf '%s\n' "${files}" | xargs shfmt -f)
 nix_files=$(printf '%s\n' "${files}" | grep -E '\.nix$')
 
 # forbidden_patterns: build steps must not run or apply downloaded content, nor
-# edit upstream files in place (changes to upstream go through patches/).
+# edit upstream files in place (changes to upstream go through patches/). The
+# device code (the feed's packages, the image's files, config-push's device side)
+# handles structured data in ucode: no jsonfilter or jshn, and no /etc/opkg.
 forbidden_patterns() {
 	targets=$(printf '%s\n' "${files}" | grep -E '^(scripts/|\.github/|justfile$)' | grep -v '^scripts/check\.sh$')
+	device=$(printf '%s\n' "${files}" | grep -E '^(feed/[^/]+/[^/]+/(Makefile$|files/)|files/|scripts/config-push\.d/)')
 	status=0
+	# shellcheck disable=SC2086
+	if grep -nHE '\bjsonfilter\b|(^|[;&|[:space:]])(\.|source)[[:space:]]+[^[:space:]]*jshn\.sh|/etc/opkg\b' ${device}; then
+		echo 'device code handles structured data in ucode: no jsonfilter, jshn or /etc/opkg' >&2
+		status=1
+	fi
 	# shellcheck disable=SC2086 # targets is a newline-separated list of plain paths
 	if grep -nE '(curl|wget)[^|]*\|[[:space:]]*(sudo[[:space:]]+)?(sh|bash|zsh|patch|git[[:space:]]+(am|apply))\b' ${targets}; then
 		echo 'remote content piped into a shell or patch tool' >&2

@@ -10,6 +10,7 @@ upgrade to the other slot comes last.
 """
 
 import hashlib
+import json
 import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -180,7 +181,7 @@ def test_a_service_that_fails_is_put_back(pushed: Pushed) -> None:
         router.run("uci get network.lan.ipaddr"),
         router.run("cat /etc/wrt-config/network"),
     ) == before
-    assert router.run("ubus call network.interface.lan status | jsonfilter -e @.up") == "true"
+    assert json.loads(router.run("ubus call network.interface.lan status"))["up"] is True
 
 
 @spec(CAPABILITY, "dae user config cannot set bind interfaces", "User config sets lan_interface")
@@ -219,7 +220,8 @@ def test_no_password_login(pushed: Pushed, tmp_path: Path) -> None:
 
 
 def _tailscale_running(router: Router) -> bool:
-    state = router.run("tailscale status --json 2>/dev/null | jsonfilter -e @.BackendState || true")
+    status = router.run("tailscale status --json 2>/dev/null || true")
+    state: object = json.loads(status).get("BackendState") if status else None
     return state == "Running"
 
 

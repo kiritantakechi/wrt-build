@@ -43,11 +43,11 @@
 ## 4. qosify on tcx (design D4)
 
 - [ ] 4.1 Write the qosify patch:
-  - the classifiers attach with `bpf_program__attach_tcx` and `BPF_F_AFTER`, as links the daemon owns;
-  - DNS learning reads replies from a packet socket on each managed WAN device, filtered to source port 53, and no longer creates `ifb-dns` and its filters; it receives through `qosify_dns_socket_cb()`, with the IP header aligned (patch 0032);
-  - ingress shaping redirects with `bpf_redirect()` to the interface's ifb, whose index the daemon keeps in a map entry per interface;
+  - the classifiers attach as tcx links with `BPF_F_AFTER` (`bpf_link_create()`), which the daemon owns;
+  - DNS learning reads replies from a packet socket on each managed WAN device, filtered to UDP from source port 53, and no longer creates `ifb-dns` and its filters; it receives through `qosify_dns_socket_cb()`, with the IP header aligned at the start of the buffer (where patch 0032 received two bytes in);
+  - ingress shaping redirects with `bpf_redirect()` to the interface's ifb, whose index the daemon keeps in a map entry per interface; a packet without a link-layer header gets an Ethernet header first;
   - patch 0010's re-attach on a replaced device carries over to the links;
-  - a kernel that refuses a tcx link, or `qosify.global.tcx=off`, gets today's `cls_bpf` under `clsact`, after einat's.
+  - a kernel that refuses a tcx link, or the `defaults` option `tcx` set to 0, gets today's `cls_bpf` under `clsact`, after einat's.
 
   Carry the patch in the series under the next free number, with the trailer `Upstream-Status: Pending` and its write-up in `docs/patches.md`.
 
@@ -58,7 +58,7 @@
   - network/qos "Inspect queueing disciplines": no ifb device;
   - "Classify by DNS name" (new): a `dns:` rule to the voice class, a name resolved through the router from a LAN client, and a flow to the address it got;
   - "Enable ingress shaping" (new): cake on the interface's ifb counts a download while it is enabled, and the ifb is gone after the restore.
-  - network/tc-hook-order "Kernel without tcx" (new): with `qosify.global.tcx=off`, einat's tcx programs run first and qosify's classifiers on `clsact` after them, and a `dns:` rule still classifies.
+  - network/tc-hook-order "Kernel without tcx" (new): with qosify's `tcx` option set to 0, einat's tcx programs run first and qosify's classifiers on `clsact` after them, and a `dns:` rule still classifies.
 
   Verify: the network suites pass on both boards. The board-model redial stress, with every CPU of the VM kept busy, keeps einat and qosify on pppoe-wan for eight rounds.
 
@@ -70,7 +70,7 @@
 
 ## 6. Integration
 
-- [ ] 6.0 Remove what the change replaced: `git grep` finds no `jsonfilter`, `jshn`, `ifb-dns`, `uclient-fetch` or `/etc/opkg` in this project's device code, scripts, tests or docs, except `fwtool`'s fallback in the base-files patch and the docs that explain it.
+- [ ] 6.0 Remove what the change replaced: `git grep` finds no `jsonfilter`, `jshn`, `ifb-dns`, `uclient-fetch` or `/etc/opkg` in this project's device code, scripts, tests or docs, except `fwtool`'s fallback in the base-files patch and the docs that explain it. The tests read the router's JSON in Python; they keep `uclient-fetch`, an upstream default package that stays in the image, as the router's own HTTP client.
 
   Verify: the code-standards check of task 5.1 passes, and the grep finds only those.
 
