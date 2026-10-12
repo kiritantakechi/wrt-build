@@ -2,7 +2,7 @@
 
 ## 1. The toolchain and the target follow the toolchain's inputs (design D1, D2, D3)
 
-- [ ] 1.1 Write the openwrt patch (D1, D2):
+- [x] 1.1 Write the openwrt patch (D1, D2):
   - `.ver_check` as the content hash of `toolchain/` and the target kernel version's generic files, for every build;
   - those generic directories among the inputs of the toolchain's compile stamp;
   - `$(BUILD_DIR)/.toolchain` with its rule before `$(BUILD_DIR)/.prepared`;

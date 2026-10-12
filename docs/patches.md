@@ -564,3 +564,5 @@ What the patch does:
 The first make after the patch rebuilds the toolchain and each target once, as none has the new records yet.
 
 Verification log: `tests/build/test_boards.py` runs the patched check on a stand-in tree: "Keep each board's build with its toolchain" for the target records, "Keep the toolchain in buildbot mode" and "Check the version from parallel makes" for the toolchain's.
+
+2026-10-12, on the VM with the dev profile: the first `just build r4s dev` after the patch found a toolchain whose record named a git commit, built it anew as a whole, Rust's host toolchain with it, and built the R4S anew. A second `just build r4s dev` compiled nothing: its time report held only the kernel's two forced passes (41 s), and ccache saw no cacheable call. `just build r6s dev` then kept the toolchain and built the R6S anew, as its build directory had no record yet.
