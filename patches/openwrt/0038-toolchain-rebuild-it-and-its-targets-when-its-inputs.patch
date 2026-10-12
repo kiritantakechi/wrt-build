@@ -1,0 +1,151 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 12 Oct 2026 21:14:10 +0800
+Subject: [PATCH] toolchain: rebuild it and its targets when its inputs change
+
+The toolchain components name their prepared stamps without their
+content, and are built again only once their build directory is gone.
+Only buildbot mode cleans up: it removes the toolchain when the last git
+commit of toolchain/ changes, and check-toolchain-clean.sh runs
+targetclean when the GCC version or toolchain/build_version does. A
+changed toolchain patch outside buildbot mode, an uncommitted one, or
+one in a tree without .git leaves the old toolchain in place, and no
+mode covers the generic kernel patches the kernel headers come from.
+The cleanup also reaches only the configuration at hand: other target
+directories built with the same toolchain keep objects of the old one.
+
+Record content instead, in every mode. .ver_check holds the hash of
+toolchain/ and of the generic kernel files of the configured kernel
+version, and a toolchain of other content is removed, to be built anew
+as a whole. Each target build directory records the toolchain it was
+built with, by name and content, and is removed with its staging
+directory when that is not the toolchain at hand, so a change of the
+GCC version or the C library, which builds a toolchain in another
+directory, cleans it too. Both checks run where the buildbot check ran:
+in every make that reads the top-level Makefile, before it builds
+anything.
+
+toolchain/build_version is a file of toolchain/, so bumping it still
+rebuilds; check-toolchain-clean.sh and toolchain_rebuild_check go.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ .gitignore                       |  1 -
+ Makefile                         |  5 +----
+ scripts/check-toolchain-clean.sh | 14 --------------
+ toolchain/Makefile               | 31 ++++++++++++++++++++++++-------
+ 4 files changed, 25 insertions(+), 26 deletions(-)
+ delete mode 100755 scripts/check-toolchain-clean.sh
+
+diff --git a/.gitignore b/.gitignore
+index ad04755..5ef8901 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -5,7 +5,6 @@
+ /dl
+ /.config
+ /.config.old
+-/.toolchain_build_ver
+ /bin
+ /build_dir
+ /staging_dir
+diff --git a/Makefile b/Makefile
+index aec1274..6bb61a1 100644
+--- a/Makefile
++++ b/Makefile
+@@ -43,7 +43,7 @@ else
+ # Include the test suite Makefile if it exists
+ -include tests/Makefile
+ 
+-$(toolchain/stamp-compile): $(tools/stamp-compile) $(if $(CONFIG_BUILDBOT),toolchain_rebuild_check)
++$(toolchain/stamp-compile): $(tools/stamp-compile)
+ $(target/stamp-compile): $(toolchain/stamp-compile) $(tools/stamp-compile) $(BUILD_DIR)/.prepared
+ $(package/stamp-compile): $(target/stamp-compile) $(package/stamp-cleanup)
+ $(package/stamp-install): $(package/stamp-compile)
+@@ -69,9 +69,6 @@ dirclean: targetclean clean
+ 	rm -rf $(TMP_DIR)
+ 	$(MAKE) -C $(TOPDIR)/scripts/config clean
+ 
+-toolchain_rebuild_check:
+-	$(SCRIPT_DIR)/check-toolchain-clean.sh
+-
+ cacheclean:
+ ifneq ($(CONFIG_CCACHE),)
+ 	$(STAGING_DIR_HOST)/bin/ccache -C
+diff --git a/scripts/check-toolchain-clean.sh b/scripts/check-toolchain-clean.sh
+deleted file mode 100755
+index 455cfb0..0000000
+--- a/scripts/check-toolchain-clean.sh
++++ /dev/null
+@@ -1,14 +0,0 @@
+-#!/bin/sh
+-eval "$(grep CONFIG_GCC_VERSION .config)"
+-CONFIG_TOOLCHAIN_BUILD_VER="$CONFIG_GCC_VERSION-$(cat toolchain/build_version)"
+-touch .toolchain_build_ver
+-CURRENT_TOOLCHAIN_BUILD_VER="$(cat .toolchain_build_ver)"
+-[ -z "$CURRENT_TOOLCHAIN_BUILD_VER" ] && {
+-	echo "$CONFIG_TOOLCHAIN_BUILD_VER" > .toolchain_build_ver
+-	exit 0
+-}
+-[ "$CONFIG_TOOLCHAIN_BUILD_VER" = "$CURRENT_TOOLCHAIN_BUILD_VER" ] && exit 0
+-echo "Toolchain build version changed ($CONFIG_TOOLCHAIN_BUILD_VER != $CURRENT_TOOLCHAIN_BUILD_VER), running make targetclean"
+-make targetclean
+-echo "$CONFIG_TOOLCHAIN_BUILD_VER" > .toolchain_build_ver
+-exit 0
+diff --git a/toolchain/Makefile b/toolchain/Makefile
+index e9cc95f..17526bf 100644
+--- a/toolchain/Makefile
++++ b/toolchain/Makefile
+@@ -26,6 +26,16 @@
+ 
+ curdir:=toolchain
+ 
++# What the toolchain is built from: its own files and, for its kernel headers,
++# the generic kernel files of the kernel version the configuration selects
++# (LINUX_<version>), as include/target.mk picks them.
++toolchain_kernel_dir:=$(TOPDIR)/target/linux/generic
++toolchain_kernel:=$(strip $(foreach ver,$(patsubst $(toolchain_kernel_dir)/kernel-%,%,$(wildcard $(toolchain_kernel_dir)/kernel-*)),$(if $(CONFIG_LINUX_$(subst .,_,$(ver))),$(ver))))
++toolchain_inputs:=$(TOPDIR)/toolchain $(if $(CONFIG_EXTERNAL_TOOLCHAIN),, \
++	$(toolchain_kernel_dir)/kernel-$(toolchain_kernel) \
++	$(foreach dir,backport pending hack,$(firstword $(wildcard $(toolchain_kernel_dir)/$(dir)-$(toolchain_kernel)) $(toolchain_kernel_dir)/$(dir))) \
++	$(toolchain_kernel_dir)/files $(toolchain_kernel_dir)/files-$(toolchain_kernel))
++
+ # subdirectories to descend into
+ $(curdir)/builddirs := $(if $(CONFIG_GDB),gdb) $(if $(CONFIG_EXTERNAL_TOOLCHAIN),wrapper,kernel-headers binutils gcc/initial gcc/final $(LIBC) fortify-headers) $(if $(CONFIG_NASM),nasm) $(if $(CONFIG_USE_MOLD),mold)
+ 
+@@ -59,20 +69,27 @@ ifneq ($(ARCH),)
+ 	); done
+ 	@grep GCC_VERSION $@ >/dev/null 2>&1 || $(INSTALL_DATA) $(TOPDIR)/toolchain/info.mk $@
+ 	@touch $@
+-endif
+-endif
+ 
+-ifdef CONFIG_BUILDBOT
+-ifneq ($(wildcard $(TOPDIR)/.git),)
++  # The toolchain records the content it is built from, and each target build
++  # directory the toolchain it was built with. A toolchain of other content is
++  # removed, to be built anew as a whole, and so is a target of another
++  # toolchain, with its staging directory. Every make that reads this Makefile
++  # checks both through the info.mk it includes, before it builds anything.
+   $(TOOLCHAIN_DIR)/stamp/.ver_check: $(TMP_DIR)/.build
+-	ver=$$(git -C "$(TOPDIR)" log --no-show-signature --format=%h -1 toolchain) || exit; \
++	ver=$$($(call find_md5_reproducible,$(toolchain_inputs))) || exit; \
+ 	[ "$$ver" = "$$(cat $@ 2>/dev/null)" ] || { \
+-		rm -rf $(BUILD_DIR) $(STAGING_DIR) $(TOOLCHAIN_DIR) $(BUILD_DIR_TOOLCHAIN); \
++		rm -rf $(TOOLCHAIN_DIR) $(BUILD_DIR_TOOLCHAIN); \
+ 		mkdir -p $(TOOLCHAIN_DIR)/stamp; \
+ 		echo "$$ver" > $@; \
++	}; \
++	toolchain="$(TOOLCHAIN_DIR_NAME) $$ver"; \
++	[ "$$toolchain" = "$$(cat $(BUILD_DIR)/.toolchain 2>/dev/null)" ] || { \
++		rm -rf $(BUILD_DIR) $(STAGING_DIR); \
++		mkdir -p $(BUILD_DIR); \
++		echo "$$toolchain" > $(BUILD_DIR)/.toolchain; \
+ 	}
+ 
+-$(TOOLCHAIN_DIR)/info.mk $(STAGING_DIR)/.prepared: $(TOOLCHAIN_DIR)/stamp/.ver_check
++  $(TOOLCHAIN_DIR)/info.mk $(STAGING_DIR)/.prepared: $(TOOLCHAIN_DIR)/stamp/.ver_check
+ endif
+ endif
+ 

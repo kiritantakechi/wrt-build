@@ -123,6 +123,16 @@ toolchain-key profile="dev":
 compiler-cache-key stage:
     scripts/compiler-cache-key.sh {{ stage }}
 
+# Say whether a cache of the paths fits next to the repository's caches (CI only)
+[group('ci')]
+cache-room +paths:
+    scripts/cache-room.sh {{ paths }}
+
+# Delete the caches a run superseded, and on the default branch merged branches' (CI only)
+[group('ci')]
+cache-prune toolchain:
+    scripts/cache-prune.sh {{ toolchain }}
+
 # Build the host tools and the board-neutral cross toolchain
 [group('ci')]
 toolchain-build profile="dev":

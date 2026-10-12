@@ -20,11 +20,9 @@
 # make world skips toolchain/compile only while the toolchain's compile stamp is up
 # to date, and toolchain/install does not write it. The packed archive has no
 # build_dir/toolchain-*, so without the stamp world would rebuild the whole cross
-# toolchain on top of the cached one; the stamp is built here as well. So is its
-# version stamp: in buildbot mode (the ci profile) every make in the tree deletes
-# the toolchain, with the board's build and staging directories, unless the
-# stamp names the last commit of toolchain/ (toolchain/Makefile), and a toolchain
-# built without buildbot mode has none.
+# toolchain on top of the cached one; the stamp is built here as well. The record
+# of what the toolchain is built from, which every make in the tree checks, make
+# writes itself (toolchain/Makefile: .ver_check, build-integrity D1).
 set -eu
 # shellcheck source=scripts/lib/core.sh
 . "$(dirname -- "$0")/lib/core.sh"
@@ -79,11 +77,8 @@ status=0
 BUILD_TIME_LOG="${log}" make -C "${tree}" -j"${jobs}" tools/install toolchain/install || status=$?
 if [ "${status}" -eq 0 ]; then
 	[ -d "${toolchain_dir}" ] || die "no toolchain directory at '${toolchain_dir}'"
-	# toolchain/Makefile: $(call stampfile,toolchain,compile) in $(TOOLCHAIN_DIR),
-	# and the version stamp as its buildbot mode writes it.
+	# toolchain/Makefile: $(call stampfile,toolchain,compile) in $(TOOLCHAIN_DIR).
 	make -C "${tree}" "${toolchain_dir}/stamp/.toolchain_compile"
-	version=$(git -C "${tree}" log --no-show-signature --format=%h -1 toolchain)
-	printf '%s\n' "${version}" | update_file "${toolchain_dir}/stamp/.ver_check"
 	libc=$(toolchain_libc "${toolchain_dir}")
 	[ -n "${libc}" ] || die "the toolchain in ${toolchain_dir} has no C library"
 	# Rust's library is the recorded one here, or none: the checks above removed

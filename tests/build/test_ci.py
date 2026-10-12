@@ -1,4 +1,7 @@
-"""build/ci: a build hands on its image and kmods with a manifest that describes them."""
+"""build/ci: a build hands on its image and kmods with a manifest that describes them.
+
+And main's runs delete the caches of the branches merged into main.
+"""
 
 import re
 import subprocess
@@ -8,6 +11,7 @@ from typing import TYPE_CHECKING
 from wrt_tests import spec
 from wrt_tests.device.emu import sha256
 from wrt_tests.model.boards import load
+from wrt_tests.model.github import MAIN, Repository, run_script
 
 if TYPE_CHECKING:
     from wrt_tests.device.router import Router
@@ -45,3 +49,28 @@ def test_the_manifest_describes_the_build(
     kernels = set(re.findall(r"kernel=([^\s\"']+)", index))
     assert kernels
     assert all(vermagic in kernel for kernel in kernels), kernels
+
+
+@spec(CAPABILITY, "Main's caches kept whole", "A merged branch")
+def test_main_deletes_merged_branches_caches(tmp_path: Path) -> None:
+    compare = {
+        "merged": "behind",
+        "identical": "identical",
+        "ahead": "ahead",
+        "diverged": "diverged",
+    }
+    repository = Repository(branches=["main", *compare], compare=compare)
+    for branch in (*compare, "deleted"):
+        repository.cache(f"refs/heads/{branch}", f"dl-{branch}")
+    repository.cache("refs/pull/1/merge", "dl-pull")
+    repository.cache(MAIN, "toolchain-1")
+    # The caches job of main's run (scripts/cache-prune.sh).
+    result, left = run_script(tmp_path, repository, "cache-prune.sh", "toolchain-1", ref=MAIN)
+    assert result.returncode == 0, result.stderr
+    # A branch merged into main, or one deleted, keeps no cache; the others stay.
+    assert sorted(ref for ref, _ in left) == [
+        "refs/heads/ahead",
+        "refs/heads/diverged",
+        MAIN,
+        "refs/pull/1/merge",
+    ]

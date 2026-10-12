@@ -43,7 +43,9 @@ See proposal.md for why. The current state:
 
 - `toolchain/Makefile`'s `.ver_check` stays the toolchain's record, at the same path and for every build. Its content is the content hash (`find_md5_reproducible`) of the `toolchain/` directory and of the generic kernel files of the target's kernel version: its version file, the backport, pending and hack patch directories, and the generic files directories.
 - When the hash differs from the record, or there is none, the rule removes `TOOLCHAIN_DIR` and `BUILD_DIR_TOOLCHAIN` and writes the new hash. The prerequisites of the toolchain's prepared state, `info.mk` and `STAGING_DIR/.prepared`, depend on it, as they do in buildbot mode today.
-- `toolchain/compile` is entered when a file of those generic kernel directories changes, as it is for `toolchain/` today: they join the inputs of the toolchain's compile stamp.
+- The rule runs where buildbot mode's ran: every make that reads the top-level Makefile remakes the `info.mk` that `rules.mk` includes, and so checks the record, before it builds anything. The first make of a build, before world starts any other, therefore decides; the others find the record current (patch 0009 keeps their concurrent checks apart).
+- Removing the toolchain removes its compile stamp, which lives in `TOOLCHAIN_DIR/stamp`, so `make world` enters `toolchain/compile` without any other input to that stamp.
+- The kernel version is the one the configuration selects (`CONFIG_LINUX_<version>`): the top-level Makefile does not read the target's Makefile, where `KERNEL_PATCHVER` is set. The generic kernel files count only when the toolchain builds its kernel headers, not for an external toolchain.
 - The hash covers content, not modification times or commits. A checkout of the same sources, an uncommitted edit, and a tree without `.git` all behave the same.
 - `toolchain/build_version` is a file of `toolchain/`, so bumping it still rebuilds. `check-toolchain-clean.sh` and the top-level `toolchain_rebuild_check` go, with their record of the GCC version, which D2 covers.
 
@@ -54,7 +56,8 @@ Alternatives considered:
 ### D2. A target build directory records the toolchain it was built with
 
 - `$(BUILD_DIR)/.toolchain` names the toolchain directory and the content of its `.ver_check`.
-- A rule that runs after the toolchain is up to date compares it with the toolchain at hand. When they differ, it removes `BUILD_DIR` and `STAGING_DIR` of the configuration at hand, and records the new one. `$(BUILD_DIR)/.prepared` depends on it, so every target stamp comes after.
+- D1's rule compares it with the toolchain at hand, right after it has brought the toolchain's own record up to date. When they differ, it removes `BUILD_DIR` and `STAGING_DIR` of the configuration at hand, and records the new one.
+- So the target is cleaned in the first make of a build, before anything is built or any other make has started. A rule of its own, behind `$(BUILD_DIR)/.prepared`, would run in the top-level make alongside the sub-makes of tools and the toolchain, which prepare `STAGING_DIR`: removing it under them could fail the build.
 - The record names the toolchain directory, whose name holds the GCC version, the C library and the architecture. So a change of any of them, which builds a toolchain in another directory, also cleans the target.
 - Each board's directories carry their own record. A toolchain rebuilt for one board's build, or by `just toolchain-build`, cleans each board when that board builds next, and only then.
 
@@ -89,7 +92,9 @@ The `caches` job, on the default branch only, deletes the caches of every `refs/
 - no longer exists, or
 - GitHub's compare API reports as `behind` or `identical` to the default branch, that is merged.
 
-The pruning of superseded caches moves from inline `awk` into a script, `scripts/cache-prune.sh`, next to the merged-branch cleanup, so that both are tested with a stand-in `gh`. The job checks out the repository for it. It still runs no build code, and has `actions: write` alone.
+The pruning of superseded caches moves from inline `awk` into a script, `scripts/cache-prune.sh`, next to the merged-branch cleanup, so that both are tested with a stand-in `gh`. The job checks out the repository for it, with `contents: read`. It still runs no build code, and has `actions: write` besides.
+
+Caches go by id, and a branch's all at once by its ref, never by key alone: `gh cache delete <key>` deletes every cache of that key, and a branch's download cache or toolchain can share its key with one of main's.
 
 ### D7. Tests and verification
 
@@ -101,10 +106,10 @@ The pruning of superseded caches moves from inline `awk` into a script, `scripts
   - This change's branch runs with main's caches present. Main's caches are all still there after the runs, as `gh cache list` shows, and the branch saved only what fit.
   - Main's run after the merge deletes the branch's caches.
   - The runs and listings go to `docs/ci.md` and `tests/verified-elsewhere.toml`.
-- **Unit tests** of both scripts with a stand-in `gh`, in the tests' unit suite:
-  - the room check on the default branch and on another ref, with and without room;
-  - the pruning of superseded caches;
-  - the merged, deleted and unmerged branches.
+- **The patched check** on a stand-in tree (`tests/build/test_boards.py`): parallel makes keep a toolchain whose record names its inputs, and each board's build directories follow the toolchain they record.
+- **Both scripts against a stand-in `gh`** that answers for a repository described as data (`wrt_tests.model.github`):
+  - in the unit suite, the room check on the default branch and on another ref, with and without room, the pruning of superseded caches, and a branch's run leaving other branches' caches;
+  - the build/ci scenario "A merged branch" (`tests/build/test_ci.py`): main's run deletes merged and deleted branches' caches, and keeps unmerged ones.
 
 ## Risks / Trade-offs
 

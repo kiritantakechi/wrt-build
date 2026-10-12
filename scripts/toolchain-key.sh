@@ -19,7 +19,10 @@ ensure_fhs build "$@"
 [ -n "${WRT_BUILD_INPUTS:-}" ] || die "WRT_BUILD_INPUTS is not set; the build environment is too old"
 
 arch=$(uname -m)
-trees=$(git -C "${tree}" rev-parse HEAD:tools HEAD:toolchain)
+# The generic kernel files go with toolchain/: the toolchain's kernel headers come
+# from them. Every kernel version's count, a superset of what the toolchain's own
+# record covers, so that the key moves whenever that record would (build-integrity D4).
+trees=$(git -C "${tree}" rev-parse HEAD:tools HEAD:toolchain HEAD:target/linux/generic)
 langs=$(git -C "${tree}/feeds/packages" rev-parse HEAD:lang/golang HEAD:lang/rust)
 # The build files that name the stamps of the Go and Rust host builds, which the
 # archive carries (build_dir/hostpkg): a prepared stamp hashes the package's

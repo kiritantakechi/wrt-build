@@ -6,7 +6,8 @@
 #                   inputs that affect them; the list of boards
 #   firmware:       per board, the target code only (ci profile: all kmods), unsigned
 #   caches:         of this ref's caches, only the current and newest stay: the
-#                   toolchain, and one download cache and compiler cache per stage
+#                   toolchain, and one download cache and compiler cache per stage;
+#                   on main, the caches of merged or deleted branches go
 #   system-test:    per board, the system tests against the shipped image, JUnit
 #                   reports, in parallel emulators (the drill among them, with
 #                   test keys)
@@ -51,6 +52,10 @@ jobs:
   host-toolchain:
     runs-on: ubuntu-24.04
     timeout-minutes: 330
+    permissions:
+      contents: read
+      # cache-room reads the repository's cache usage.
+      actions: read
     outputs:
       key: ${{ steps.key.outputs.key }}
       boards: ${{ steps.boards.outputs.boards }}
@@ -124,8 +129,18 @@ jobs:
           key: ${{ steps.key.outputs.key }}
           path: ${{ env.WRT_WORKDIR }}/toolchain-cache.tar.zst
 
-      - name: Save compiler cache
+      # Off the default branch, only within the quota's room, so that main's
+      # caches stay (build-integrity D5); the toolchain above is saved regardless.
+      - name: Room for the compiler cache
+        id: compiler-cache-room
         if: always() && steps.cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: nix develop .#build -c just cache-room "$WRT_WORKDIR/compiler-cache" >> "$GITHUB_OUTPUT"
+
+      - name: Save compiler cache
+        if: always() && steps.compiler-cache-room.outputs.save == 'true'
         uses: actions/cache/save@v6
         with:
           key: ${{ steps.compiler-cache.outputs.key }}
@@ -136,6 +151,10 @@ jobs:
     name: firmware (${{ matrix.board }})
     runs-on: ubuntu-24.04
     timeout-minutes: 330
+    permissions:
+      contents: read
+      # cache-room reads the repository's cache usage.
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -194,15 +213,33 @@ jobs:
           WRT_COMPILER_CACHE_TRIM: 1
         run: nix develop .#build -c scripts/build.sh "$BOARD" ci
 
-      - name: Save download cache
+      # Off the default branch, each only within the quota's room, so that
+      # main's caches stay (build-integrity D5).
+      - name: Room for the download cache
+        id: dl-room
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: nix develop .#build -c just cache-room "$WRT_WORKDIR/dl" >> "$GITHUB_OUTPUT"
+
+      - name: Save download cache
+        if: always() && steps.dl-room.outputs.save == 'true'
         uses: actions/cache/save@v6
         with:
           key: dl-${{ hashFiles('upstream.lock', 'feed/**/Makefile') }}
           path: ${{ env.WRT_WORKDIR }}/dl
 
-      - name: Save compiler cache
+      - name: Room for the compiler cache
+        id: compiler-cache-room
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: nix develop .#build -c just cache-room "$WRT_WORKDIR/compiler-cache" >> "$GITHUB_OUTPUT"
+
+      - name: Save compiler cache
+        if: always() && steps.compiler-cache-room.outputs.save == 'true'
         uses: actions/cache/save@v6
         with:
           key: ${{ steps.compiler-cache.outputs.key }}
@@ -225,36 +262,29 @@ jobs:
 
   # Every run saves a compiler cache per board, holding what its build used, and,
   # whenever their inputs change, a download cache, a toolchain and the host
-  # stage's compiler cache. Past the 10 GB quota GitHub evicts the least recently
-  # used caches, so the firmware jobs restore the toolchain last. The run then
-  # keeps, of its own ref's caches, the current toolchain, the newest download
-  # cache, and the newest compiler cache of each stage: the host's and each
-  # board's. The ccache-<board> family, which compiler caches replaced, goes.
+  # stage's compiler cache; off the default branch, a compiler or download cache
+  # only within the quota's room. Past the 10 GB quota GitHub evicts the least
+  # recently used caches, so the firmware jobs restore the toolchain last. The
+  # run then keeps, of its own ref's caches, the current toolchain, the newest
+  # download cache, and the newest compiler cache of each stage: the host's and
+  # each board's. On main, the caches of merged or deleted branches go too
+  # (scripts/cache-prune.sh). The job runs no build code.
   caches:
     needs: [host-toolchain, firmware]
     if: always() && github.event_name != 'pull_request' && needs.host-toolchain.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
+      contents: read
       actions: write
     steps:
-      - name: Prune superseded caches
+      - uses: actions/checkout@v7
+
+      - name: Prune caches
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TOOLCHAIN: ${{ needs.host-toolchain.outputs.key }}
-        run: |
-          gh cache list --ref "$GITHUB_REF" --limit 100 --sort created_at --order desc \
-            --json key --jq '.[].key' >caches
-          awk -v toolchain="$TOOLCHAIN" '
-            /^toolchain-/ { if ($0 != toolchain) print; next }
-            /^dl-/ { if (kept["dl"]++) print; next }
-            /^compiler-cache-/ { split($0, part, "-"); if (kept[part[3]]++) print; next }
-            /^ccache-/ { print; next }
-          ' caches >superseded
-          # A cache GitHub evicted meanwhile is gone either way.
-          while read -r key; do
-            gh cache delete "$key" || echo "::warning::cache $key was not deleted"
-          done <superseded
+        run: scripts/cache-prune.sh "$TOOLCHAIN"
 
   system-test:
     needs: [host-toolchain, firmware]

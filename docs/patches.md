@@ -143,6 +143,8 @@ What the patch does: the version is kept in a shell variable instead of `tmp/.ve
 
 Verification log: 2026-10-01, eight makes started a millisecond apart delete the toolchain in 38 of 40 rounds with the upstream check and in none with the patch; `tests/build/test_boards.py` ("Check the version from parallel makes") runs the patched check this way.
 
+Patch 0038 keeps this form of the check, and makes it record the toolchain's content in every mode.
+
 ### qosify: an interface on a replaced device
 
 Patch: `patches/openwrt/0010-qosify-start-an-interface-anew-on-a-replaced-device.patch` (adds the package patch `100-interface-start-an-interface-anew-on-a-replaced-device.patch`), for git.openwrt.org/project/qosify.
@@ -544,3 +546,21 @@ Why it matters here: the `ubsan` profile's third run trapped here translating a 
 What the patch does: the value is shifted as `uint32_t`. That keeps every hash as GCC computed it, so the catalogs that `po2lmo` made still match.
 
 Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
+### toolchain: rebuilt with its targets when its inputs change
+
+Patch: `patches/openwrt/0038-toolchain-rebuild-it-and-its-targets-when-its-inputs.patch`, for openwrt/openwrt, on top of patch 0009.
+
+Problem: the toolchain components name their prepared stamps without their content, so a component is built again only once its build directory is gone. Only buildbot mode cleans up: it removes the toolchain when the last git commit of `toolchain/` changes, and `check-toolchain-clean.sh` runs `make targetclean` when the GCC version or `toolchain/build_version` does. Outside buildbot mode, a changed toolchain patch leaves the old toolchain in place, and so does an uncommitted one, or one in a tree without `.git`. No mode covers the generic kernel patches, from which the toolchain's kernel headers come. The cleanup also reaches only the configuration at hand: other target directories built with the same toolchain keep objects of the old one.
+
+Why it matters here: patch 0020 added a GCC patch, and `just toolchain-build dev` in an existing tree did not rebuild GCC. Every board builds in directories of its own on the one board-neutral toolchain (board-model D2), so cleaning the configuration at hand would leave the other board's packages compiled by the old toolchain (`build-integrity` D1, D2).
+
+What the patch does:
+- `.ver_check` holds the content hash (`find_md5_reproducible`) of `toolchain/` and of the generic kernel files of the configured kernel version: its version file, the backport, pending and hack directories, and the files directories, as `include/target.mk` picks them. A toolchain of other content is removed with its build directory, to be built anew as a whole: its three GCC passes share one source tree, so rebuilding a component alone would leave the toolchain partly old.
+- Each target build directory records the toolchain it was built with, by directory name and content (`$(BUILD_DIR)/.toolchain`). When that is not the toolchain at hand, the build and staging directories are removed, so a change of the GCC version or the C library, which builds a toolchain in another directory, cleans the target too.
+- Both checks run where buildbot mode's ran: every make that reads the top-level Makefile remakes the `info.mk` it includes before building anything, so the first make of a build decides, before world starts any other. They run in every mode, with or without git, and an uncommitted edit counts.
+- `toolchain/build_version` is a file of `toolchain/`, so bumping it still rebuilds. `check-toolchain-clean.sh`, `toolchain_rebuild_check` and `.toolchain_build_ver` go.
+
+The first make after the patch rebuilds the toolchain and each target once, as none has the new records yet.
+
+Verification log: `tests/build/test_boards.py` runs the patched check on a stand-in tree: "Keep each board's build with its toolchain" for the target records, "Keep the toolchain in buildbot mode" and "Check the version from parallel makes" for the toolchain's.

@@ -27,12 +27,13 @@ None.
 
 ### Modified Capabilities
 - `build/environment`: a change to the toolchain's files rebuilds the toolchain and every board's packages with it.
+- `build/boards`: the toolchain is kept by the record of its inputs' content rather than the last commit of `toolchain/`, and each board's build directories record the toolchain they were built with.
 - `build/ci`: the toolchain key covers the generic kernel files; branch runs keep main's caches whole, and a merged branch's caches go.
 
 ## Impact
 
 - `patches/openwrt/`: a new patch to `toolchain/Makefile`, the top-level `Makefile` and `scripts/check-toolchain-clean.sh`.
-- `scripts/toolchain-build.sh`, `scripts/toolchain-key.sh`, a new CI cache script with its `just` recipe, `.github/workflows/build.yml`, `docs/ci.md`, `docs/dev-setup.md`, `docs/patches.md`.
+- `scripts/toolchain-build.sh`, `scripts/toolchain-key.sh`, two new CI cache scripts with their `just` recipes, `.github/workflows/build.yml`, `docs/ci.md`, `docs/dev-setup.md`, `docs/patches.md`.
 - The first build of each tree after the patch builds the toolchain and every board anew, once: no tree has the new records yet. CI's toolchain key moves once, as `toolchain-key.sh` changes.
 - A toolchain change now costs a full target rebuild locally, as it does in CI, where a new compiler misses every compiler cache entry.
 - A branch run with little room in the quota saves no compiler cache. Its next run then restores main's, which serves every source the branch left as main has it.

@@ -14,8 +14,7 @@ ensure_fhs build "$@"
 
 cd "${tree}"
 # The toolchain the tree is configured for, as toolchain-build leaves it; not a
-# directory another configuration left, such as the one buildbot mode stamps
-# before defconfig has run (staging_dir/toolchain-_gcc-_).
+# directory another configuration left.
 toolchain_dir=$(make -s val.TOOLCHAIN_DIR)
 toolchain="staging_dir/${toolchain_dir##*/}"
 # Without its compile stamp, make world rebuilds the toolchain (toolchain-build).
