@@ -28,7 +28,7 @@ It creates the filesystem (label `wrtdata`) and the subvolumes, names the disk b
 
 ### What waits for it
 
-The container service, SMB and the persistent log start only while `/mnt/data` is mounted, and start again each time it is. Until then they run nothing and write nothing: `/mnt/data` on the boot disk stays an empty directory. A disk plugged in after boot brings them up without a reboot. Take it out with the router off: pulled out while in use, the filesystem stays behind, detached, for as long as a file on it is open, and the disk comes back cleanly only after a reboot.
+The container service, SMB and the persistent log start only while `/mnt/data` is mounted, and start again each time it is; SMB also stops when it is unmounted. Until then they run nothing and write nothing. `/mnt` itself is a small filesystem in RAM (1 MiB): whatever a process writes under `/mnt/data` without the disk lands there and never on the boot disk, and a reboot forgets it. A disk plugged in after boot brings the services up without a reboot. Take it out with the router off: pulled out while in use, the filesystem stays behind, detached, for as long as a file on it is open, and the disk comes back cleanly only after a reboot.
 
 ### Snapshots
 

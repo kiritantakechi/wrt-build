@@ -1,16 +1,13 @@
-# The data disk's mount point lies on an empty read-only filesystem: while no
-# disk is mounted on it, nothing written to a path on the disk can land on the
-# boot disk. The disk mounts on it as on any directory, and its unmount leaves
-# the mount point read-only again (device-robustness D7). It is mounted after
-# the overlay root and before procd's coldplug lets block mount the disk.
+# The data disk's mount point lies on a small filesystem in RAM: while no disk is
+# mounted on it, what a process still writes under it, as a podman command that
+# outlived the disk does, lands in RAM and never on the boot disk, and fails once
+# that filesystem is full. blockd's links to its automounts in /mnt live there
+# too. It is mounted after the overlay root, and before procd's coldplug lets
+# block mount anything (device-robustness D7).
 
 wrt_data_mountpoint() {
 	. /lib/functions/wrt-data.sh
-	local parent="${WRT_DATA%/*}"
-
-	mount -t tmpfs -o mode=0755,size=64k wrt-data "${parent}" &&
-		mkdir "${WRT_DATA}" &&
-		mount -o remount,ro "${parent}"
+	mount -t tmpfs -o mode=0755,size=1m wrt-data "${WRT_DATA%/*}"
 }
 
 boot_hook_add preinit_main wrt_data_mountpoint

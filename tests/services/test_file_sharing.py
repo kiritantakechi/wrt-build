@@ -14,6 +14,7 @@ from wrt_tests.device.storage import announce, boot_disk_entries, mount_options,
 from wrt_tests.model.poll import until
 
 if TYPE_CHECKING:
+    from wrt_tests.device.router import Router
     from wrt_tests.device.storage import Disk
     from wrt_tests.sandbox.net import Netns
     from wrt_tests.services.datapath import Online
@@ -24,7 +25,7 @@ SHARE = "shares"
 LAN_ADDRESS = "10.0.0.1"
 SMB_TIMEOUT = 60
 # From the disk's removal to a stopped service: procd runs the unmount trigger a
-# second after blockd's event, then the restart.
+# second after blockd's event, then the reload.
 STOP_TIMEOUT = 30
 
 
@@ -45,6 +46,22 @@ def _smbclient(client: Netns, *args: str) -> tuple[int, str]:
         timeout=SMB_TIMEOUT,
     )
     return result.returncode, result.stdout + result.stderr
+
+
+def _sharing_state(router: Router) -> str:
+    """Return what the router shows of the SMB service and its disk, for a wait that timed out."""
+    commands = (
+        "grep ' /mnt/data ' /proc/mounts",
+        "grep -w ksmbd /proc/modules",
+        "pidof ksmbd.mountd",
+        "logread -e ksmbd | tail -n 20",
+        # procd runs one trigger command at a time: one that hangs holds up the rest.
+        "ps w | grep -e /etc/init.d/ -e podman | grep -v grep",
+        'ubus call service list \'{"name": "ksmbd", "verbose": true}\'',
+    )
+    return router.run(
+        "; ".join(f"echo '$ {command}'; {command}" for command in commands) + "; true"
+    )
 
 
 def _list(client: Netns, server: str, user: tuple[str, str], *options: str) -> tuple[int, str]:
@@ -154,8 +171,12 @@ def test_shares_go_with_the_data_disk(
     finally:
         announce(router, data_disk, "add")
         wait_mounted(router)
-    until(
-        lambda: _list(sharing.client(), LAN_ADDRESS, smb_user)[0] == 0,
-        timeout=SMB_TIMEOUT,
-        what="the shares back",
-    )
+    try:
+        until(
+            lambda: _list(sharing.client(), LAN_ADDRESS, smb_user)[0] == 0,
+            timeout=SMB_TIMEOUT,
+            what="the shares back",
+        )
+    except TimeoutError as error:
+        error.add_note(_sharing_state(router))
+        raise

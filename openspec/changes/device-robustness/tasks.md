@@ -8,11 +8,11 @@
 - [ ] 1.2 Write the fstools patch (D2): `mount_action("remove")` unmounts before the hotplug removal, and blockd's `umount` handler reports only a target it knows. Carry it under the next free number with `Upstream-Status: Pending` and its write-up.
 
   Verify: fstools builds for both boards. On the router, `echo remove` to the data disk's `uevent` produces a `mount.remove` with `"target": "/mnt/data"`, as `ubus subscribe block` shows.
-- [ ] 1.3 Revise packages patch 0001 (D3): the unmount restart trigger per share, and a running server stopped before a start with nothing to share returns. Update its message, `PKG_RELEASE` and its write-up in `docs/patches.md` (the gap it states is closed).
+- [ ] 1.3 Revise packages patch 0001 (D3): reload triggers per share for the mount and the unmount, and a running server stopped before a start with nothing to share returns. Update its message, `PKG_RELEASE` and its write-up in `docs/patches.md` (the gap it states is closed).
 
   Verify: `just patch` applies the series. The services/file-sharing test "Data disk removed while sharing" (new, D6) passes on both boards, and so does "Data disk absent".
 
-- [ ] 1.4 Add wrt-data's preinit hook (D7) for the read-only mount point, bump wrt-data's `PKG_RELEASE`, and add the storage/data-disk test "Data disk removed while in use" (new).
+- [ ] 1.4 Add wrt-data's preinit hook (D7) that puts the mount point on a small tmpfs, bump wrt-data's `PKG_RELEASE`, and add the storage/data-disk test "Data disk removed while in use" (new).
 
   Verify: on both boards the new test passes, the file-sharing test "Data disk removed while sharing" finds nothing on the boot disk under `/mnt/data`, and the storage/data-disk, services and firmware/ab-upgrade suites pass.
 

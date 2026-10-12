@@ -19,8 +19,8 @@ Three faults of the device side, each found in passing by an earlier change, bre
   - Several mount points become one condition that any of them satisfies.
   - The existing `mount.add` helpers keep their meaning for every package that uses them.
 - **blockd names the unmounted mount point** (an openwrt patch to fstools): `block` unmounts a removed device before blockd forgets it, and blockd never reports another device's old mount point.
-- **ksmbd withdraws its shares when their disk goes** (packages patch 0001, revised): the service restarts on the unmount of a share's mount point, and a start with nothing to share stops the server, port 445 included.
-- **The data disk's mount point is read-only while no disk is mounted on it** (wrt-data): it lies on an empty read-only filesystem, mounted early in boot, so that nothing can write in the disk's place.
+- **ksmbd withdraws its shares when their disk goes** (packages patch 0001, revised): the service reloads, which starts it anew, on the mount and the unmount of a share's mount point, and a start with nothing to share stops the server, port 445 included.
+- **Nothing written in the data disk's place reaches the flash** (wrt-data): its mount point lies on a small filesystem in RAM, mounted early in boot, so that what a process writes there without the disk lands in RAM, bounded.
 - **podman accepts its own storage at any concurrency** (a packages patch to podman): a recorded path equal to podman's own matches without resolving either, and resolution is left to paths that differ as strings.
 - **qosify's ifb names fit the device name** (an openwrt patch adding a qosify patch):
   - A long name keeps its first two characters and its last nine.
@@ -35,7 +35,7 @@ None.
 
 ### Modified Capabilities
 - `services/file-sharing`: the SMB service stops offering shares when the data disk is unmounted while it runs, not only when the system boots without it.
-- `storage/data-disk`: the data disk's mount point is read-only while no disk is mounted on it.
+- `storage/data-disk`: nothing written under the data disk's mount point without the disk reaches the boot disk.
 - `services/containers`: container runtime commands that start at the same time all accept the storage recorded on `@containers`.
 - `network/qos`: an interface's ifb has a name within the kernel's limit, derived from the device's name, and qosify's status reports it.
 
@@ -43,7 +43,7 @@ None.
 
 - `patches/openwrt/`: new patches for procd (`procd.sh`), fstools (`block.c`, `blockd.c`) and qosify (`interface.c`, `qosify-status`).
 - `patches/packages/`: patch 0001 (ksmbd-tools) revised; a new patch for podman (`libpod`).
-- `feed/utils/wrt-data`: a preinit hook for the read-only mount point.
+- `feed/utils/wrt-data`: a preinit hook that puts the mount point on a small filesystem in RAM.
 - `tests/services/test_file_sharing.py`, `tests/services/test_containers.py`, `tests/network/test_qos.py`, `tests/storage/test_data_disk.py`: a scenario each.
 - `docs/patches.md`: the write-ups, including 0001's.
 - Hot-unplugging the data disk stays unsupported for the services that keep files open on it (`docs/services.md`). This change makes the SMB service stop offering a disk that has gone, whatever the reason; it does not make the disk safe to pull.

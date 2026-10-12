@@ -57,11 +57,13 @@ Alternatives considered:
 
 This is fstools' own ordering fault. Every `mount.remove` consumer, procd's triggers and hotplug's `mount` scripts alike, gets the mount point of a removed disk.
 
-### D3. ksmbd restarts on the unmount of a share's mount point
+### D3. ksmbd reloads on the mount and the unmount of a share's mount point
 
-- `service_triggers` registers, for each share, the restart trigger on the mount (as now) and the one on the unmount (D1).
-- `restart` stops the server, and the start that follows finds the mount point gone from `/proc/mounts`: with nothing left to share, it starts nothing. blockd sends `mount.remove` before `block` unmounts, so the restart counts on the trigger's 1 s delay. That is far longer than the time this image takes from the event to the unmount.
-- `start_service` stops a running server before it returns with nothing to share. A `reload` or `start` after an unmount then leaves nothing listening either.
+- `service_triggers` registers, for each share, a reload trigger on the mount and one on the unmount (D1).
+- A reload is a start for this script, which defines no `reload_service`, and `start_service` resets a running server hard first. So a reload does what a restart would, but procd updates the service in place.
+- A restart is `stop` then `start`, and `stop` deletes the service from procd, its triggers included, until `start` registers it again. The file-sharing test lost the `mount.add` of a disk re-added two seconds after the unmount's restart: it arrived while ksmbd had no triggers. A reload keeps them throughout. An event during a running reload makes procd run it again after.
+- With every mount point unmounted, the start that the reload is finds nothing to share, after the hard reset, and starts nothing. blockd sends `mount.remove` before `block` unmounts, so this counts on the trigger's 1 s delay. That is far longer than the time this image takes from the event to the unmount.
+- `start_service` stops a running server before it returns with nothing to share: the hard reset now comes before that return.
 - The changes amend patch 0001, which owns the script's mount handling. Its subject still holds; its message, `PKG_RELEASE` and write-up follow.
 
 ### D4. podman: identical recorded and own paths match without resolving
@@ -83,22 +85,22 @@ Alternatives considered:
 
 Two long names that share their first two and last nine characters would still share an ifb. That stays as in upstream's scheme; a unique scheme would change every long name for a case no configuration here has.
 
-### D7. The data disk's mount point is read-only while no disk is on it
+### D7. The data disk's mount point lies in RAM
 
-The file-sharing test found `containers` on the flash under `/mnt/data` once the disk was unmounted. `block` removes the mount point after a lazy unmount. A podman command that started before it, and touched its graph root after, created the path anew on the boot disk. Stopping each service on the unmount (D1) cannot cover a process that is already running. So the fix is a place that cannot be written:
-- A preinit hook of wrt-data (`/lib/preinit/86_wrt_data_mountpoint`) mounts an empty read-only tmpfs on the mount point's parent, `/mnt`, holding only the mount point. It runs after the overlay is mounted (`80_mount_root`), and before procd's coldplug lets `block` mount anything.
-- The disk mounts on the mount point as on any directory: `block` creates it only when it is missing, and a directory that exists is not created again, read-only or not.
-- After an unmount, `block`'s removal of the mount point fails and is harmless. Whatever creates a path under the mount point gets `EROFS` instead of writing to the flash.
+The file-sharing test found `containers` on the flash under `/mnt/data` once the disk was unmounted. `block` removes the mount point after a lazy unmount. A podman command that started before it, and touched its graph root after, created the path anew on the boot disk. Stopping each service on the unmount (D1) cannot cover a process that is already running. So the place it writes to must not be the flash:
+- A preinit hook of wrt-data (`/lib/preinit/86_wrt_data_mountpoint`) mounts a small tmpfs (1 MiB) on the mount point's parent, `/mnt`. It runs after the overlay is mounted (`80_mount_root`), and before procd's coldplug lets `block` mount anything.
+- Without the disk, whatever a process writes under the mount point lands in that tmpfs, in RAM. Once 1 MiB is used up, the write fails instead of growing. Nothing reaches the flash, and a reboot forgets it.
+- The disk mounts on the mount point as before: `block` creates the directory when it is missing and removes it after an unmount, now in RAM.
+- blockd's links to its automounts of unconfigured devices (`/mnt/<device>`) keep working in the tmpfs.
 - `/proc/mounts` lists the tmpfs at `/mnt`, not at `/mnt/data`. So the checks that look for the disk's mount, ksmbd's `grep " /mnt/data "` and `wrt_data_mounted`'s btrfs line, are unaffected.
-
-What this costs:
-- `/mnt` holds nothing else. An administrator who needs another mount there uses another directory.
-- Anonymous mounts (`anon_mount`), which go to `/mnt/<device>`, would fail. They are off, as fstab's default.
 - sysupgrade's second stage mounts the new slot's boot partition at its own ramfs's `/mnt`, not this one.
 
+What this costs: what lay under `/mnt` on the flash is hidden. The image puts nothing there.
+
 Alternatives considered:
+- **A read-only tmpfs over `/mnt`:** it made writes fail outright, but blockd could no longer create its `/mnt/<device>` links, and logged so at every boot for the boot partitions.
 - **An immutable directory** (`chattr +i`): the image has no `chattr`, and the flag on an overlay directory depends on the lower filesystems.
-- **A read-only placeholder mounted at `/mnt/data` itself:** `/proc/mounts` would list `/mnt/data`, and every "is the disk mounted" check would have to tell the placeholder from the disk, upstream's ksmbd check included.
+- **A placeholder mounted at `/mnt/data` itself:** `/proc/mounts` would list `/mnt/data` without the disk, and every "is the disk mounted" check would have to tell the placeholder from the disk, upstream's ksmbd check included.
 
 ### D6. Tests
 
@@ -116,8 +118,8 @@ Alternatives considered:
 
 ## Risks / Trade-offs
 
-- [`mount.remove` precedes the unmount] → The restart runs 1 s after the event, while this image unmounts at once after it; a slow `/etc/hotplug.d/mount` script could delay the unmount by up to blockd's 3 s ubus timeout. The test exercises the real ordering.
-- [A share's disk unmounted while clients hold files] → ksmbd's restart drops their sessions. That is the point of the requirement: the disk is gone.
+- [`mount.remove` precedes the unmount] → The reload runs 1 s after the event, while this image unmounts at once after it; a slow `/etc/hotplug.d/mount` script could delay the unmount by up to blockd's 3 s ubus timeout. The test exercises the real ordering.
+- [A share's disk unmounted while clients hold files] → ksmbd's reload, a hard reset, drops their sessions. That is the point of the requirement: the disk is gone.
 - [The concurrency test could pass by luck on a faulty podman] → Its symlink, re-pointed between two names of one directory, makes the path's resolution change all the time instead of once: all ten rounds failed on the unfixed podman, none passed by luck.
 - [procd.sh is sourced by every init script] → The new helpers add functions only. The changed internals keep the existing helpers' triggers byte for byte for one mount point, as the existing users' triggers, compared before and after, show.
 

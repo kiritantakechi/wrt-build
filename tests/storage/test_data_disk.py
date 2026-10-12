@@ -211,15 +211,17 @@ def test_moves_to_another_port(pod: Online, data_disk: Disk) -> None:
 
 
 @spec(CAPABILITY, "Dependent services wait for the mount", "Data disk removed while in use")
-def test_a_removed_disk_leaves_its_mount_point_read_only(pod: Online, data_disk: Disk) -> None:
+def test_nothing_written_without_the_disk_reaches_the_boot_disk(
+    pod: Online, data_disk: Disk
+) -> None:
     router = pod.router
     announce(router, data_disk, "remove")
     try:
         until(
             lambda: mount_options(router) is None, timeout=PLUG_TIMEOUT, what=f"{MOUNT} unmounted"
         )
-        assert router.returncode(f"mkdir -p {MOUNT}/containers/storage") != 0
-        assert router.returncode(f"touch {MOUNT}/file") != 0
+        # As a podman command that outlived the disk recreates its graph root.
+        router.run(f"mkdir -p {MOUNT}/containers/storage && touch {MOUNT}/containers/storage/file")
         assert boot_disk_entries(router) == []
     finally:
         announce(router, data_disk, "add")
