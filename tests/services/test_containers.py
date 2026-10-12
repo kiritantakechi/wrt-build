@@ -33,6 +33,23 @@ EXPOSED_PORT = 8080
 FIREWALL_TIMEOUT = 30
 # Nothing of an app may be in the image (the app containers' spec).
 NATIVE_APPS = ("qbittorrent", "libtorrent", "qt6", "qt5", "qtbase")
+# podman commands started at once, and how often, each time on a storage of their
+# own whose run root does not exist yet, as the configured one after a boot
+# (device-robustness D4). A concurrent command that creates the run root changes
+# how its path resolves between podman's two resolutions of it, a window too
+# short to hit by chance. So a symlink on the path keeps changing its target,
+# swapped atomically (rename), between two names of one directory (a bind
+# mount): the path resolves now to one name, now to the other, while every file
+# under it stays the same.
+AT_ONCE = 8
+ROUNDS = 10
+SCRATCH = "/var/run/concurrency"
+TOGGLE = (
+    "import * as fs from 'fs';"
+    f" while (fs.access('{SCRATCH}/toggle'))"
+    " for (let target in ['a', 'b']) {"
+    f" fs.symlink(target, '{SCRATCH}/next'); fs.rename('{SCRATCH}/next', '{SCRATCH}/link'); }}"
+)
 
 
 @pytest.fixture(scope="module")
@@ -167,3 +184,29 @@ def test_no_native_apps(pod: Online) -> None:
     installed = [line.split()[0] for line in listed]
     assert "podman" in {name.rsplit("-", 2)[0] for name in installed}
     assert not [name for name in installed if name.startswith(NATIVE_APPS)]
+
+
+@spec(CAPABILITY, "Container storage on the data disk", "Runtime commands at the same time")
+def test_runtime_commands_at_the_same_time(online: Online, data_disk: Disk) -> None:
+    del data_disk  # the scratch storage's place
+    root = f"{STORAGE}-concurrency"
+    # Through /run -> /var/run -> /tmp/run, then the changing symlink.
+    runroot = "/run/concurrency/link/runroot"
+    podman = f"podman --root {root} --runroot {runroot} info >/dev/null"
+    round_ = (
+        f"rm -rf {root} {SCRATCH} && mkdir -p {SCRATCH}/a {SCRATCH}/b"
+        f" && mount -o bind {SCRATCH}/a {SCRATCH}/b"
+        f" && ln -s a {SCRATCH}/link && touch {SCRATCH}/toggle"
+        f' && {{ ucode -e "{TOGGLE}" & toggle=$!; }};'
+        f" pids=; for i in $(seq {AT_ONCE}); do"
+        f' {podman} 2>{SCRATCH}.$i & pids="$pids $!"; done; failed=0;'
+        " for pid in $pids; do wait $pid || failed=$((failed + 1)); done;"
+        f" rm {SCRATCH}/toggle; wait $toggle; umount {SCRATCH}/b;"
+        f" cat {SCRATCH}.*; echo failed=$failed"
+    )
+    try:
+        reports = [online.router.run(round_, timeout=300) for _ in range(ROUNDS)]
+    finally:
+        online.router.run(f"umount {SCRATCH}/b 2>/dev/null; rm -rf {root} {SCRATCH} {SCRATCH}.*")
+    failed = [report for report in reports if not report.endswith("failed=0")]
+    assert not failed, f"{len(failed)} of {ROUNDS} rounds had commands fail; the first: {failed[0]}"

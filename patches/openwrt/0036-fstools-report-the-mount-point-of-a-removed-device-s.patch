@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 12 Oct 2026 06:27:31 +0800
+Subject: [PATCH] fstools: report the mount point of a removed device's unmount
+
+When a hotplugged device is removed, block has blockd forget the device
+before it unmounts it, so blockd's mount.remove names no mount point, or
+the one of an earlier unmount. procd's triggers on the removed device's
+mount point never fire.
+
+Carry the fstools patch that unmounts a removed device before blockd
+forgets it, and makes blockd report the mount point of the device being
+unmounted, or none, instead of one kept across calls. It is meant for
+fstools upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/system/fstools/Makefile               |  2 +-
+ ...-point-of-a-removed-device-s-unmount.patch | 75 +++++++++++++++++++
+ 2 files changed, 76 insertions(+), 1 deletion(-)
+ create mode 100644 package/system/fstools/patches/101-block-report-the-mount-point-of-a-removed-device-s-unmount.patch
+
+diff --git a/package/system/fstools/Makefile b/package/system/fstools/Makefile
+index 2a6405b..2521dfa 100644
+--- a/package/system/fstools/Makefile
++++ b/package/system/fstools/Makefile
+@@ -8,7 +8,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=fstools
+-PKG_RELEASE:=2
++PKG_RELEASE:=3
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/fstools.git
+diff --git a/package/system/fstools/patches/101-block-report-the-mount-point-of-a-removed-device-s-unmount.patch b/package/system/fstools/patches/101-block-report-the-mount-point-of-a-removed-device-s-unmount.patch
+new file mode 100644
+index 0000000..469a2eb
+--- /dev/null
++++ b/package/system/fstools/patches/101-block-report-the-mount-point-of-a-removed-device-s-unmount.patch
+@@ -0,0 +1,75 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] block: report the mount point of a removed device's unmount
++
++When a hotplugged device is removed, block told blockd to forget the
++device before it unmounted it. blockd's "umount" handler then no longer
++found the device, and sent mount.remove with the mount point it had kept
++in a static buffer from an earlier unmount, or with an empty one. A
++trigger on the removed device's mount point never fired, and one on
++another device's could.
++
++Unmount first, then have blockd forget the device. In blockd, report the
++mount point of the device being unmounted, or none for a device it does
++not know, instead of one kept across calls.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++ block.c  | 8 ++++++--
++ blockd.c | 8 ++------
++ 2 files changed, 8 insertions(+), 8 deletions(-)
++
++diff --git a/block.c b/block.c
++index c08da16..0614c0c 100644
++--- a/block.c
+++++ b/block.c
++@@ -1269,11 +1269,15 @@ static int mount_action(char *action, char *device, const char *options, int typ
++ 		return -1;
++ 
++ 	if (!strcmp(action, "remove")) {
+++		/*
+++		 * Unmount before blockd forgets the device, so that it still
+++		 * knows the mount point to report the unmount for.
+++		 */
+++		umount_device(device, type, true);
+++
++ 		if (type == TYPE_HOTPLUG)
++ 			blockd_notify("hotplug", device, NULL, NULL);
++ 
++-		umount_device(device, type, true);
++-
++ 		return 0;
++ 	} else if (strcmp(action, "add")) {
++ 		ULOG_ERR("Unkown action %s\n", action);
++diff --git a/blockd.c b/blockd.c
++index 902671f..99dada0 100644
++--- a/blockd.c
+++++ b/blockd.c
++@@ -421,7 +421,6 @@ static int blockd_umount(struct ubus_context *ctx, struct ubus_object *obj,
++ 	struct blockd_umount_context *c;
++ 	static const char *action = "remove";
++ 	char *devname;
++-	static char oldtarget[PATH_MAX];
++ 	struct device *device;
++ 	int err;
++ 
++@@ -432,10 +431,6 @@ static int blockd_umount(struct ubus_context *ctx, struct ubus_object *obj,
++ 
++ 	devname = blobmsg_get_string(data[MOUNT_DEVICE]);
++ 	device = vlist_find(&devices, devname, device, node);
++-	if (device) {
++-		strncpy(oldtarget, device->target, sizeof(oldtarget)-1);
++-		oldtarget[PATH_MAX - 1] = '\0';
++-	}
++ 
++ 	c = calloc(1, sizeof(*c));
++ 	if (!c)
++@@ -450,7 +445,8 @@ static int blockd_umount(struct ubus_context *ctx, struct ubus_object *obj,
++ 		return UBUS_STATUS_UNKNOWN_ERROR;
++ 	}
++ 
++-	send_block_notification(ctx, action, devname, oldtarget);
+++	/* A device blockd does not know has no mount point to report. */
+++	send_block_notification(ctx, action, devname, device ? device->target : NULL);
++ 
++ 	return 0;
++ }

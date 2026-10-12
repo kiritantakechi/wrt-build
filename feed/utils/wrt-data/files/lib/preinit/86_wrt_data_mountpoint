@@ -1,0 +1,16 @@
+# The data disk's mount point lies on an empty read-only filesystem: while no
+# disk is mounted on it, nothing written to a path on the disk can land on the
+# boot disk. The disk mounts on it as on any directory, and its unmount leaves
+# the mount point read-only again (device-robustness D7). It is mounted after
+# the overlay root and before procd's coldplug lets block mount the disk.
+
+wrt_data_mountpoint() {
+	. /lib/functions/wrt-data.sh
+	local parent="${WRT_DATA%/*}"
+
+	mount -t tmpfs -o mode=0755,size=64k wrt-data "${parent}" &&
+		mkdir "${WRT_DATA}" &&
+		mount -o remount,ro "${parent}"
+}
+
+boot_hook_add preinit_main wrt_data_mountpoint

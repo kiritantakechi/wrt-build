@@ -5,21 +5,25 @@ Subject: [PATCH] ksmbd-tools: share only what is mounted, and start once it is
 
 A share whose path lies on an fstab mount point that is not mounted
 exposed the directory underneath, on the root filesystem: files written
-there filled the flash, and vanished from view once the disk came.
+there filled the flash, and vanished from view once the disk came. A
+share whose disk was unmounted while ksmbd ran stayed offered until the
+service restarted.
 
-Leave such a share out until its mount point is mounted, restart the
-service when it is (a mount trigger per share), and do not start at all
-while every share waits for its mount.
+Leave such a share out until its mount point is mounted, and restart the
+service when it is mounted or unmounted: a mount trigger and an unmount
+trigger per share, the latter from procd.sh's unmount helpers. With
+every share waiting for its mount, stop a running server and start
+nothing.
 
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
  net/ksmbd-tools/Makefile         |  2 +-
- net/ksmbd-tools/files/ksmbd.init | 28 ++++++++++++++++++++++++++++
- 2 files changed, 29 insertions(+), 1 deletion(-)
+ net/ksmbd-tools/files/ksmbd.init | 30 ++++++++++++++++++++++++++++++
+ 2 files changed, 31 insertions(+), 1 deletion(-)
 
 diff --git a/net/ksmbd-tools/Makefile b/net/ksmbd-tools/Makefile
-index df3a142..8c6e0b5 100644
+index df3a142..080ffc4 100644
 --- a/net/ksmbd-tools/Makefile
 +++ b/net/ksmbd-tools/Makefile
 @@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
@@ -27,12 +31,12 @@ index df3a142..8c6e0b5 100644
  PKG_NAME:=ksmbd-tools
  PKG_VERSION:=3.5.7
 -PKG_RELEASE:=1
-+PKG_RELEASE:=2
++PKG_RELEASE:=3
  
  PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
  PKG_SOURCE_URL:=https://github.com/cifsd-team/ksmbd-tools/releases/download/$(PKG_VERSION)
 diff --git a/net/ksmbd-tools/files/ksmbd.init b/net/ksmbd-tools/files/ksmbd.init
-index f87b392..7fefbc5 100644
+index f87b392..c687490 100644
 --- a/net/ksmbd-tools/files/ksmbd.init
 +++ b/net/ksmbd-tools/files/ksmbd.init
 @@ -109,6 +109,16 @@ smb_add_share()
@@ -61,7 +65,7 @@ index f87b392..7fefbc5 100644
  	mkdir -p /var/etc/ksmbd
  
  	config_load ksmbd
-@@ -150,12 +162,22 @@ init_config()
+@@ -150,12 +162,24 @@ init_config()
  	config_foreach smb_add_share share
  }
  
@@ -69,7 +73,9 @@ index f87b392..7fefbc5 100644
 +{
 +	local path
 +	config_get path "$1" path
-+	[ -n "$path" ] && procd_add_restart_mount_trigger "$path"
++	[ -n "$path" ] || return
++	procd_add_restart_mount_trigger "$path"
++	procd_add_restart_unmount_trigger "$path"
 +}
 +
  service_triggers()
@@ -84,16 +90,16 @@ index f87b392..7fefbc5 100644
  	for i in $SMBD_IFACE; do
  		procd_add_reload_interface_trigger "$i"
  	done
-@@ -175,6 +197,12 @@ start_service()
- {
- 	init_config
- 
-+	# Every share waits for its mount: nothing to serve yet.
+@@ -182,6 +206,12 @@ start_service()
+ 	
+ 	# NOTE: We don't do a soft-reload via signal, since [global] ksmbd.conf setting changes will be ignored, so always reset hard.
+ 	[ -e /sys/module/ksmbd ] && stop_service
++
++	# Every share waits for its mount: nothing to serve.
 +	if [ "$SHARES" -eq 0 ] && [ "$SHARES_WAITING" -gt 0 ]; then
-+		logger -p daemon.notice -t 'ksmbd' "No share is mounted yet, not starting."
++		logger -p daemon.notice -t 'ksmbd' "No share is mounted, not starting."
 +		return 0
 +	fi
-+
- 	if [ ! -e /etc/ksmbd/ksmbd.conf ]; then
- 		logger -p daemon.error -t 'ksmbd' "missing config /etc/ksmbd/ksmbd.conf!"
- 		exit 1
+ 	
+ 	[ ! -e /sys/module/ksmbd ] && modprobe ksmbd 2> /dev/null
+ 	if [ ! -e /sys/module/ksmbd ]; then

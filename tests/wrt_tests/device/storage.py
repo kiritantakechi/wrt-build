@@ -4,7 +4,9 @@ A disk is a sparse raw image on the runner that the tests plug into the
 emulator's xHCI controller as a UAS device. The router shows its SCSI product
 name as the disk's model, which is how the tests find its block device.
 ``initialize`` runs ``wrt-data init`` as an administrator would: the device, then
-its name typed again to confirm.
+its name typed again to confirm. ``announce`` has the kernel announce the disk's
+block device again, added or removed, as a plug or an unplug does, while the disk
+stays attached.
 """
 
 import shlex
@@ -20,6 +22,8 @@ if TYPE_CHECKING:
     from wrt_tests.device.router import Router
 
 MOUNT = "/mnt/data"
+# The boot disk's own directory under the mount point: the overlay's upper layer.
+BOOT_DISK = f"/overlay/upper{MOUNT}"
 SUBVOLUMES = ("containers", "downloads", "shares", "logs")
 # Sparse: only what the router writes takes space on the runner.
 SIZE = 8 << 30
@@ -71,6 +75,21 @@ def device(router: Router, disk: Disk) -> str:
         what=f"{disk.name}'s block device",
     )
     return f"/dev/{model.split('/')[3]}"
+
+
+def announce(router: Router, disk: Disk, action: str) -> None:
+    """Have the kernel announce ``action`` (add, remove) for ``disk``'s block device.
+
+    The hotplug handlers then mount or unmount it as they do for a plug or an
+    unplug; a removal is preceded by a sync, as nothing can write to it after.
+    """
+    name = device(router, disk).removeprefix("/dev/")
+    router.run(f"sync && echo {shlex.quote(action)} >/sys/class/block/{name}/uevent")
+
+
+def boot_disk_entries(router: Router) -> list[str]:
+    """Return what the boot disk itself holds under the data disk's mount point."""
+    return router.run(f"ls -A {BOOT_DISK} 2>/dev/null || true").split()
 
 
 def mount_options(router: Router) -> set[str] | None:

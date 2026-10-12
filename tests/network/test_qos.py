@@ -9,7 +9,7 @@ import json
 import re
 import subprocess
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -38,6 +38,12 @@ DOWN_RATE = 10_000_000
 DOWN_SECONDS = 10
 # How far above the rate a shaped download may measure.
 DOWN_MARGIN = 1.2
+# A device with a 14-character name, a VLAN of the LAN bridge (busybox's ip makes
+# VLANs, not veth pairs), and the ifb its ingress shaping gets: "ifb-", the
+# name's first two characters and its last nine.
+LONG_DEVICE = "qosify-long-v1"
+LONG_VLAN = 4001
+LONG_IFB = f"ifb-{LONG_DEVICE[:2]}{LONG_DEVICE[-9:]}"
 
 
 def _cake(router: Router, device: str = "pppoe-wan") -> str:
@@ -48,6 +54,12 @@ def _sent_bytes(router: Router, device: str) -> int:
     """Return the bytes the root qdisc of ``device`` has sent."""
     (sent,) = re.findall(r"Sent (\d+) bytes", _cake(router, device))
     return int(sent)
+
+
+def _device_status(router: Router, name: str) -> dict[str, object]:
+    """Return qosify's status of the device section ``name``."""
+    devices = json.loads(router.run("ubus call qosify status"))["devices"]
+    return cast("dict[str, object]", devices.get(name, {}))
 
 
 def _ifbs(router: Router) -> list[str]:
@@ -171,3 +183,30 @@ def test_shaping_returns_after_a_redial(online: Online) -> None:
     assert online.recovery <= RECOVERY
     assert hooks(online.router, "pppoe-wan") == WAN
     assert "qdisc cake" in _cake(online.router)
+
+
+@spec(CAPABILITY, "Ingress shaping when configured", "Ingress shaping on a device with a long name")
+def test_ingress_shaping_names_a_long_device_s_ifb(online: Online) -> None:
+    router = online.router
+    section = "qosify.long_device"
+    router.run(
+        f"ip link add link br-lan name {LONG_DEVICE} type vlan id {LONG_VLAN}"
+        f" && ip link set {LONG_DEVICE} up"
+        f" && uci set {section}=device && uci set {section}.name={LONG_DEVICE}"
+        f" && uci set {section}.bandwidth=10mbit && uci set {section}.ingress=1"
+        " && uci commit qosify && /etc/init.d/qosify reload"
+    )
+    try:
+        ifb = until(
+            lambda: _device_status(router, LONG_DEVICE).get("ifb"),
+            timeout=RECOVERY,
+            what=f"qosify's ifb for {LONG_DEVICE}",
+        )
+        assert ifb == LONG_IFB
+        assert "qdisc cake" in router.run(f"tc qdisc show dev {LONG_IFB} root")
+    finally:
+        router.run(
+            f"uci -q delete {section}; uci commit qosify; /etc/init.d/qosify reload;"
+            f" ip link del {LONG_DEVICE}"
+        )
+    assert _ifbs(router) == []

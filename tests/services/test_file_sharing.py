@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from wrt_tests import spec
-from wrt_tests.device.storage import wait_mounted
+from wrt_tests.device.storage import announce, boot_disk_entries, mount_options, wait_mounted
 from wrt_tests.model.poll import until
 
 if TYPE_CHECKING:
@@ -23,6 +23,9 @@ CAPABILITY = "services/file-sharing"
 SHARE = "shares"
 LAN_ADDRESS = "10.0.0.1"
 SMB_TIMEOUT = 60
+# From the disk's removal to a stopped service: procd runs the unmount trigger a
+# second after blockd's event, then the restart.
+STOP_TIMEOUT = 30
 
 
 @pytest.fixture(scope="module")
@@ -119,6 +122,37 @@ def test_no_shares_without_the_data_disk(
         assert "NT_STATUS_CONNECTION_REFUSED" in output, output
     finally:
         data_disk.plug(port)
+        wait_mounted(router)
+    until(
+        lambda: _list(sharing.client(), LAN_ADDRESS, smb_user)[0] == 0,
+        timeout=SMB_TIMEOUT,
+        what="the shares back",
+    )
+
+
+@spec(CAPABILITY, "Shares on the data disk", "Data disk removed while sharing")
+def test_shares_go_with_the_data_disk(
+    sharing: Online, smb_user: tuple[str, str], data_disk: Disk
+) -> None:
+    router = sharing.router
+    assert _list(sharing.client(), LAN_ADDRESS, smb_user)[0] == 0
+    announce(router, data_disk, "remove")
+    try:
+        until(
+            lambda: mount_options(router) is None, timeout=STOP_TIMEOUT, what="the disk unmounted"
+        )
+        until(
+            lambda: router.returncode("pidof ksmbd.mountd || [ -e /sys/module/ksmbd ]") != 0,
+            timeout=STOP_TIMEOUT,
+            what="the SMB service stopped",
+        )
+        assert router.run("ss -Htln 'sport = :445'") == ""
+        code, output = _list(sharing.client(), LAN_ADDRESS, smb_user)
+        assert code != 0
+        assert "NT_STATUS_CONNECTION_REFUSED" in output, output
+        assert boot_disk_entries(router) == []
+    finally:
+        announce(router, data_disk, "add")
         wait_mounted(router)
     until(
         lambda: _list(sharing.client(), LAN_ADDRESS, smb_user)[0] == 0,

@@ -83,13 +83,33 @@ Alternatives considered:
 
 Two long names that share their first two and last nine characters would still share an ifb. That stays as in upstream's scheme; a unique scheme would change every long name for a case no configuration here has.
 
+### D7. The data disk's mount point is read-only while no disk is on it
+
+The file-sharing test found `containers` on the flash under `/mnt/data` once the disk was unmounted. `block` removes the mount point after a lazy unmount. A podman command that started before it, and touched its graph root after, created the path anew on the boot disk. Stopping each service on the unmount (D1) cannot cover a process that is already running. So the fix is a place that cannot be written:
+- A preinit hook of wrt-data (`/lib/preinit/86_wrt_data_mountpoint`) mounts an empty read-only tmpfs on the mount point's parent, `/mnt`, holding only the mount point. It runs after the overlay is mounted (`80_mount_root`), and before procd's coldplug lets `block` mount anything.
+- The disk mounts on the mount point as on any directory: `block` creates it only when it is missing, and a directory that exists is not created again, read-only or not.
+- After an unmount, `block`'s removal of the mount point fails and is harmless. Whatever creates a path under the mount point gets `EROFS` instead of writing to the flash.
+- `/proc/mounts` lists the tmpfs at `/mnt`, not at `/mnt/data`. So the checks that look for the disk's mount, ksmbd's `grep " /mnt/data "` and `wrt_data_mounted`'s btrfs line, are unaffected.
+
+What this costs:
+- `/mnt` holds nothing else. An administrator who needs another mount there uses another directory.
+- Anonymous mounts (`anon_mount`), which go to `/mnt/<device>`, would fail. They are off, as fstab's default.
+- sysupgrade's second stage mounts the new slot's boot partition at its own ramfs's `/mnt`, not this one.
+
+Alternatives considered:
+- **An immutable directory** (`chattr +i`): the image has no `chattr`, and the flag on an overlay directory depends on the lower filesystems.
+- **A read-only placeholder mounted at `/mnt/data` itself:** `/proc/mounts` would list `/mnt/data`, and every "is the disk mounted" check would have to tell the placeholder from the disk, upstream's ksmbd check included.
+
 ### D6. Tests
 
 - **File sharing, "Data disk removed while sharing":**
   - With the shares offered, `echo remove` to the data disk's `uevent` goes the way a hot unplug goes: 10-mount, `block hotplug` remove, blockd and procd. The disk image stays attached.
   - Within a few seconds: `ksmbd.mountd` gone, `ksmbd.ko` unloaded, nothing on port 445, `smbclient --list` refused, and nothing under `/mnt/data` in the overlay's upper directory.
   - `echo add` mounts it again, and the shares come back.
-- **Containers, "Runtime commands at the same time":** in each of several rounds, the test removes a scratch run root under `/run` and its graph root on the data disk, and starts eight `podman --root ... --runroot /run/containers/<scratch> info` at once. Every command must succeed. A scratch storage keeps the system's pods out of it and gives every round a database that records the unresolved path.
+- **Containers, "Runtime commands at the same time":**
+  - In each of ten rounds, the test starts eight `podman --root ... --runroot ... info` at once, on a scratch storage whose run root does not exist yet. Every command must succeed. A scratch storage keeps the system's pods out of it.
+  - Concurrency alone did not hit the two-resolution window in ten rounds on the unfixed podman, even with the run root behind 32 symlinks.
+  - So the run root's path goes through a symlink that a background ucode loop keeps re-pointing, atomically, between two names of one directory (a bind mount). The path then resolves now to one name, now to the other, as a concurrent creation makes it resolve differently, while every file under it stays the same. All ten rounds failed on the unfixed podman.
 - **QoS, "Ingress shaping on a device with a long name":**
   - A veth pair with 14-character names; a qosify `device` section with ingress shaping on one of them.
   - `ubus call qosify status` names the expected ifb, the ifb carries cake, and removing the section removes the ifb.
@@ -98,7 +118,7 @@ Two long names that share their first two and last nine characters would still s
 
 - [`mount.remove` precedes the unmount] → The restart runs 1 s after the event, while this image unmounts at once after it; a slow `/etc/hotplug.d/mount` script could delay the unmount by up to blockd's 3 s ubus timeout. The test exercises the real ordering.
 - [A share's disk unmounted while clients hold files] → ksmbd's restart drops their sessions. That is the point of the requirement: the disk is gone.
-- [The concurrency test can pass by luck on a faulty podman] → It runs several rounds of eight commands. The task records how often it fails on the unfixed podman before the fix, so that its value as a regression test is known.
+- [The concurrency test could pass by luck on a faulty podman] → Its symlink, re-pointed between two names of one directory, makes the path's resolution change all the time instead of once: all ten rounds failed on the unfixed podman, none passed by luck.
 - [procd.sh is sourced by every init script] → The new helpers add functions only. The changed internals keep the existing helpers' triggers byte for byte for one mount point, as the existing users' triggers, compared before and after, show.
 
 ## Migration Plan

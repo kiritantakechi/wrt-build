@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 12 Oct 2026 06:31:51 +0800
+Subject: [PATCH] podman: match equal database paths without resolving them
+
+podman's database check resolves the symlinks of a recorded path and of
+its own, the same string, in two calls, and resolves a path only if it
+exists. Two podman commands starting together on a fresh /tmp/run then
+fail now and then: one sees the run root that the other creates between
+its two calls, and reports "database run root "/run/containers/storage"
+does not match our run root "/tmp/run/containers/storage"".
+
+Carry the podman patch that matches equal paths without resolving them.
+It is meant for podman upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ utils/podman/Makefile                         |  2 +-
+ ...atabase-paths-without-resolving-them.patch | 60 +++++++++++++++++++
+ 2 files changed, 61 insertions(+), 1 deletion(-)
+ create mode 100644 utils/podman/patches/020-libpod-match-equal-database-paths-without-resolving-them.patch
+
+diff --git a/utils/podman/Makefile b/utils/podman/Makefile
+index 78e6024..803d59a 100644
+--- a/utils/podman/Makefile
++++ b/utils/podman/Makefile
+@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=podman
+ PKG_VERSION:=5.8.4
+-PKG_RELEASE:=3
++PKG_RELEASE:=4
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+ PKG_SOURCE_URL:=https://github.com/podman-container-tools/podman/archive/v$(PKG_VERSION)
+diff --git a/utils/podman/patches/020-libpod-match-equal-database-paths-without-resolving-them.patch b/utils/podman/patches/020-libpod-match-equal-database-paths-without-resolving-them.patch
+new file mode 100644
+index 0000000..2e93eb4
+--- /dev/null
++++ b/utils/podman/patches/020-libpod-match-equal-database-paths-without-resolving-them.patch
+@@ -0,0 +1,60 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] libpod: match equal database paths without resolving them
++
++ValidateDBConfig compares each path the database recorded with the
++runtime's own, after resolving the symlinks of each in turn. A path is
++resolved only if it exists, so when another process creates it between
++the two resolutions, the same path compares unequal:
++
++  database run root "/run/containers/storage" does not match our run
++  root "/tmp/run/containers/storage": database configuration mismatch
++
++It takes two podman processes starting at once, with a run root that
++goes through a symlink and does not exist yet: the storage creates the
++run root after the validation. That is how the first commands after a
++boot find it when /run is a symlink into a tmpfs. It is the same race as
++the volume path's (containers/podman#23515), for a path that the
++validation does not create.
++
++Resolve the paths only when they differ as strings: equal paths are the
++same path, however they resolve. This holds for the SQLite and the
++BoltDB state alike.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++ libpod/boltdb_state_internal.go | 6 ++++--
++ libpod/sqlite_state.go          | 4 +++-
++ 2 files changed, 7 insertions(+), 3 deletions(-)
++
++diff --git a/libpod/boltdb_state_internal.go b/libpod/boltdb_state_internal.go
++index ceaf8e3..1a118ff 100644
++--- a/libpod/boltdb_state_internal.go
+++++ b/libpod/boltdb_state_internal.go
++@@ -232,8 +232,10 @@ func readOnlyValidateConfig(bucket *bolt.Bucket, toCheck dbConfigValidation) (bo
++ 
++ 	// Tolerate symlinks when possible - most relevant for OStree systems
++ 	// and rootless containers, where we want to put containers in /home,
++-	// which is symlinked to /var/home.
++-	if toCheck.isPath {
+++	// which is symlinked to /var/home. Equal paths need no resolving:
+++	// resolving the same path twice differs only when another process
+++	// creates it in between.
+++	if toCheck.isPath && dbValue != ourValue {
++ 		if dbValue != "" {
++ 			checkedVal, err := evalSymlinksIfExists(dbValue)
++ 			if err != nil {
++diff --git a/libpod/sqlite_state.go b/libpod/sqlite_state.go
++index f45e5e2..f969c8a 100644
++--- a/libpod/sqlite_state.go
+++++ b/libpod/sqlite_state.go
++@@ -414,7 +414,9 @@ func (s *SQLiteState) ValidateDBConfig(_ *Runtime) (defErr error) {
++ 	}
++ 
++ 	checkField := func(fieldName, dbVal, ourVal string, isPath bool) error {
++-		if isPath {
+++		// Equal paths need no resolving: resolving the same path twice
+++		// differs only when another process creates it in between.
+++		if isPath && dbVal != ourVal {
++ 			// Tolerate symlinks when possible - most relevant for OStree systems
++ 			// and rootless containers, where we want to put containers in /home,
++ 			// which is symlinked to /var/home.

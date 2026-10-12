@@ -24,6 +24,8 @@ from wrt_tests.device.storage import (
     PLUG_TIMEOUT,
     SUBVOLUMES,
     Disk,
+    announce,
+    boot_disk_entries,
     device,
     initialize,
     mount_options,
@@ -49,8 +51,6 @@ SNAPSHOTTED = ("containers", "shares")
 KEEP_DAYS = 7
 DAYS_RUN = 9  # more than eight days
 CRON_TIMEOUT = 90
-# The boot disk's own directory under the mount point: the overlay's upper layer.
-BOOT_DISK = f"/overlay/upper{MOUNT}"
 HEALTHCHECK = (
     "uci set wrt-ab.healthcheck.total=30 && uci set wrt-ab.healthcheck.interval=3"
     " && uci commit wrt-ab && wrt-healthcheck"
@@ -85,11 +85,6 @@ def rebooted(pod: Online) -> str:
     )
     pod.reboot()
     return line
-
-
-def _boot_disk_entries(router: Router) -> list[str]:
-    """Return what the boot disk itself holds under /mnt/data."""
-    return router.run(f"ls -A {BOOT_DISK} 2>/dev/null || true").split()
 
 
 def _services(router: Router) -> dict[str, bool]:
@@ -215,6 +210,24 @@ def test_moves_to_another_port(pod: Online, data_disk: Disk) -> None:
     assert {*SUBVOLUMES, ".snapshots"} <= subvolumes(pod.router)
 
 
+@spec(CAPABILITY, "Dependent services wait for the mount", "Data disk removed while in use")
+def test_a_removed_disk_leaves_its_mount_point_read_only(pod: Online, data_disk: Disk) -> None:
+    router = pod.router
+    announce(router, data_disk, "remove")
+    try:
+        until(
+            lambda: mount_options(router) is None, timeout=PLUG_TIMEOUT, what=f"{MOUNT} unmounted"
+        )
+        assert router.returncode(f"mkdir -p {MOUNT}/containers/storage") != 0
+        assert router.returncode(f"touch {MOUNT}/file") != 0
+        assert boot_disk_entries(router) == []
+    finally:
+        announce(router, data_disk, "add")
+        wait_mounted(router)
+    for subvolume in SUBVOLUMES:
+        assert router.returncode(f"btrfs subvolume show {MOUNT}/{subvolume} >/dev/null") == 0
+
+
 @pytest.fixture(scope="module")
 def without_disk(pod: Online, data_disk: Disk, dae: Online) -> Iterator[Online]:
     """Boot without the data disk, dae on; plug the disk back in at the end, if no test did."""
@@ -240,7 +253,7 @@ def test_boot_without_the_data_disk(without_disk: Online) -> None:
     router.run("/etc/init.d/log restart")
     services = _services(router)
     assert not any(services.values()), services
-    assert _boot_disk_entries(router) == []
+    assert boot_disk_entries(router) == []
     router.run(HEALTHCHECK, timeout=180)
     assert json.loads(router.run(f"cat {HEALTH}"))["result"] == "pass"
 
@@ -273,4 +286,4 @@ def test_data_disk_mounts_late(without_disk: Online, data_disk: Disk) -> None:
         timeout=app.START_TIMEOUT,
         what="every service on the data disk",
     )
-    assert _boot_disk_entries(router) == []
+    assert boot_disk_entries(router) == []

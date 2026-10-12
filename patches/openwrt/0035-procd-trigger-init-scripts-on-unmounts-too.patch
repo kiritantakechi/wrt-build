@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 12 Oct 2026 06:25:11 +0800
+Subject: [PATCH] procd: trigger init scripts on unmounts too
+
+procd.sh lets an init script restart or reload when a mount point that
+holds its data is mounted (mount.add), but not when it is unmounted. A
+service whose disk goes away keeps serving from where the disk was,
+until someone restarts it.
+
+Add _procd_add_action_unmount_trigger, with restart and reload wrappers,
+which register mount.remove as the mount helpers register mount.add,
+through one helper for both events. Along the way:
+
+- name the init script in _procd_add_mount_trigger itself, from
+  $initscript, rather than from a $name the caller may have set to
+  anything;
+- pass the mount points as separate arguments, so that paths on several
+  mount points give one condition that any of them meets; they gave a
+  single "eq" against all of them joined by newlines, which never
+  matched.
+
+The trigger of a single mount point stays as it was.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/system/procd/Makefile       |  2 +-
+ package/system/procd/files/procd.sh | 42 ++++++++++++++++++++++++-----
+ 2 files changed, 36 insertions(+), 8 deletions(-)
+
+diff --git a/package/system/procd/Makefile b/package/system/procd/Makefile
+index 4512b1f..22e7f83 100644
+--- a/package/system/procd/Makefile
++++ b/package/system/procd/Makefile
+@@ -8,7 +8,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=procd
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/procd.git
+diff --git a/package/system/procd/files/procd.sh b/package/system/procd/files/procd.sh
+index 2f2c7ae..e403f74 100644
+--- a/package/system/procd/files/procd.sh
++++ b/package/system/procd/files/procd.sh
+@@ -368,6 +368,7 @@ _procd_add_mount_trigger() {
+ 	_procd_add_array_data "$1"
+ 	local action="$2"
+ 	local multi=0
++	local script=$(readlink "$initscript")
+ 	shift ; shift
+ 
+ 	json_add_array
+@@ -389,7 +390,7 @@ _procd_add_mount_trigger() {
+ 	[ $multi = 1 ] && json_close_array
+ 
+ 	json_add_array
+-	_procd_add_array_data "run_script" /etc/init.d/$name $action
++	_procd_add_array_data "run_script" /etc/init.d/$(basename ${script:-$initscript}) $action
+ 	json_close_array
+ 
+ 	json_close_array
+@@ -397,19 +398,35 @@ _procd_add_mount_trigger() {
+ 	json_close_array
+ }
+ 
+-_procd_add_action_mount_trigger() {
+-	local action="$1"
+-	shift
++# Run the init script's <action> on <event> (mount.add once a mount point is
++# mounted, mount.remove as it is unmounted) of the fstab mount points that hold
++# any of the paths: one condition, met by any of them.
++_procd_add_mount_event_trigger() {
++	local event="$1"
++	local action="$2"
++	shift ; shift
+ 	local mountpoints="$(procd_get_mountpoints "$@")"
+ 	[ "${mountpoints//[[:space:]]}" ] || return 0
+-	local script=$(readlink "$initscript")
+-	local name=$(basename ${script:-$initscript})
++
++	# One argument per mount point, as procd_get_mountpoints lists them.
++	local IFS='
++'
++	set -- $mountpoints
++	unset IFS
+ 
+ 	_procd_open_trigger
+-	_procd_add_mount_trigger mount.add $action "$mountpoints"
++	_procd_add_mount_trigger "$event" "$action" "$@"
+ 	_procd_close_trigger
+ }
+ 
++_procd_add_action_mount_trigger() {
++	_procd_add_mount_event_trigger mount.add "$@"
++}
++
++_procd_add_action_unmount_trigger() {
++	_procd_add_mount_event_trigger mount.remove "$@"
++}
++
+ procd_get_mountpoints() {
+ 	(
+ 		__procd_check_mount() {
+@@ -436,6 +453,14 @@ _procd_add_reload_mount_trigger() {
+ 	_procd_add_action_mount_trigger reload "$@"
+ }
+ 
++_procd_add_restart_unmount_trigger() {
++	_procd_add_action_unmount_trigger restart "$@"
++}
++
++_procd_add_reload_unmount_trigger() {
++	_procd_add_action_unmount_trigger reload "$@"
++}
++
+ _procd_add_raw_trigger() {
+ 	json_add_array
+ 	_procd_add_array_data "$1"
+@@ -699,6 +724,9 @@ _procd_wrapper \
+ 	procd_add_action_mount_trigger \
+ 	procd_add_reload_mount_trigger \
+ 	procd_add_restart_mount_trigger \
++	procd_add_action_unmount_trigger \
++	procd_add_reload_unmount_trigger \
++	procd_add_restart_unmount_trigger \
+ 	procd_open_trigger \
+ 	procd_close_trigger \
+ 	procd_open_instance \

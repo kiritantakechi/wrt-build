@@ -2,7 +2,7 @@
 
 ## 1. SMB shares withdrawn on unmount (design D1, D2, D3)
 
-- [ ] 1.1 Write the procd patch (D1): `_procd_add_mount_event_trigger`, the unmount helpers and their exports, and `_procd_add_mount_trigger` naming the script from `$initscript`. Carry it under the next free openwrt patch number with `Upstream-Status: Pending`, and its write-up in `docs/patches.md`.
+- [x] 1.1 Write the procd patch (D1): `_procd_add_mount_event_trigger`, the unmount helpers and their exports, and `_procd_add_mount_trigger` naming the script from `$initscript`. Carry it under the next free openwrt patch number with `Upstream-Status: Pending`, and its write-up in `docs/patches.md`.
 
   Verify: `just patch` applies it. For each present user (log, ksmbd-tools, transmission, nfsd v3 and v4, postgresql), the trigger JSON its `service_triggers` produces with one mount point is the same before and after, as a script that sources `procd.sh` on the host shows. Two mount points produce one `or` condition with both.
 - [ ] 1.2 Write the fstools patch (D2): `mount_action("remove")` unmounts before the hotplug removal, and blockd's `umount` handler reports only a target it knows. Carry it under the next free number with `Upstream-Status: Pending` and its write-up.
@@ -12,9 +12,13 @@
 
   Verify: `just patch` applies the series. The services/file-sharing test "Data disk removed while sharing" (new, D6) passes on both boards, and so does "Data disk absent".
 
+- [ ] 1.4 Add wrt-data's preinit hook (D7) for the read-only mount point, bump wrt-data's `PKG_RELEASE`, and add the storage/data-disk test "Data disk removed while in use" (new).
+
+  Verify: on both boards the new test passes, the file-sharing test "Data disk removed while sharing" finds nothing on the boot disk under `/mnt/data`, and the storage/data-disk, services and firmware/ab-upgrade suites pass.
+
 ## 2. podman's database check at any concurrency (design D4)
 
-- [ ] 2.1 Before the fix, add the services/containers test "Runtime commands at the same time" (D6), and run it on the current image to record how often a round fails.
+- [x] 2.1 Before the fix, add the services/containers test "Runtime commands at the same time" (D6), and run it on the current image to record how often a round fails.
 
   Verify: the failure rate is noted in the patch's write-up as the reproduction.
 - [ ] 2.2 Write the podman patch (D4) for SQLite and BoltDB states, as a new packages patch with `Upstream-Status: Pending` and its write-up, and bump the podman package's `PKG_RELEASE`.

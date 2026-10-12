@@ -109,13 +109,13 @@ Verification log: 2026-09-29, a bridge created after dae is bound within the spe
 
 Patch: `patches/packages/0001-ksmbd-tools-share-only-what-is-mounted-and-start-onc.patch`, for openwrt/packages.
 
-Problem: ksmbd's init script shares every configured path whether or not the disk it belongs on is mounted. A share on a USB disk that is late or absent then shares the empty directory underneath, on the router's flash: what clients write there fills the flash, and disappears from view once the disk is mounted over it. Nothing starts the service again when the disk arrives.
+Problem: ksmbd's init script shares every configured path whether or not the disk it belongs on is mounted. A share on a USB disk that is late or absent then shares the empty directory underneath, on the router's flash: what clients write there fills the flash, and disappears from view once the disk is mounted over it. Nothing starts the service again when the disk arrives, and nothing withdraws a share whose disk is unmounted while the service runs.
 
-What the patch does: `smb_add_share` asks `procd_get_mountpoints` for the fstab mount point a share's path lies on and leaves the share out while that mount point is not mounted; the service does not start while every share waits; `service_triggers` adds a restart mount trigger per share path, so the mount brings the share. Shares on no fstab mount point are unaffected. `PKG_RELEASE` goes to 2. A disk unmounted while the service runs keeps its shares until the service restarts: procd's mount triggers fire when a mount point is mounted, not when it is unmounted.
+What the patch does: `smb_add_share` asks `procd_get_mountpoints` for the fstab mount point a share's path lies on and leaves the share out while that mount point is not mounted. `service_triggers` adds a restart trigger per share path for the mount, and one for the unmount (procd's unmount helpers, patch 0035), so the mount brings the share and the unmount takes it away. A start with every share waiting stops a running server, after the hard reset every start does, and starts nothing. Shares on no fstab mount point are unaffected. `PKG_RELEASE` goes to 3.
 
 How this project uses it: the share `shares` lies on the data disk, whose fstab entry exists from the first boot (r4s-services D2).
 
-Verification log: 2026-09-29, in the emulator ksmbd stays down without the data disk and starts when it is plugged in (`tests/storage/test_data_disk.py`, `tests/services/test_file_sharing.py`).
+Verification log: 2026-09-29, in the emulator ksmbd stays down without the data disk and starts when it is plugged in (`tests/storage/test_data_disk.py`, `tests/services/test_file_sharing.py`). With patches 0035 and 0036, the data disk removed while the service runs stops it, port 445 included, and its return brings the shares back (the file-sharing test "Data disk removed while sharing", both boards).
 
 ### ubox: a log file on a disk that is not mounted
 
@@ -461,6 +461,42 @@ What the patches do:
 
 Verification log: the network/tc-hook-order and network/qos tests on both boards: einat's tcx programs first and qosify's after them, with no legacy filter and no ifb; a `dns:` rule classifying a flow on pppoe-wan; ingress shaping through the ifb; and the `clsact` fallback with `tcx` set to 0. 2026-10-11, with every CPU of the VM kept busy, eight rounds of restarts of qosify and einat and redials on the R6S left einat's programs and then qosify's on pppoe-wan's tcx hooks every time, 26 to 36 s after the restarts and 27 to 42 s after the hang-ups.
 
+### procd: init scripts triggered on unmounts too
+
+Patch: `patches/openwrt/0035-procd-trigger-init-scripts-on-unmounts-too.patch`, for openwrt/openwrt.
+
+Problem: `procd.sh` gives init scripts mount triggers for `mount.add` only, so a service whose disk is unmounted keeps serving from the mount point until someone restarts it. The helper also turned the mount points of several paths into one condition, an `eq` against all of them joined by newlines, which never matched; and `_procd_add_mount_trigger` named the script to run from whatever `$name` its caller had.
+
+Why it matters here: ksmbd's shares are on the data disk, and services/file-sharing requires that no share be offered once the disk is gone (`device-robustness` D1, D3).
+
+What the patch does: one helper registers a trigger for an event and an action on the mount points that hold the given paths. `_procd_add_action_mount_trigger` is it with `mount.add`, as before, and the new `_procd_add_action_unmount_trigger`, with `procd_add_restart_unmount_trigger` and `procd_add_reload_unmount_trigger`, with `mount.remove`. The mount points become separate arguments, so several of them give one `or`, and `_procd_add_mount_trigger` names the script from `$initscript`. A single mount point's trigger is the same as before.
+
+Verification log: 2026-10-12, the triggers `procd.sh` builds, compared before and after with the build tree's host `jshn`: the same for one mount point with restart, reload and start (as ubox's log, ksmbd-tools, transmission, nfs-kernel-server and postgresql call them), one `or` for two mount points, and `mount.remove` from the unmount helpers.
+
+### fstools: the mount point of a removed device's unmount
+
+Patch: `patches/openwrt/0036-fstools-report-the-mount-point-of-a-removed-device-s.patch` (adds the fstools patch `package/system/fstools/patches/101-block-report-the-mount-point-of-a-removed-device-s-unmount.patch`), for fstools, carried by openwrt/openwrt until then.
+
+Problem: when a hotplugged device is removed, `block` has blockd forget the device (`hotplug` with `remove`) before it unmounts it. blockd's `umount` handler then no longer finds the device, and sends `mount.remove` with the mount point it kept in a static buffer from an earlier unmount, or with none.
+
+Why it matters here: the data disk is a hotplug mount at `/mnt/data`, and ksmbd's unmount trigger (patch 0035) waits for a `mount.remove` that names it (`device-robustness` D2).
+
+What the patch does: `block` unmounts a removed device first and has blockd forget it after, and blockd reports the mount point of the device being unmounted, or none for a device it does not know, instead of one kept across calls.
+
+Verification log: on both boards, `echo remove` to the data disk's `uevent` gives a `mount.remove` that names `/mnt/data` (the file-sharing test "Data disk removed while sharing").
+
+### qosify: a long device's ifb named after its own name
+
+Patch: `patches/openwrt/0037-qosify-name-a-long-device-s-ifb-after-its-own-name.patch` (adds the qosify patch `package/network/config/qosify/patches/104-interface-name-a-long-device-s-ifb-after-its-own-name.patch`, and changes `qosify-status`), for git.openwrt.org/project/qosify, carried by openwrt/openwrt until then.
+
+Problem: for a device name of 12 to 15 characters, `interface_ifb_name()` keeps the first two characters and takes the rest at `len - (IFNAMSIZ + 6) - 1`, 8 to 11 characters before the name: undefined behavior, and an ifb named after whatever precedes the name in memory. `qosify-status` derives the ifb's name as `printf %.16s "ifb-$ifname"`, which disagrees with the daemon's for those lengths.
+
+Why it matters here: ingress shaping redirects to the interface's ifb (patch 0034), and a VLAN or a tunnel can have a long name (`device-robustness` D5).
+
+What the patch does: the tail starts at `len - (IFNAMSIZ - 7)`, the last nine characters, which make fifteen with `ifb-` and the first two. `ubus call qosify status` reports each active interface's ifb as `ifb`, and `qosify-status` shows that device. `PKG_RELEASE` goes to 6.
+
+Verification log: the network/qos test "Ingress shaping on a device with a long name" on both boards.
+
 ### wsdd2: the random seed without overflow
 
 Patch: `patches/packages/0005-wsdd2-seed-without-overflow.patch` (adds the package patch `020-wsd-seed-without-overflow.patch`), for openwrt/packages: wsdd2's own repository, github.com/Netgear/wsdd2, is gone, and openwrt/packages builds it from its mirror.
@@ -472,6 +508,18 @@ Why it matters here: the `ubsan` profile's fifth run trapped here: wsdd2 trapped
 What the patch does: the shift is done as `unsigned long`, and the seed takes `time()`'s result. `srand48()` takes the low 32 bits of its seed, which stay the same.
 
 Verification log: see the `ubsan` run in `docs/undefined-behavior.md`.
+
+### podman: equal database paths matched without resolving them
+
+Patch: `patches/packages/0006-podman-match-equal-database-paths-without-resolving-.patch` (adds the podman patch `utils/podman/patches/020-libpod-match-equal-database-paths-without-resolving-them.patch`), for podman, carried by openwrt/packages until then.
+
+Problem: `ValidateDBConfig` compares the paths the database recorded with the runtime's own, resolving the symlinks of each in turn; a path is resolved only if it exists. Without `--runroot`, the runtime's run root is the database's, the same string. The storage creates the run root after the validation, so a second podman process that creates it between the first one's two resolutions makes the same path compare unequal: `database run root "/run/containers/storage" does not match our run root "/tmp/run/containers/storage": database configuration mismatch`. The SQLite and the BoltDB state share the logic. Upstream fixed the same race for the volume path by creating it first (containers/podman#23515).
+
+Why it matters here: the image's run root goes through `/run` → `/var/run` → `/tmp/run`, and wrt-containers and wrt-sync run podman at the same time after a boot or a mount of the data disk. CI run 37324813891 lost a device sync to it (`device-robustness` D4).
+
+What the patch does: both states resolve the paths only when they differ as strings; equal paths match. `PKG_RELEASE` goes to 4.
+
+Verification log: the services/containers test "Runtime commands at the same time" runs ten rounds of eight `podman info` at once, each on a scratch storage whose run root does not exist yet. Concurrency alone reproduced nothing in ten rounds without the patch, even with the run root behind 32 symlinks: the window is two path resolutions wide. A symlink on the run root's path that keeps changing its target between two names of one directory (a bind mount), as a concurrent creation changes how the path resolves, made all ten rounds fail without the patch (2026-10-12, R6S).
 
 ### luci-base: the host tools built in the host build directory
 
