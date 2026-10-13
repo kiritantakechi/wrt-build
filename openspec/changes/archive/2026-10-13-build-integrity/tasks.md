@@ -43,7 +43,7 @@
 
 ## 4. Integration
 
-- [ ] 4.1 Run the full system tests on both boards (dev profile).
+- [x] 4.1 Run the full system tests on both boards (dev profile).
 
   Verify: all tests pass on both boards, and `spec-coverage --change build-integrity` reports no uncovered scenario.
 - [x] 4.2 Get a green CI run for both boards on the branch, with main's caches present.
