@@ -93,6 +93,18 @@ by = "local VM, 2026-10-04: just build r4s dev with nothing changed took 5 min 3
 [[scenario]]
 capability = "build/environment"
 requirement = "Rebuild only what changed"
+scenario = "Change a toolchain patch"
+by = "local VM, 2026-10-13 (build-integrity task 1.3, docs/patches.md patch 0038): with a no-op GCC patch added, just build r4s dev built the toolchain anew and compiled all 475 stages of the R4S (ccache 14.8 %), and just build r6s dev kept that toolchain and compiled all 481 of the R6S (15.9 %); with the patch removed, the R4S's build built the toolchain anew again and both boards compiled every stage anew (ccache 99.99 %, the earlier toolchain's entries)"
+
+[[scenario]]
+capability = "build/ci"
+requirement = "Main's caches kept whole"
+scenario = "A branch runs while main's caches fill the quota"
+by = "build.yml run 38305783785, build-integrity's branch, 2026-10-13: with main's five caches of 7.6 GB present, the host stage saved the toolchain and its compiler cache (1.6 GB fit), the firmware jobs saved neither their compiler caches (3.2 and 3.4 GB) nor the download cache (7.0 GB), as 9.9 GB were present, and passed on what they restored; every cache of main was still there after the run (docs/ci.md)"
+
+[[scenario]]
+capability = "build/environment"
+requirement = "Rebuild only what changed"
 scenario = "Change the compiler flags"
 by = "local VM, 2026-10-04: dropping -fno-plt from config/toolchain.seed built the toolchains anew, recorded the flags without it, and prepared all 132 target packages of the R4S again; restoring it did the same (docs/patches.md, patch 0011)"
 

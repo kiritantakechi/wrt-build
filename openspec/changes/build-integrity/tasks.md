@@ -11,10 +11,10 @@
   Carry it under the next free openwrt patch number with `Upstream-Status: Pending`, and its write-up in `docs/patches.md`.
 
   Verify: `just patch` applies it. The build/boards tests "Keep each board's build with its toolchain" and "Check the toolchain from parallel makes" pass on the patched rule. On the VM, with the dev profile, a first `just build` builds the toolchain and the board anew, and a second one compiles nothing (time report, compiler cache reports).
-- [ ] 1.2 Remove `.ver_check`'s writing from `toolchain-build.sh` (D3), with its comment, and update `docs/dev-setup.md` on when a toolchain and a board are built anew.
+- [x] 1.2 Remove `.ver_check`'s writing from `toolchain-build.sh` (D3), with its comment, and update `docs/dev-setup.md` on when a toolchain and a board are built anew.
 
   Verify: `just check` passes. `just toolchain-build ci` on a configured tree leaves a `.ver_check` holding the content hash, and a following `just build <board> ci` compiles no toolchain part.
-- [ ] 1.3 Verify the build/environment scenario "Change a toolchain patch" on the VM: add a no-op GCC patch to `toolchain/gcc/patches-15.x` through a scratch patch, build both boards, remove it, and build both again.
+- [x] 1.3 Verify the build/environment scenario "Change a toolchain patch" on the VM: add a no-op GCC patch to `toolchain/gcc/patches-15.x` through a scratch patch, build both boards, remove it, and build both again.
 
   Verify: each change rebuilds the toolchain once and compiles every package of each board anew, as the time reports and compiler cache reports show; the record is the scenario's entry in `tests/verified-elsewhere.toml`.
 
@@ -46,7 +46,7 @@
 - [ ] 4.1 Run the full system tests on both boards (dev profile).
 
   Verify: all tests pass on both boards, and `spec-coverage --change build-integrity` reports no uncovered scenario.
-- [ ] 4.2 Get a green CI run for both boards on the branch, with main's caches present.
+- [x] 4.2 Get a green CI run for both boards on the branch, with main's caches present.
 
   Verify: after the run, every cache of main is still listed (`gh cache list`), and the branch's caches fit the quota. Record the run, its per-board timings and the cache listing in `docs/ci.md`, and the build/ci scenario "A branch runs while main's caches fill the quota" in `tests/verified-elsewhere.toml`.
 
