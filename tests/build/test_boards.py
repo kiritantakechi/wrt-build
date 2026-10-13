@@ -354,6 +354,21 @@ def _tree_to_check_toolchain(workdir: Path) -> Path:
     return tree
 
 
+def _check_make(
+    tree: Path, board: str = "", toolchain: str = "toolchain", **variables: str
+) -> list[str | Path]:
+    """Return the make that checks the toolchain for ``board``'s build, with ``variables``.
+
+    Every variable the stand-in reads goes on the command line, where no
+    variable of the environment, such as CI's BOARD, can stand in for it.
+    """
+    return [
+        *("make", "-s", "-C", tree, tree / "staging_dir" / toolchain / "stamp" / ".ver_check"),
+        *(f"{name}={value}" for name, value in variables.items()),
+        *(f"BOARD={board}", f"TOOLCHAIN_DIR_NAME={toolchain}"),
+    ]
+
+
 def _check_toolchain(
     tree: Path, board: str = "", toolchain: str = "toolchain", **variables: str
 ) -> Path:
@@ -368,14 +383,7 @@ def _check_toolchain(
         os.utime(record, (0, 0))
     (tree / "tmp").mkdir(exist_ok=True)
     (tree / "tmp" / ".build").touch()
-    subprocess.run(
-        [
-            *("make", "-s", "-C", tree, record),
-            *(f"{name}={value}" for name, value in variables.items()),
-            *(f"BOARD={board}", f"TOOLCHAIN_DIR_NAME={toolchain}"),
-        ],
-        check=True,
-    )
+    subprocess.run(_check_make(tree, board, toolchain, **variables), check=True)
     return record
 
 
@@ -608,7 +616,7 @@ def test_parallel_makes_check_the_toolchain(tmp_path: Path) -> None:
         for _ in range(MAKES):
             makes.append(
                 subprocess.Popen(
-                    ["make", "-s", "-C", tree, record],
+                    _check_make(tree),
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -622,7 +630,7 @@ def test_parallel_makes_check_the_toolchain(tmp_path: Path) -> None:
         assert record.read_text() == INPUTS
     # A toolchain recorded from other inputs is still deleted, and recorded anew.
     compiler, record = _recorded_toolchain(tree, "0000000\n")
-    subprocess.run(["make", "-s", "-C", tree, record], check=True)
+    subprocess.run(_check_make(tree), check=True)
     assert not compiler.exists()
     assert record.read_text() == INPUTS
 
