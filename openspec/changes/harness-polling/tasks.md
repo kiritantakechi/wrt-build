@@ -11,7 +11,7 @@
 
 ## 2. Integration (design D4)
 
-- [ ] 2.1 Repeat the reproduction: `network/test_wan.py` ten times on the R4S on the VM, with `stress-ng --cpu 4` beside the emulator.
+- [x] 2.1 Repeat the reproduction: `network/test_wan.py` ten times on the R4S on the VM, with `stress-ng --cpu 4` beside the emulator.
 
   Verify: ten of ten runs pass, where three of ten failed before (2026-10-14).
 - [ ] 2.2 Run the full system tests on both boards (dev profile).
