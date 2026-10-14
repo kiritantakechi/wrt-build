@@ -145,6 +145,19 @@ def test_power_cut_keeps_the_disk(router: Router) -> None:
     assert router.run("cat /root/marker") == "written-before-the-cut"
 
 
+@spec(CAPABILITY, "Fault injection", "Watchdog reset logged")
+def test_a_watchdog_reset_is_logged(router: Router) -> None:
+    emulator = router.emulator
+    logged = len(emulator.logged())
+    since = emulator.console.mark()
+    previous_boot = router.boot_id()
+    # procd stops feeding the watchdog, which stays armed.
+    router.run("ubus call system watchdog '{\"stop\": true}'")
+    router.wait_rebooted(previous_boot)
+    assert "watchdog_perform_action" in emulator.logged()[logged:]
+    assert "reboot: Restarting system" not in emulator.console.text(since)
+
+
 @spec(CAPABILITY, "USB storage", "Hot-plug a USB disk")
 def test_usb_disk_hot_plug(router: Router, tmp_path: Path) -> None:
     # The xHCI controller's two root hubs, USB 2 and USB 3.

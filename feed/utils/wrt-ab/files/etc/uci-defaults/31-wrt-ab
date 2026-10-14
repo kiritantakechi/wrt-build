@@ -1,10 +1,12 @@
 #!/bin/sh
 # The stored U-Boot environment of an A/B system, for fw_printenv and fw_setenv
-# (board-model D4): on the boot disk, which holds the root partition, at the
-# offset and size of every board's U-Boot (uboot/wrt-ab.config). Only a system
-# booted from a slot has one, and only uboot-envtools' own defaults
-# (30_uboot-envtools) found none: a configuration an upgrade carries over keeps
-# its own.
+# (board-model D4): on the boot disk, which holds the root partition, in the
+# copies the bootloader named on the kernel command line, and nowhere else
+# (trial-boot-resilience D3). Only a system booted from a slot has one, and only
+# uboot-envtools' own defaults (30_uboot-envtools) found none: a configuration an
+# upgrade carries over keeps its own, made under the same bootloader. A
+# bootloader that names no copies predates two of them: the environment stays
+# unconfigured, which makes upgrades refuse until the factory image is written.
 # shellcheck source=/dev/null # parts of base-files and uboot-envtools on the router
 . /lib/functions.sh
 # shellcheck source=/dev/null
@@ -16,8 +18,18 @@ ucode -e "import { slot } from 'wrt.ab'; exit(slot() ? 0 : 1);" || exit 0
 uci -q get ubootenv.@ubootenv[0] >/dev/null && exit 0
 export_bootdevice || exit 1
 export_partdevice wrt_disk 0 || exit 1
-# shellcheck disable=SC2154 # export_partdevice sets wrt_disk
-ubootenv_add_uci_config "/dev/${wrt_disk}" 0x3f8000 0x8000
+wrt_copies=$(ucode -e "import { environment } from 'wrt.ab';
+for (let copy in environment() ?? []) print(copy.offset, ' ', copy.size, '\n');")
+if [ -z "${wrt_copies}" ]; then
+	logger -t wrt-ab -p daemon.err "the bootloader names no environment; write the factory image to upgrade"
+	exit 0
+fi
+while read -r wrt_offset wrt_size; do
+	# shellcheck disable=SC2154 # export_partdevice sets wrt_disk
+	ubootenv_add_uci_config "/dev/${wrt_disk}" "${wrt_offset}" "${wrt_size}"
+done <<EOF
+${wrt_copies}
+EOF
 config_load ubootenv
 config_foreach ubootenv_add_app_config
 exit 0

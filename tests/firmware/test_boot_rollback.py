@@ -8,13 +8,15 @@ from typing import TYPE_CHECKING
 from wrt_tests import spec
 from wrt_tests.device.ab import (
     BOOT_DISK,
-    ENV_OFFSET,
+    ENV_COPIES,
     ENV_SIZE,
     getenv,
+    newest_env_copy,
     partition,
     region_sha256,
     setenv,
     slot,
+    slot_sha256,
 )
 from wrt_tests.device.emu import extract_fit_image, read_fit, run
 from wrt_tests.model.image import SECTOR, default_environment, read_mbr
@@ -46,7 +48,15 @@ def _trial(router: Router) -> None:
 
 
 def _env_sha256(router: Router) -> str:
-    return region_sha256(router, BOOT_DISK, ENV_OFFSET, ENV_OFFSET + ENV_SIZE)
+    """Return the checksums of both copies of the environment."""
+    return ",".join(
+        region_sha256(router, BOOT_DISK, offset, offset + ENV_SIZE) for offset in ENV_COPIES
+    )
+
+
+def _corrupt(router: Router, offset: int) -> None:
+    """Overwrite the CRC and the first variables of the environment's copy at ``offset``."""
+    router.run(f"dd if=/dev/urandom of={BOOT_DISK} bs=64 seek={offset // 64} count=1 conv=fsync")
 
 
 def _config(path: Path) -> dict[str, str]:
@@ -91,12 +101,73 @@ def test_boot_slot_b(router: Router) -> None:
 )
 def test_corrupted_environment_boots_slot_a(router: Router) -> None:
     setenv(router, boot_slot="b")
-    # Overwrite the CRC and the first variables: U-Boot falls back to its defaults.
-    router.run(
-        f"dd if=/dev/urandom of={BOOT_DISK} bs=64 seek={ENV_OFFSET // 64} count=1 conv=fsync"
-    )
+    # Both copies corrupted: U-Boot falls back to its defaults.
+    for offset in ENV_COPIES:
+        _corrupt(router, offset)
     router.reboot()
     assert slot(router) == "a"
+
+
+@spec(CAPABILITY, "Slot selection from a persistent variable", "Environment write cut short")
+def test_cut_short_write_keeps_the_previous_state(router: Router) -> None:
+    running = slot(router)
+    _trial(router)
+    # The confirmation, cut short: the copy it went to is corrupted, as a reset in
+    # the middle of writing it leaves it.
+    setenv(router, upgrade_available=0)
+    _corrupt(router, newest_env_copy(router))
+    router.reboot()
+    # The trial as it was before: counted on, on the same slot.
+    assert slot(router) == running
+    assert (getenv(router, "upgrade_available"), getenv(router, "bootcount")) == ("1", "1")
+
+
+@spec(
+    CAPABILITY,
+    "The system writes the environment where the bootloader reads it",
+    "The environment where the bootloader names it",
+)
+def test_the_environment_is_where_the_bootloader_names_it(router: Router) -> None:
+    named = re.search(r"(?:^| )wrt\.env=(\S+)", router.run("cat /proc/cmdline"))
+    assert named is not None
+    copies = [tuple(int(part, 16) for part in copy.split("@")) for copy in named[1].split(",")]
+    assert copies == [(ENV_SIZE, offset) for offset in ENV_COPIES]
+    configured = [
+        (device, int(offset, 16), int(size, 16))
+        for device, offset, size, *_ in map(
+            str.split, router.run("cat /etc/fw_env.config").splitlines()
+        )
+    ]
+    assert configured == [(BOOT_DISK, offset, ENV_SIZE) for offset in ENV_COPIES]
+    setenv(router, wrt_probe="written")
+    assert getenv(router, "wrt_probe") == "written"
+
+
+@spec(
+    CAPABILITY,
+    "The system writes the environment where the bootloader reads it",
+    "A bootloader that names no environment",
+)
+def test_no_upgrade_without_the_bootloader_s_environment(
+    router: Router, upgrade_image: Path
+) -> None:
+    named = router.run(
+        "ucode -e \"import { environment } from 'wrt.ab';"
+        " printf('%J', environment('root=PARTUUID=x rw wrt.slot=a'));\""
+    )
+    assert named == "null"
+    # What a bootloader without wrt.env= leaves: no configuration.
+    router.run(
+        "while uci -q delete ubootenv.@ubootenv[0]; do :; done && uci commit ubootenv"
+        " && rm /etc/fw_env.config"
+    )
+    other = "b" if slot(router) == "a" else "a"
+    before = slot_sha256(router, other)
+    router.put(upgrade_image, UPGRADE_IMAGE)
+    refused = router.run(f"sysupgrade {UPGRADE_IMAGE} 2>&1 || echo refused")
+    assert "names no U-Boot environment" in refused
+    assert refused.endswith("refused")
+    assert slot_sha256(router, other) == before
 
 
 @spec(
@@ -227,13 +298,15 @@ def test_same_logic_in_both_bootloaders(
     assert constants == _names(UBOOT_DIR / "board-qemu.env")
     assert {name: shipped[name] for name in shared} == {name: qemu[name] for name in shared}
     assert constants <= shipped.keys() & qemu.keys()
-    # Each keeps its environment at the shared offset of the MMC device its
-    # constants boot from...
+    # Each keeps both copies of its environment at the shared offsets of the MMC
+    # device its constants boot from...
     for name, environment in (("u-boot.config", shipped), ("u-boot-qemu.config", qemu)):
         config = _config(build_output / name)
         assert config.get("CONFIG_ENV_IS_IN_MMC") == "y", name
         assert int(config["CONFIG_ENV_MMC_DEVICE_INDEX"]) == int(environment["wrt_mmc"]), name
-        assert int(config["CONFIG_ENV_OFFSET"], 16) == ENV_OFFSET, name
+        assert config.get("CONFIG_ENV_REDUNDANT") == "y", name
+        offsets = (config["CONFIG_ENV_OFFSET"], config["CONFIG_ENV_OFFSET_REDUND"])
+        assert tuple(int(offset, 16) for offset in offsets) == ENV_COPIES, name
         assert int(config["CONFIG_ENV_SIZE"], 16) == ENV_SIZE, name
     # ...which the board's device tree makes its boot disk's controller: an eMMC
     # is soldered on, an SD card is not.

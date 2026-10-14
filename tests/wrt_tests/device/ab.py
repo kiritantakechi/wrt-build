@@ -13,11 +13,14 @@ if TYPE_CHECKING:
 
 # The emulator's boot disk, an SD card or an eMMC on its SD host controller.
 BOOT_DISK = "/dev/mmcblk0"
-# The U-Boot environment on the boot disk (design D1): offset and size in bytes.
-ENV_OFFSET, ENV_SIZE = 0x3F8000, 0x8000
+# The copies of the U-Boot environment on the boot disk (design D1,
+# trial-boot-resilience D1): their offsets and their size in bytes.
+ENV_COPIES, ENV_SIZE = (0x3F8000, 0x400000), 0x8000
+# A copy's serial flag, after its CRC: U-Boot reads the valid copy with the higher.
+ENV_FLAG = 4
 # The area U-Boot and the partition table occupy before boot-A, without the
 # environment: MBR, loader (sector 64 on) and u-boot.itb (8 MiB on).
-BOOT_AREA = ((0, 0x200), (0x8000, ENV_OFFSET), (0x800000, 0x2000000))
+BOOT_AREA = ((0, 0x200), (0x8000, ENV_COPIES[0]), (0x800000, 0x2000000))
 PARTITIONS = {"a": (1, 2), "b": (3, 4)}
 READ_BLOCK = 1 << 20
 
@@ -48,6 +51,25 @@ def setenv(router: Router, **variables: str | int) -> None:
     """Write U-Boot variables with the router's own helper, as wrt-slot and sysupgrade do."""
     pairs = " ".join(f"{name} {value}" for name, value in variables.items())
     router.run(f". /lib/functions/wrt-ab.sh && wrt_ab_setenv {pairs}")
+
+
+def newest_env_copy(router: Router) -> int:
+    """Return the offset of the copy of the environment the latest write went to.
+
+    Each write goes to the other copy with a serial flag one higher, so the
+    newest copy holds the higher flag, counting on from 255 to 0.
+    """
+    flags = {
+        offset: int(
+            router.run(
+                f"dd if={BOOT_DISK} bs=1 skip={offset + ENV_FLAG} count=1 2>/dev/null"
+                " | hexdump -e '1/1 \"%u\"'"
+            )
+        )
+        for offset in ENV_COPIES
+    }
+    first, second = (flags[offset] for offset in ENV_COPIES)
+    return ENV_COPIES[1] if (second - first) % 256 == 1 else ENV_COPIES[0]
 
 
 def region_sha256(router: Router, device: str, start: int, end: int) -> str:

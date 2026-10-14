@@ -36,7 +36,10 @@ wrt_ab_erofs_size() {
 }
 
 # platform_check_image <image>: accept only a single-slot upgrade image, a tar of
-# CONTROL, kernel (the boot partition) and root (EROFS), on a system running A/B.
+# CONTROL, kernel (the boot partition) and root (EROFS), on a system running A/B
+# that can write the U-Boot environment where its bootloader reads it: one
+# whose bootloader named no environment has none configured (31-wrt-ab), and
+# refuses before anything is written (trial-boot-resilience D3).
 platform_check_image() {
 	wrt_members=$(wrt_ab_members "$1" | sort | tr '\n' ' ')
 	if [ "${wrt_members}" != "CONTROL kernel root " ]; then
@@ -45,6 +48,10 @@ platform_check_image() {
 	fi
 	if ! wrt_ab_slot >/dev/null; then
 		echo "Not running from an A/B slot; flash the factory image instead"
+		return 1
+	fi
+	if ! fw_printenv >/dev/null 2>&1; then
+		echo "The bootloader names no U-Boot environment; flash the factory image instead"
 		return 1
 	fi
 }

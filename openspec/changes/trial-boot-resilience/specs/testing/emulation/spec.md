@@ -9,7 +9,7 @@ The emulator SHALL provide the following means of fault injection:
 - keystrokes sent to the serial console during boot;
 - restoring the disk to its initial state between tests.
 
-The emulator SHALL log every action of its watchdog and every reset or shutdown that it requests itself, with the time, next to the console log, so that a reset the console does not explain is named there.
+The emulator SHALL log every action of its watchdog and every shutdown it is asked for, with the time, next to the console log and for the whole session, so that a reset the console does not explain is named there.
 
 #### Scenario: Tests are isolated
 - **WHEN** a test changes the configuration, and then the next test starts

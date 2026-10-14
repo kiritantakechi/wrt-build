@@ -7,7 +7,8 @@ The boot disk holds two complete systems, slot A and slot B: the SD card on the 
 | Offset | Content | Size |
 |---|---|---|
 | `0x8000` | idbloader: the SoC's loader (TPL and SPL on the RK3399; rkbin's DRAM initialization and SPL on the RK3588S) | < 4 MiB |
-| `0x3F8000` | U-Boot environment | 32 KiB |
+| `0x3F8000` | U-Boot environment, first copy | 32 KiB |
+| `0x400000` | U-Boot environment, second copy | 32 KiB |
 | `0x800000` | u-boot.itb (U-Boot + TF-A) | < 24 MiB |
 | 32 MiB | p1 boot-A (ext4: `kernel.img`, the configuration handed over on upgrade) | 64 MiB |
 | | p2 root-A (EROFS, then its f2fs overlay from the next 64 KiB boundary) | 1024 MiB |
@@ -27,6 +28,8 @@ U-Boot reads only these three from the stored environment; the logic that uses t
 | `bootcount` | Boots of the trial slot so far; U-Boot counts and saves it only while `upgrade_available` is 1. |
 
 `bootlimit` is 3 and built in. Linux reads and writes the variables with `fw_printenv` and `fw_setenv`; `wrt-slot status` shows them.
+
+The environment is stored twice. Each write, U-Boot's or Linux's, replaces the older copy and gives it a serial flag one higher, and U-Boot reads the valid copy with the higher flag; with neither valid, it uses its built-in default, which boots slot A. A reset in the middle of a write, by a power cut or the watchdog, so leaves the previous state in effect. U-Boot names its copies on the kernel command line, `wrt.env=0x8000@0x3F8000,0x8000@0x400000` (size and offset of each), next to `wrt.slot=`, and the system configures `fw_printenv` and `fw_setenv` from that alone (`31-wrt-ab`). A U-Boot that names none predates the second copy: the system then leaves the environment alone, and an upgrade refuses until the factory image is written, which brings the new U-Boot.
 
 ## States
 

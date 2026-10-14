@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from wrt_tests import spec
 from wrt_tests.device.ab import getenv, setenv, slot
+from wrt_tests.model.poll import until
 
 if TYPE_CHECKING:
     from wrt_tests.device.router import Router
@@ -17,6 +18,9 @@ FAILING = "/tmp/demo-fails"  # noqa: S108 (a path on the router)
 # Limits short enough for a test and long enough for a check to fail twice.
 LIMITS = {"total": 6, "interval": 3, "timeout": 3}
 QUICK = " && ".join(f"uci set wrt-ab.healthcheck.{name}={value}" for name, value in LIMITS.items())
+# Limits long enough for a check that fails after the clock was set, then passes.
+SLOW = {"total": 60, "interval": 3, "timeout": 3}
+DAY = 86400
 
 
 def _check(router: Router) -> dict[str, object]:
@@ -83,6 +87,34 @@ def test_trial_failure_reboots(router: Router) -> None:
     router.run(
         f"until logread -e wrt-healthcheck | grep -q '{confirmed}'; do sleep 2; done", timeout=300
     )
+
+
+@spec(CAPABILITY, "Result handling by trial boot state", "Clock set during a trial boot")
+def test_a_clock_set_forward_does_not_end_a_trial(router: Router) -> None:
+    running = slot(router)
+    setenv(router, boot_slot=running, upgrade_available=1, bootcount=0)
+    router.run(f"touch {FAILING}")
+    _register(router, "demo", f"[ ! -e {FAILING} ]")
+    limits = " && ".join(
+        f"uci set wrt-ab.healthcheck.{name}={value}" for name, value in SLOW.items()
+    )
+    previous_boot = router.boot_id()
+    router.detach(f"{limits} && uci commit wrt-ab && wrt-healthcheck")
+    until(
+        lambda: router.returncode("pgrep -f /usr/sbin/wrt-healthcheck >/dev/null") == 0,
+        timeout=30,
+        what="the health check running",
+    )
+    # A day forward, as NTP sets a clock that lagged, while the check still fails
+    # for two more rounds; then it passes, well within the total time limit.
+    router.run(f"date -s @$(($(date +%s) + {DAY})) >/dev/null")
+    router.run(f"sleep {2 * SLOW['interval']} && rm {FAILING}")
+    confirmed = f"slot {running} passed its trial boot and is confirmed"
+    router.run(
+        f"until logread -e wrt-healthcheck | grep -q '{confirmed}'; do sleep 1; done",
+        timeout=SLOW["total"],
+    )
+    assert router.boot_id() == previous_boot
 
 
 @spec(CAPABILITY, "Result handling by trial boot state", "Check fails on a confirmed system")

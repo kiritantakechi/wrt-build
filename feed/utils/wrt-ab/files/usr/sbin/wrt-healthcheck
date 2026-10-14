@@ -20,6 +20,12 @@ function setting(name, fallback) {
 	return +(cursor().get('wrt-ab', 'healthcheck', name) ?? fallback);
 }
 
+// seconds(): seconds on the monotonic clock, which setting the time of day does
+// not move, as NTP does once the router is online (trial-boot-resilience D4).
+function seconds() {
+	return clock(true)[0];
+}
+
 function log(level, message) {
 	system(['logger', '-t', 'wrt-healthcheck', '-p', `daemon.${level}`, message]);
 }
@@ -94,13 +100,13 @@ let interval = setting('interval', 10);
 let timeout = setting('timeout', 30);
 let running = slot();
 let trial = getenv('upgrade_available', '0') == '1';
-let start = time();
+let start = seconds();
 let failed;
 
 while (true) {
 	failed = run_checks(timeout);
 
-	if (!length(failed) || time() - start >= total)
+	if (!length(failed) || seconds() - start >= total)
 		break;
 
 	sleep(interval * 1000);

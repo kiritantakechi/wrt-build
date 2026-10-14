@@ -51,6 +51,13 @@ QEMU = "qemu-system-aarch64"
 MACHINE = "virt,gic-version=3"
 # The boot disk's device, which throttle_writes() slows down.
 BOOT_DISK_ID = "boot-disk"
+# QEMU's own account of the machine, beside the console log: its watchdog's
+# actions and the shutdowns it is asked for, with the time, so that a reset the
+# console does not explain is named there (trial-boot-resilience D5). QEMU
+# writes each run's anew; the session's log keeps every run's.
+QEMU_LOG = "qemu.log"
+QEMU_RUN_LOG = "qemu-run.log"
+QEMU_TRACES = ("watchdog_perform_action", "qemu_system_shutdown_request")
 # The router's LAN address, which the harness logs in to.
 ROUTER_ADDRESS = "10.0.0.1"
 UNPLUG_TIMEOUT = 30
@@ -389,6 +396,12 @@ class Emulator:
         self.target = target
         self.qemu: QEMUDriver = target.get_driver("QEMUDriver", activate=False)
         self.console = Console(self.qemu, console_log)
+        self.log = console_log.with_name(QEMU_LOG)
+        self.run_log = console_log.with_name(QEMU_RUN_LOG)
+        traces = (f"-trace {event}" for event in QEMU_TRACES)
+        self.qemu.extra_args = " ".join(
+            (str(self.qemu.extra_args), *traces, f"-msg timestamp=on -D {self.run_log}")
+        )
         self.disk = directory / DISK_FILE
         self.overlay = directory / OVERLAY_FILE
 
@@ -410,6 +423,16 @@ class Emulator:
         """Kill the machine without any shutdown; the disk keeps what was written."""
         self.console.stop()
         self.qemu.off()
+        if self.run_log.exists():
+            with self.log.open("a", encoding="utf-8") as log:
+                log.write(self.run_log.read_text(encoding="utf-8"))
+            self.run_log.unlink()
+
+    def logged(self) -> str:
+        """Return what QEMU logged in this session, the running machine's included."""
+        return "".join(
+            path.read_text(encoding="utf-8") for path in (self.log, self.run_log) if path.exists()
+        )
 
     def _monitor(self, command_line: str) -> None:
         # HMP reports failures as output text, not as a QMP error.

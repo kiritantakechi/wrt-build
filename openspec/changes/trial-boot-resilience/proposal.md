@@ -17,7 +17,7 @@ Found on the way: the health check measures its time limit on the wall clock. Th
 
 - **U-Boot keeps two copies of its environment** (`uboot/wrt-ab.config`), at `0x3F8000` and `0x400000`. A write goes to the older copy, so a write cut short leaves the newer one, the previous state, in effect.
 - **The bootloader tells the system where its copies are.** It passes their sizes and offsets on the kernel command line, as it passes the running slot. `fw_printenv` and `fw_setenv` are configured from that alone. A system started by a bootloader that does not tell refuses to write the environment, rather than write it in a layout that bootloader cannot read.
-- **The emulator logs what its watchdog does**, and every reset or shutdown QEMU itself requests, next to the console log. CI uploads that log with the console's when a test fails.
+- **The emulator logs what its watchdog does**, and every shutdown QEMU is asked for, next to the console log. CI uploads that log with the console's when a test fails.
 - **The health check measures its time limits on the boot's monotonic clock**, which setting the time of day does not move.
 - **BREAKING (development builds only)**, as the bootloader changes only with a factory image and no release has shipped the old layout:
   - an image from after this change, booted by a bootloader from before it, refuses to upgrade until the factory image is written;
@@ -32,7 +32,7 @@ None.
 ### Modified Capabilities
 - `firmware/boot-rollback`: the stored environment has two copies, and a write cut short leaves the previous state in effect; the bootloader names its copies to the system.
 - `firmware/health-check`: the time limits run on the monotonic clock.
-- `testing/emulation`: the emulator logs its watchdog's actions and the resets it requests.
+- `testing/emulation`: the emulator logs its watchdog's actions and the shutdowns it is asked for.
 
 ## Impact
 

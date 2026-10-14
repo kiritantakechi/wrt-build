@@ -66,9 +66,10 @@ Alternatives considered:
 
 ### D5. The emulator logs its resets
 
-- QEMU starts with `-trace watchdog_perform_action -trace qemu_system_shutdown_request -D emulator<n>/qemu.log`: each line carries the time and the action, the watchdog's or a shutdown or reset QEMU itself requests.
-- CI's console artifact takes `qemu.log` with `console.log`.
-- A reset without a line there and without a message on the console is then the guest's own, or a harness power cut, which the tests that cut the power know they did.
+- QEMU starts with `-trace watchdog_perform_action -trace qemu_system_shutdown_request -msg timestamp=on -D emulator<n>/qemu-run.log`: each line carries the time and the action, the watchdog's or a shutdown QEMU is asked for, a harness power cut among them.
+- QEMU writes that file anew at every start, and a power cut starts QEMU again, so `Emulator.power_cut` appends the stopped run's lines to `qemu.log`, which keeps the session's; the session ends with a power cut too.
+- CI's console artifacts take both with `console.log`.
+- A guest's own reset or reboot is not traced; the kernel prints it on the console. A reset that neither the console nor the log shows is then one the harness forced, which the tests that cut the power know they did.
 
 ### D6. Tests
 

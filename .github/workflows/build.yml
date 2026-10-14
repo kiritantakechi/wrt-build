@@ -344,7 +344,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: system-test-console-${{ matrix.board }}-${{ matrix.suite.name }}
-          path: ${{ env.WRT_WORKDIR }}/test/${{ matrix.board }}/emulator*/console.log
+          # QEMU's log names a reset the console does not explain (trial-boot-resilience D5).
+          path: |
+            ${{ env.WRT_WORKDIR }}/test/${{ matrix.board }}/emulator*/console.log
+            ${{ env.WRT_WORKDIR }}/test/${{ matrix.board }}/emulator*/qemu*.log
           if-no-files-found: ignore
 
   # The keys exist only in the release-signing environment, whose reviewers
@@ -447,7 +450,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: drill-console-${{ matrix.board }}
-          path: ${{ env.WRT_WORKDIR }}/test/${{ matrix.board }}/emulator*/console.log
+          # QEMU's log names a reset the console does not explain (trial-boot-resilience D5).
+          path: |
+            ${{ env.WRT_WORKDIR }}/test/${{ matrix.board }}/emulator*/console.log
+            ${{ env.WRT_WORKDIR }}/test/${{ matrix.board }}/emulator*/qemu*.log
           if-no-files-found: ignore
 
   # The check main's rules require (board-model D9), under the name it always
