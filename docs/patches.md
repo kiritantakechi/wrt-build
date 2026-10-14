@@ -533,7 +533,7 @@ Why it matters here: the storage is on the data disk, and wrt-containers and wrt
 
 What the patch does: the driver gets a lock of its own, `home.lock` in the `overlay` directory of the run root. It is held while the driver binds the home, while `Cleanup()` unmounts it, and while a probe that runs after the initialization mounts under the home. It keeps two operations on one mount apart, as the graph lock does for the probes of the initialization, and a probe runs once per run root, so once per boot. Taking the graph lock in `Status()` instead would leave the creations' probes unlocked: they run under the layer store's lock, after which the graph lock cannot be taken. `PKG_RELEASE` goes to 5.
 
-Verification log: see the `container-storage-probes` change.
+Verification log: the services/containers test "Runtime commands at the same time" runs ten rounds of eight podman commands at once, three in a row each, with the probes' records removed as they appear, so that every command probes. Without the patch, 7 and 8 of the 10 rounds left the probes' mounts behind in two runs; with it, none of 30 rounds in three runs did, and every command succeeded (2026-10-15, R4S).
 
 ### luci-base: the host tools built in the host build directory
 
