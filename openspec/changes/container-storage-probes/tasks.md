@@ -14,7 +14,7 @@
 - [x] 2.1 Run the services system tests on both boards (dev profile).
 
   Verify: all tests pass on both boards.
-- [ ] 2.2 Get a green CI run for both boards.
+- [x] 2.2 Get a green CI run for both boards.
 
   Verify: record the run in `docs/ci.md`, with the cause of run 38556156281's failures.
 

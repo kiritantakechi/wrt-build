@@ -17,7 +17,7 @@
 - [x] 2.2 Run the full system tests on both boards (dev profile).
 
   Verify: all tests pass on both boards.
-- [ ] 2.3 Get a green CI run for both boards.
+- [x] 2.3 Get a green CI run for both boards.
 
   Verify: record the run in `docs/ci.md`, with the cause of the refused probes of runs 38102368454 and 38252151081.
 
