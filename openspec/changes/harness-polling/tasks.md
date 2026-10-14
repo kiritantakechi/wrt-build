@@ -14,7 +14,7 @@
 - [x] 2.1 Repeat the reproduction: `network/test_wan.py` ten times on the R4S on the VM, with `stress-ng --cpu 4` beside the emulator.
 
   Verify: ten of ten runs pass, where three of ten failed before (2026-10-14).
-- [ ] 2.2 Run the full system tests on both boards (dev profile).
+- [x] 2.2 Run the full system tests on both boards (dev profile).
 
   Verify: all tests pass on both boards.
 - [ ] 2.3 Get a green CI run for both boards.
