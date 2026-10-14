@@ -91,7 +91,7 @@ def test_the_cores_are_the_board_s(router: Router, board: Board) -> None:
 def _lease(client: Netns) -> str:
     """Wait for the client's DHCP lease; return its address, which must be in the LAN."""
     shown = until(
-        lambda: client.run("ip", "-4", "-o", "addr", "show", "dev", "eth0") or None,
+        lambda: client.run("ip", "-4", "-o", "addr", "show", "dev", "eth0"),
         timeout=DHCP_TIMEOUT,
         what=f"DHCP lease of {client.name}",
     )

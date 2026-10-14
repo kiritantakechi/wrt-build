@@ -93,6 +93,8 @@ The test harness, `tests/wrt_tests`, is four packages, layered from the bottom u
 
 The package root exports `spec` alone, which every test imports. The tests themselves are no layer's: a test may use every layer. Code that acts on the router belongs to `device` even when the data it puts there comes from below, as `device/trust.py` puts the sandbox's CA and the release keys on the router.
 
+A test waits for a condition with `model.poll.until`, whose probe answers with content once the condition holds: an empty answer, whether `None`, `False`, zero, an empty string or an empty collection, means not yet, as in an `if`. So a probe may return a command's output, a list of matches or a status field as it is, and a wait cannot end on the empty output of a command that found nothing.
+
 ## Order and naming in a module
 
 Every shell library module and every harness module reads top-down, in this order:

@@ -17,6 +17,7 @@ from wrt_tests.model.boards import BOARDS_DIR, Description
 from wrt_tests.model.coverage import VerifiedElsewhere
 from wrt_tests.model.data import DataError, read_json, read_toml
 from wrt_tests.model.outputs import EmulationSource, Manifest, Release, ToolchainRecord
+from wrt_tests.model.poll import until
 from wrt_tests.model.undefined_behavior import Diagnostic, Review
 
 if TYPE_CHECKING:
@@ -277,3 +278,24 @@ def test_a_malformed_data_file_names_the_field(name: str, breakage: str, tmp_pat
         data.read(copy)
     problems = error.value.problems
     assert any(problem.startswith(f"{copy}: {where}: ") for problem in problems), problems
+
+
+# Every kind of empty answer a probe may give while its condition does not hold.
+EMPTY_ANSWERS = (None, False, 0, "", (), frozenset())
+
+
+def _answers(*answers: object) -> Callable[[], object]:
+    """Return a probe that gives ``answers`` one by one, then the last for ever."""
+    remaining = list(answers)
+    return lambda: remaining.pop(0) if len(remaining) > 1 else remaining[0]
+
+
+@spec(CAPABILITY, "Waiting for a condition", "A probe answers empty first")
+def test_a_wait_goes_on_through_empty_answers() -> None:
+    assert until(_answers("", [], "listening"), timeout=5, what="an answer", every=0) == "listening"
+
+
+@spec(CAPABILITY, "Waiting for a condition", "No answer within the time limit")
+def test_a_wait_without_an_answer_names_what_it_waited_for() -> None:
+    with pytest.raises(TimeoutError, match=re.escape("no listener within 0.2 s")):
+        until(_answers(*EMPTY_ANSWERS), timeout=0.2, what="listener", every=0.01)

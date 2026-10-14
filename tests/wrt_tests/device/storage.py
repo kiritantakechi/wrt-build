@@ -70,7 +70,7 @@ def device(router: Router, disk: Disk) -> str:
     # The SCSI model is padded with spaces.
     command = f"grep -l {shlex.quote(f'^{disk.name} *$')} /sys/block/sd*/device/model || true"
     model = until(
-        lambda: router.run(command) or None,
+        lambda: router.run(command),
         timeout=PLUG_TIMEOUT,
         what=f"{disk.name}'s block device",
     )
