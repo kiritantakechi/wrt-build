@@ -523,6 +523,18 @@ What the patch does: both states resolve the paths only when they differ as stri
 
 Verification log: the services/containers test "Runtime commands at the same time" runs ten rounds of eight `podman info` at once, each on a scratch storage whose run root does not exist yet. Concurrency alone reproduced nothing in ten rounds without the patch, even with the run root behind 32 symlinks: the window is two path resolutions wide. A symlink on the run root's path that keeps changing its target between two names of one directory (a bind mount), as a concurrent creation changes how the path resolves, made all ten rounds fail without the patch (2026-10-12, R6S).
 
+### podman: the storage's feature probes leave no mounts behind
+
+Patch: `patches/packages/0007-podman-lock-the-storage-s-home-mount-for-its-lazy-fe.patch` (adds the podman patch `utils/podman/patches/021-overlay-lock-home-s-mount-for-the-lazy-feature-probes.patch`, to its vendored copy of go.podman.io/storage), for go.podman.io/storage, carried by openwrt/packages until then.
+
+Problem: the storage's overlay driver probes three kernel features when it is first asked about them, after its initialization: idmapped lower layers, in `Status()`, which `podman info` calls, and in the creation of a layer or a container; volatile mounts, in `Status()` and when it mounts a layer; and data-only lower layers. Each probe mounts in a new directory under the driver's home, then unmounts by path. The store holds its graph lock while the driver initializes, which binds the home onto itself unless it is a mount point already (`mount.MakePrivate`), and while `Cleanup()` unmounts the home at a command's end. It does not hold it for `Status()` or the creations. When another process binds the home while a probe has its mounts under the home's previous mount, the bind hides them. podman warns `Unmount ".../overlay/compat1721885628/lower-mapped": invalid argument`, the probe's directory cannot be removed, and the mounts stay until a reboot.
+
+Why it matters here: the storage is on the data disk, and wrt-containers and wrt-sync run podman at the same time after a boot or a mount of the data disk, on a run root in RAM that has no record of the probes yet. Mounts left under the storage keep the data disk's mount busy until a reboot. CI run 38556156281 lost the services/containers test "Runtime commands at the same time" to it in both attempts: its cleanup could not remove the scratch storage (`Resource busy`).
+
+What the patch does: the driver gets a lock of its own, `home.lock` in the `overlay` directory of the run root. It is held while the driver binds the home, while `Cleanup()` unmounts it, and while a probe that runs after the initialization mounts under the home. It keeps two operations on one mount apart, as the graph lock does for the probes of the initialization, and a probe runs once per run root, so once per boot. Taking the graph lock in `Status()` instead would leave the creations' probes unlocked: they run under the layer store's lock, after which the graph lock cannot be taken. `PKG_RELEASE` goes to 5.
+
+Verification log: see the `container-storage-probes` change.
+
 ### luci-base: the host tools built in the host build directory
 
 Patch: `patches/luci/0001-luci-base-build-po2lmo-and-jsmin-in-the-host-build-d.patch`, for openwrt/luci.

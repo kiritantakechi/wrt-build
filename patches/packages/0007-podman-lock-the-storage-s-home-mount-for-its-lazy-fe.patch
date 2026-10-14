@@ -1,0 +1,182 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Wed, 14 Oct 2026 23:24:14 +0800
+Subject: [PATCH] podman: lock the storage's home mount for its lazy feature
+ probes
+
+podman's storage probes some kernel features only when it is first
+asked about them, mounting under its home without the lock that keeps
+another process from binding the home onto itself meanwhile. podman
+commands starting together on a run root without the probes' records,
+as the first ones after a boot, then leave the probes' mounts behind now
+and then: they stay until a reboot and keep the file system under the
+storage busy.
+
+Carry the storage patch that locks the home's mount for these probes. It
+is meant for go.podman.io/storage, which podman vendors.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ utils/podman/Makefile                         |   2 +-
+ ...-s-mount-for-the-lazy-feature-probes.patch | 138 ++++++++++++++++++
+ 2 files changed, 139 insertions(+), 1 deletion(-)
+ create mode 100644 utils/podman/patches/021-overlay-lock-home-s-mount-for-the-lazy-feature-probes.patch
+
+diff --git a/utils/podman/Makefile b/utils/podman/Makefile
+index 803d59a..497f1ce 100644
+--- a/utils/podman/Makefile
++++ b/utils/podman/Makefile
+@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=podman
+ PKG_VERSION:=5.8.4
+-PKG_RELEASE:=4
++PKG_RELEASE:=5
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+ PKG_SOURCE_URL:=https://github.com/podman-container-tools/podman/archive/v$(PKG_VERSION)
+diff --git a/utils/podman/patches/021-overlay-lock-home-s-mount-for-the-lazy-feature-probes.patch b/utils/podman/patches/021-overlay-lock-home-s-mount-for-the-lazy-feature-probes.patch
+new file mode 100644
+index 0000000..c3d6eb5
+--- /dev/null
++++ b/utils/podman/patches/021-overlay-lock-home-s-mount-for-the-lazy-feature-probes.patch
+@@ -0,0 +1,138 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] overlay: lock home's mount for the lazy feature probes
++
++The overlay driver probes some kernel features only when it is first
++asked about them: idmapped lower layers (SupportsShifting, so Status and
++the creation of a layer or a container), volatile mounts (Status, Get)
++and data-only lower layers. Each probe mounts in a new directory under
++home, then unmounts by path and removes the directory.
++
++The store holds its graph lock while it calls Init, which binds home
++onto itself unless it is a mount point already (mount.MakePrivate), and
++Cleanup, which unmounts it: the lock keeps these changes of home's mount
++apart from the mounts that Init's own probes make. The store does not
++hold it while it calls Status, or while it creates a layer or a
++container. When another process binds home meanwhile, the bind hides the
++probe's mounts: the probe's unmounts find no mount at their paths, the
++directory cannot be removed, and the mounts stay until a reboot, keeping
++the file system under the storage busy:
++
++  level=warning msg="Unmount \"/mnt/data/containers/storage/overlay/compat1721885628/lower-mapped\": invalid argument"
++
++It takes podman commands at once on a run root without the probes'
++records, as the first commands after a boot have.
++
++Hold a lock of the driver, in the run home, while Init binds home, while
++Cleanup unmounts it, and while a probe that runs after Init mounts under
++it.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++ .../storage/drivers/overlay/overlay.go        | 28 ++++++++++++++++++-
++ 1 file changed, 27 insertions(+), 1 deletion(-)
++
++diff --git a/vendor/go.podman.io/storage/drivers/overlay/overlay.go b/vendor/go.podman.io/storage/drivers/overlay/overlay.go
++index 2eb720c..8bb1f03 100644
++--- a/vendor/go.podman.io/storage/drivers/overlay/overlay.go
+++++ b/vendor/go.podman.io/storage/drivers/overlay/overlay.go
++@@ -37,6 +37,7 @@ import (
++ 	"go.podman.io/storage/pkg/fsutils"
++ 	"go.podman.io/storage/pkg/idmap"
++ 	"go.podman.io/storage/pkg/idtools"
+++	"go.podman.io/storage/pkg/lockfile"
++ 	"go.podman.io/storage/pkg/mount"
++ 	"go.podman.io/storage/pkg/parsers"
++ 	"go.podman.io/storage/pkg/system"
++@@ -51,6 +52,7 @@ const (
++ 	defaultPerms         = os.FileMode(0o555)
++ 	selinuxLabelTest     = "system_u:object_r:container_file_t:s0"
++ 	mountProgramFlagFile = ".has-mount-program"
+++	homeLockFile         = "home.lock"
++ )
++ 
++ // This backend uses the overlay union filesystem for containers
++@@ -138,6 +140,14 @@ type Driver struct {
++ 	stagingDirsLocks map[string]*staging_lockfile.StagingLockFile
++ 
++ 	supportsIDMappedMounts *bool
+++
+++	// homeLock is held while Init binds home onto itself and Cleanup
+++	// unmounts it, and while a feature probe that runs after Init mounts
+++	// under home. The store holds its graph lock while it calls Init and
+++	// Cleanup, but not while a feature is first asked about, as in Status
+++	// or a layer's creation: a bind of home by another process then hides
+++	// the probe's mounts from the paths that it unmounts them by.
+++	homeLock *lockfile.LockFile
++ }
++ 
++ type additionalLayerStore struct {
++@@ -269,7 +279,9 @@ func (d *Driver) getSupportsVolatile() (bool, error) {
++ 	if d.supportsVolatile != nil {
++ 		return *d.supportsVolatile, nil
++ 	}
+++	d.homeLock.Lock()
++ 	supportsVolatile, err := checkSupportVolatile(d.home, d.runhome)
+++	d.homeLock.Unlock()
++ 	if err != nil {
++ 		return false, err
++ 	}
++@@ -281,7 +293,9 @@ func (d *Driver) getSupportsDataOnly() (bool, error) {
++ 	if d.supportsDataOnly != nil {
++ 		return *d.supportsDataOnly, nil
++ 	}
+++	d.homeLock.Lock()
++ 	supportsDataOnly, err := supportsDataOnlyLayersCached(d.home, d.runhome)
+++	d.homeLock.Unlock()
++ 	if err != nil {
++ 		return false, err
++ 	}
++@@ -341,6 +355,10 @@ func Init(home string, options graphdriver.Options) (graphdriver.Driver, error)
++ 	if err := os.MkdirAll(runhome, 0o700); err != nil {
++ 		return nil, err
++ 	}
+++	homeLock, err := lockfile.GetLockFile(filepath.Join(runhome, homeLockFile))
+++	if err != nil {
+++		return nil, err
+++	}
++ 
++ 	if opts.mountProgram == "" {
++ 		if supported, err := SupportsNativeOverlay(home, runhome); err != nil {
++@@ -422,7 +440,10 @@ func Init(home string, options graphdriver.Options) (graphdriver.Driver, error)
++ 	}
++ 
++ 	if !opts.skipMountHome {
++-		if err := mount.MakePrivate(home); err != nil {
+++		homeLock.Lock()
+++		err := mount.MakePrivate(home)
+++		homeLock.Unlock()
+++		if err != nil {
++ 			return nil, fmt.Errorf("overlay: failed to make mount private: %w", err)
++ 		}
++ 	}
++@@ -445,6 +466,7 @@ func Init(home string, options graphdriver.Options) (graphdriver.Driver, error)
++ 		options:               *opts,
++ 		stagingDirsLocksMutex: sync.Mutex{},
++ 		stagingDirsLocks:      make(map[string]*staging_lockfile.StagingLockFile),
+++		homeLock:              homeLock,
++ 	}
++ 
++ 	d.naiveDiff = graphdriver.NewNaiveDiffDriver(d, graphdriver.NewNaiveLayerIDMapUpdater(d))
++@@ -863,6 +885,8 @@ func (d *Driver) Cleanup() error {
++ 	if anyPresent {
++ 		return nil
++ 	}
+++	d.homeLock.Lock()
+++	defer d.homeLock.Unlock()
++ 	return mount.Unmount(d.home)
++ }
++ 
++@@ -2672,7 +2696,9 @@ func (d *Driver) supportsIDmappedMounts() bool {
++ 		return *d.supportsIDMappedMounts
++ 	}
++ 
+++	d.homeLock.Lock()
++ 	supportsIDMappedMounts, err := checkAndRecordIDMappedSupport(d.home, d.runhome)
+++	d.homeLock.Unlock()
++ 	d.supportsIDMappedMounts = &supportsIDMappedMounts
++ 	if err == nil {
++ 		return supportsIDMappedMounts

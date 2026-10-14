@@ -33,22 +33,36 @@ EXPOSED_PORT = 8080
 FIREWALL_TIMEOUT = 30
 # Nothing of an app may be in the image (the app containers' spec).
 NATIVE_APPS = ("qbittorrent", "libtorrent", "qt6", "qt5", "qtbase")
-# podman commands started at once, and how often, each time on a storage of their
-# own whose run root does not exist yet, as the configured one after a boot
-# (device-robustness D4). A concurrent command that creates the run root changes
-# how its path resolves between podman's two resolutions of it, a window too
-# short to hit by chance. So a symlink on the path keeps changing its target,
-# swapped atomically (rename), between two names of one directory (a bind
-# mount): the path resolves now to one name, now to the other, while every file
-# under it stays the same.
+# podman commands started at once, how many each runs in a row, and how often,
+# each time on a storage of their own whose run root does not exist yet, as the
+# configured one after a boot (device-robustness D4). A concurrent command that
+# creates the run root changes how its path resolves between podman's two
+# resolutions of it, a window too short to hit by chance. So a symlink on the
+# path keeps changing its target, swapped atomically (rename), between two names
+# of one directory (a bind mount): the path resolves now to one name, now to the
+# other, while every file under it stays the same. Commands in a row keep the
+# starts and ends of some, which bind and unmount the storage's home, overlapping
+# with the others' work through a round (container-storage-probes D3).
 AT_ONCE = 8
+IN_A_ROW = 3
 ROUNDS = 10
 SCRATCH = "/var/run/concurrency"
 TOGGLE = (
     "import * as fs from 'fs';"
-    f" while (fs.access('{SCRATCH}/toggle'))"
+    f" while (fs.access('{SCRATCH}/busy'))"
     " for (let target in ['a', 'b']) {"
     f" fs.symlink(target, '{SCRATCH}/next'); fs.rename('{SCRATCH}/next', '{SCRATCH}/link'); }}"
+)
+# The storage probes some kernel features with mounts under its home when it is
+# first asked about them, unless the run root records the answers, as it does not
+# for the first commands after a boot. Removing the records as they appear keeps
+# every command probing (container-storage-probes D3).
+FEATURES = ("idmapped-lower-dir", "volatile")
+FORGET = (
+    "import * as fs from 'fs';"
+    f" while (fs.access('{SCRATCH}/busy'))"
+    f" for (let feature in {list(FEATURES)}) for (let found in ['true', 'false'])"
+    f" fs.unlink('{SCRATCH}/a/runroot/overlay/' + feature + '-' + found);"
 )
 
 
@@ -193,20 +207,33 @@ def test_runtime_commands_at_the_same_time(online: Online, data_disk: Disk) -> N
     # Through /run -> /var/run -> /tmp/run, then the changing symlink.
     runroot = "/run/concurrency/link/runroot"
     podman = f"podman --root {root} --runroot {runroot} info >/dev/null"
+    # What is mounted under the scratch storage: nothing, once every command has
+    # cleaned up after itself.
+    mounted = f"grep -F ' {root}/' /proc/self/mountinfo"
+    # Whatever a round left, so that every round starts on a clean scratch storage.
+    cleanup = (
+        f"{mounted} | cut -d' ' -f5 | sort -r | xargs -rn1 umount -l;"
+        f" umount {SCRATCH}/b 2>/dev/null; rm -rf {root} {SCRATCH} {SCRATCH}.*"
+    )
     round_ = (
-        f"rm -rf {root} {SCRATCH} && mkdir -p {SCRATCH}/a {SCRATCH}/b"
+        f"{cleanup}; mkdir -p {SCRATCH}/a {SCRATCH}/b"
         f" && mount -o bind {SCRATCH}/a {SCRATCH}/b"
-        f" && ln -s a {SCRATCH}/link && touch {SCRATCH}/toggle"
-        f' && {{ ucode -e "{TOGGLE}" & toggle=$!; }};'
+        f" && ln -s a {SCRATCH}/link && touch {SCRATCH}/busy"
+        f' && {{ ucode -e "{TOGGLE}" & toggle=$!; ucode -e "{FORGET}" & forget=$!; }};'
         f" pids=; for i in $(seq {AT_ONCE}); do"
-        f' {podman} 2>{SCRATCH}.$i & pids="$pids $!"; done; failed=0;'
+        f" ( for k in $(seq {IN_A_ROW}); do {podman} || exit; done ) 2>{SCRATCH}.$i &"
+        ' pids="$pids $!"; done; failed=0;'
         " for pid in $pids; do wait $pid || failed=$((failed + 1)); done;"
-        f" rm {SCRATCH}/toggle; wait $toggle; umount {SCRATCH}/b;"
-        f" cat {SCRATCH}.*; echo failed=$failed"
+        f" rm {SCRATCH}/busy; wait $toggle $forget; umount {SCRATCH}/b;"
+        f" cat {SCRATCH}.*; {mounted} | sed 's/^/left mounted: /'; echo failed=$failed"
     )
     try:
         reports = [online.router.run(round_, timeout=300) for _ in range(ROUNDS)]
     finally:
-        online.router.run(f"umount {SCRATCH}/b 2>/dev/null; rm -rf {root} {SCRATCH} {SCRATCH}.*")
+        online.router.returncode(cleanup)
     failed = [report for report in reports if not report.endswith("failed=0")]
     assert not failed, f"{len(failed)} of {ROUNDS} rounds had commands fail; the first: {failed[0]}"
+    leaked = [report for report in reports if "left mounted: " in report]
+    assert not leaked, (
+        f"{len(leaked)} of {ROUNDS} rounds left mounts behind; the first: {leaked[0]}"
+    )
