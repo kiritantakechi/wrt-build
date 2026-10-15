@@ -29,7 +29,7 @@
 - [x] 4.1 Run the full system tests on both boards (dev profile), then the trial tests eight times on the R4S under `stress-ng --cpu 4`.
 
   Verify: all tests pass; every reset in the repeated runs is either named in `qemu.log` or a harness power cut, and every trial ends confirmed on the new slot. Record what `qemu.log` named, if anything, in `docs/ci.md`.
-- [ ] 4.2 Get a green CI run for both boards.
+- [x] 4.2 Get a green CI run for both boards.
 
   Verify: record the run in `docs/ci.md`, with the cause found for runs 37293958173 and 38252151081.
 
