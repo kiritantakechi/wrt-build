@@ -60,6 +60,8 @@ The emulator SHALL provide the following means of fault injection:
 - keystrokes sent to the serial console during boot;
 - restoring the disk to its initial state between tests.
 
+The emulator SHALL log every action of its watchdog and every shutdown it is asked for, with the time, next to the console log and for the whole session, so that a reset the console does not explain is named there.
+
 #### Scenario: Tests are isolated
 - **WHEN** a test changes the configuration, and then the next test starts
 - **THEN** the next test sees the disk in the image's initial state
@@ -67,6 +69,10 @@ The emulator SHALL provide the following means of fault injection:
 #### Scenario: Forced power cut
 - **WHEN** a test forces a power cut on the running system and then restarts the VM
 - **THEN** the VM reboots from the same disk, and content already written to disk before the power cut is still there
+
+#### Scenario: Watchdog reset logged
+- **WHEN** userspace stops feeding the watchdog and the watchdog resets the machine
+- **THEN** the emulator's log names the watchdog's action, while the console shows no shutdown
 
 ### Requirement: USB storage
 The emulator SHALL provide a USB 3 host controller on which a test plugs a disk in, on a port it chooses, and pulls it out again while the system runs. The disk SHALL be attached through USB Attached SCSI, as the boards' data disks are, so that the image's own UAS driver serves it.

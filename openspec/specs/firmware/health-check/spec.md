@@ -34,6 +34,8 @@ If the system is in the trial boot state (`upgrade_available` is 1):
 
 If the system is already confirmed, a failed check SHALL only record the result and MUST NOT reboot.
 
+The time limits SHALL run on a clock that setting the time of day does not move, as NTP or an administrator does during a boot.
+
 #### Scenario: Check passes during trial boot
 - **WHEN** the health check passes in the trial boot state
 - **THEN** `upgrade_available` becomes 0, `bootcount` becomes 0, and all later reboots keep using this slot
@@ -45,6 +47,10 @@ If the system is already confirmed, a failed check SHALL only record the result 
 #### Scenario: Check fails on a confirmed system
 - **WHEN** the system is already confirmed and the health check fails
 - **THEN** the failure is recorded, and the device does not reboot
+
+#### Scenario: Clock set during a trial boot
+- **WHEN** the time of day is set forward by a day while a trial boot's checks are still failing, and they pass within the total time limit
+- **THEN** the slot is confirmed, and the device does not reboot
 
 ### Requirement: Slot status query
 An administrator SHALL be able to run one command to see the current slot, whether it is confirmed, the result of the most recent health check, and the failed checks.
