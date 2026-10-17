@@ -1,0 +1,485 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Sat, 17 Oct 2026 15:36:30 +0800
+Subject: [PATCH] procd: validate firmware images without blocking
+
+procd validates an upgrade image, for validate_firmware_image and before
+sysupgrade starts the upgrade, by reading the validation script's output
+in its main loop until the script ends; meanwhile it feeds no watchdog
+and answers no ubus call. A validation that takes longer than the
+watchdog's timeout resets the device before the upgrade begins: in the
+emulator on a slow host, the A/B tests' upgrades now and then.
+
+Carry the procd patch that reads the output in the main loop and
+answers the request once it is complete. It is meant for procd upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/system/procd/Makefile                 |   2 +-
+ ...mages-without-blocking-the-main-loop.patch | 443 ++++++++++++++++++
+ 2 files changed, 444 insertions(+), 1 deletion(-)
+ create mode 100644 package/system/procd/patches/100-system-validate-images-without-blocking-the-main-loop.patch
+
+diff --git a/package/system/procd/Makefile b/package/system/procd/Makefile
+index 22e7f83..b18a4b6 100644
+--- a/package/system/procd/Makefile
++++ b/package/system/procd/Makefile
+@@ -8,7 +8,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=procd
+-PKG_RELEASE:=2
++PKG_RELEASE:=3
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/procd.git
+diff --git a/package/system/procd/patches/100-system-validate-images-without-blocking-the-main-loop.patch b/package/system/procd/patches/100-system-validate-images-without-blocking-the-main-loop.patch
+new file mode 100644
+index 0000000..dc1ec3e
+--- /dev/null
++++ b/package/system/procd/patches/100-system-validate-images-without-blocking-the-main-loop.patch
+@@ -0,0 +1,443 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] system: validate images without blocking the main loop
++
++validate_firmware_image and sysupgrade run
++/usr/libexec/validate_firmware_image and read its output with a blocking
++read() until the script ends. Meanwhile procd does nothing else: it
++answers no ubus call, supervises no service and feeds no watchdog. A
++validation that takes longer than the watchdog's timeout, as an upgrade
++image's can on a slow device, resets the device before the upgrade
++begins.
++
++Read the script's output in the main loop instead, from the non-blocking
++read end of the pipe, and defer the request until the output is
++complete: validate_firmware_image replies then, and sysupgrade checks
++the result and starts the upgrade then, as before. Each validation keeps
++its own result and error message, which were in a global blob_buf and a
++static buffer, so that validations at once no longer overwrite each
++other's; and both ends of the pipe are close-on-exec, so that the
++services procd starts meanwhile do not inherit them.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++ system.c | 267 +++++++++++++++++++++++++++++++++++++++----------------
++ 1 file changed, 188 insertions(+), 79 deletions(-)
++
++diff --git a/system.c b/system.c
++index f6fe444..5e6841e 100644
++--- a/system.c
+++++ b/system.c
++@@ -546,119 +546,182 @@ static int proc_signal(struct ubus_context *ctx, struct ubus_object *obj,
++ 	return 0;
++ }
++ 
+++/*
+++ * A validation of a firmware image runs the validation script while procd's
+++ * main loop goes on: its output is parsed as it comes, and the request waits,
+++ * deferred, until the output is complete. Then done() answers it.
+++ */
+++struct validation {
+++	struct uloop_fd output;
+++	json_tokener *tok;
+++	size_t read_count;
+++	enum vjson_state state;
+++	char err[256];
+++	struct blob_buf result;
+++	struct ubus_context *ctx;
+++	struct ubus_request_data req;
+++	struct blob_attr *msg;
+++	void (*done)(struct validation *v);
+++};
+++
++ __attribute__((format (printf, 2, 3)))
++-static enum vjson_state vjson_error(char **b, const char *fmt, ...)
+++static enum vjson_state vjson_error(struct validation *v, const char *fmt, ...)
++ {
++-	static char buf[256] = { 0 };
++ 	const char *pfx = "Firmware image couldn't be validated: ";
++ 	va_list va;
++ 	int r;
++ 
++-	r = snprintf(buf, sizeof(buf), "%s", pfx);
+++	r = snprintf(v->err, sizeof(v->err), "%s", pfx);
++ 	if (r < 0) {
++-		*b = "vjson_error() snprintf failed";
+++		snprintf(v->err, sizeof(v->err), "vjson_error() snprintf failed");
++ 		return VJSON_ERROR;
++ 	}
++ 
++ 	va_start(va, fmt);
++-	r = vsnprintf(buf+r, sizeof(buf)-r, fmt, va);
++-	if (r < 0) {
++-		*b = "vjson_error() vsnprintf failed";
++-		return VJSON_ERROR;
++-	}
+++	r = vsnprintf(v->err + r, sizeof(v->err) - r, fmt, va);
++ 	va_end(va);
+++	if (r < 0)
+++		snprintf(v->err, sizeof(v->err), "vjson_error() vsnprintf failed");
++ 
++-	*b = buf;
++ 	return VJSON_ERROR;
++ }
++ 
++-static enum vjson_state vjson_parse_token(json_tokener *tok, char *buf, ssize_t len, char **err)
+++static enum vjson_state vjson_parse_token(struct validation *v, char *buf, ssize_t len)
++ {
++ 	json_object *jsobj = NULL;
++ 
++-	jsobj = json_tokener_parse_ex(tok, buf, len);
++-	if (json_tokener_get_error(tok) == json_tokener_continue)
+++	jsobj = json_tokener_parse_ex(v->tok, buf, len);
+++	if (json_tokener_get_error(v->tok) == json_tokener_continue)
++ 		return VJSON_CONTINUE;
++ 
++-	if (json_tokener_get_error(tok) == json_tokener_success) {
+++	if (json_tokener_get_error(v->tok) == json_tokener_success) {
++ 		if (json_object_get_type(jsobj) != json_type_object) {
++ 			json_object_put(jsobj);
++-			return vjson_error(err, "result is not an JSON object");
+++			return vjson_error(v, "result is not an JSON object");
++ 		}
++ 
++-		blobmsg_add_object(&b, jsobj);
+++		blobmsg_add_object(&v->result, jsobj);
++ 		json_object_put(jsobj);
++ 		return VJSON_SUCCESS;
++ 	}
++ 
++-	return vjson_error(err, "failed to parse JSON: %s (%d)",
++-			   json_tokener_error_desc(json_tokener_get_error(tok)),
++-			   json_tokener_get_error(tok));
+++	return vjson_error(v, "failed to parse JSON: %s (%d)",
+++			   json_tokener_error_desc(json_tokener_get_error(v->tok)),
+++			   json_tokener_get_error(v->tok));
++ }
++ 
++-static enum vjson_state vjson_parse(int fd, char **err)
+++static void validation_free(struct validation *v)
++ {
++-	enum vjson_state r = VJSON_ERROR;
++-	size_t read_count = 0;
++-	char buf[64] = { 0 };
++-	json_tokener *tok;
+++	json_tokener_free(v->tok);
+++	blob_buf_free(&v->result);
+++	free(v->msg);
+++	free(v);
+++}
+++
+++/*
+++ * validation_read - parse what the validation script wrote; once it has
+++ * written a whole JSON object, failed or ended, answer the request
+++ */
+++static void validation_read(struct uloop_fd *fd, unsigned int events)
+++{
+++	struct validation *v = container_of(fd, struct validation, output);
+++	char buf[64];
++ 	ssize_t len;
++ 	int _errno;
++ 
++-	tok = json_tokener_new();
++-	if (!tok)
++-		return vjson_error(err, "json_tokener_new() failed");
++-
++-	vjson_error(err, "incomplete JSON input");
++-
++-	while ((len = read(fd, buf, sizeof(buf)))) {
+++	for (;;) {
+++		len = read(fd->fd, buf, sizeof(buf));
++ 		if (len < 0 && errno == EINTR)
++ 			continue;
++ 
+++		if (len < 0 && errno == EAGAIN)
+++			return;
+++
++ 		if (len < 0) {
++ 			_errno = errno;
++-			json_tokener_free(tok);
++-			return vjson_error(err, "read() failed: %s (%d)",
++-					   strerror(_errno), _errno);
+++			v->state = vjson_error(v, "read() failed: %s (%d)",
+++					       strerror(_errno), _errno);
+++			break;
++ 		}
++ 
++-		read_count += len;
++-		r = vjson_parse_token(tok, buf, len, err);
++-		if (r != VJSON_CONTINUE)
+++		if (len == 0) {
+++			if (v->read_count == 0)
+++				v->state = vjson_error(v, "no JSON input");
++ 			break;
+++		}
++ 
++-		memset(buf, 0, sizeof(buf));
+++		v->read_count += len;
+++		v->state = vjson_parse_token(v, buf, len);
+++		if (v->state != VJSON_CONTINUE)
+++			break;
++ 	}
++ 
++-	if (read_count == 0)
++-		vjson_error(err, "no JSON input");
+++	if (v->state == VJSON_CONTINUE)
+++		v->state = vjson_error(v, "incomplete JSON input");
++ 
++-	json_tokener_free(tok);
++-	return r;
+++	uloop_fd_delete(fd);
+++	close(fd->fd);
+++	v->done(v);
+++	validation_free(v);
++ }
++ 
++ /**
++- * validate_firmware_image_call - perform validation & store result in global b
+++ * validation_new - a validation whose end done() answers
++  *
++- * @file: firmware image path
+++ * @msg: the request's message, copied for done() if given
++  */
++-static enum vjson_state validate_firmware_image_call(const char *file, char **err)
+++static struct validation *validation_new(struct ubus_context *ctx, struct blob_attr *msg,
+++					 void (*done)(struct validation *v))
+++{
+++	struct validation *v;
+++
+++	v = calloc(1, sizeof(*v));
+++	if (!v)
+++		return NULL;
+++
+++	v->ctx = ctx;
+++	v->done = done;
+++	v->state = VJSON_CONTINUE;
+++	blob_buf_init(&v->result, 0);
+++
+++	v->tok = json_tokener_new();
+++	if (v->tok && msg)
+++		v->msg = blob_memdup(msg);
+++
+++	if (!v->tok || (msg && !v->msg)) {
+++		if (v->tok)
+++			json_tokener_free(v->tok);
+++		blob_buf_free(&v->result);
+++		free(v);
+++		return NULL;
+++	}
+++
+++	return v;
+++}
+++
+++/**
+++ * validation_run - start the validation of @file in the main loop
+++ *
+++ * Returns VJSON_CONTINUE once the validation script runs, or VJSON_ERROR with
+++ * the reason in v->err.
+++ */
+++static enum vjson_state validation_run(struct validation *v, const char *file)
++ {
++ 	const char *path = "/usr/libexec/validate_firmware_image";
++-	enum vjson_state ret = VJSON_ERROR;
++ 	int _errno;
++ 	int fds[2];
++ 	int fd;
++ 
++-	blob_buf_init(&b, 0);
++-	vjson_error(err, "unhandled error");
++-
++ 	if (pipe(fds)) {
++ 		_errno = errno;
++-		return vjson_error(err, "pipe() failed: %s (%d)",
+++		return vjson_error(v, "pipe() failed: %s (%d)",
++ 				   strerror(_errno), _errno);
++ 	}
++ 
+++	/* Neither end goes to the services procd starts while the script runs */
+++	fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+++	fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+++
++ 	switch (fork()) {
++ 	case -1:
++ 		_errno = errno;
++@@ -666,7 +729,7 @@ static enum vjson_state validate_firmware_image_call(const char *file, char **er
++ 		close(fds[0]);
++ 		close(fds[1]);
++ 
++-		return vjson_error(err, "fork() failed: %s (%d)",
+++		return vjson_error(v, "fork() failed: %s (%d)",
++ 				   strerror(_errno), _errno);
++ 	case 0:
++ 		/* Set stdin & stderr to /dev/null */
++@@ -689,10 +752,12 @@ static enum vjson_state validate_firmware_image_call(const char *file, char **er
++ 	/* Parent process */
++ 	close(fds[1]);
++ 
++-	ret = vjson_parse(fds[0], err);
++-	close(fds[0]);
+++	fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL) | O_NONBLOCK);
+++	v->output.fd = fds[0];
+++	v->output.cb = validation_read;
+++	uloop_fd_add(&v->output, ULOOP_READ);
++ 
++-	return ret;
+++	return VJSON_CONTINUE;
++ }
++ 
++ enum {
++@@ -704,14 +769,24 @@ static const struct blobmsg_policy validate_firmware_image_policy[__VALIDATE_FIR
++ 	[VALIDATE_FIRMWARE_IMAGE_PATH] = { .name = "path", .type = BLOBMSG_TYPE_STRING },
++ };
++ 
+++static void validate_firmware_image_done(struct validation *v)
+++{
+++	if (v->state != VJSON_SUCCESS) {
+++		ubus_complete_deferred_request(v->ctx, &v->req, UBUS_STATUS_UNKNOWN_ERROR);
+++		return;
+++	}
+++
+++	ubus_send_reply(v->ctx, &v->req, v->result.head);
+++	ubus_complete_deferred_request(v->ctx, &v->req, UBUS_STATUS_OK);
+++}
+++
++ static int validate_firmware_image(struct ubus_context *ctx,
++ 				   struct ubus_object *obj,
++ 				   struct ubus_request_data *req,
++ 				   const char *method, struct blob_attr *msg)
++ {
++ 	struct blob_attr *tb[__VALIDATE_FIRMWARE_IMAGE_MAX];
++-	enum vjson_state ret = VJSON_ERROR;
++-	char *err;
+++	struct validation *v;
++ 
++ 	if (!msg)
++ 		return UBUS_STATUS_INVALID_ARGUMENT;
++@@ -720,11 +795,16 @@ static int validate_firmware_image(struct ubus_context *ctx,
++ 	if (!tb[VALIDATE_FIRMWARE_IMAGE_PATH])
++ 		return UBUS_STATUS_INVALID_ARGUMENT;
++ 
++-	ret = validate_firmware_image_call(blobmsg_get_string(tb[VALIDATE_FIRMWARE_IMAGE_PATH]), &err);
++-	if (ret != VJSON_SUCCESS)
+++	v = validation_new(ctx, NULL, validate_firmware_image_done);
+++	if (!v)
++ 		return UBUS_STATUS_UNKNOWN_ERROR;
++ 
++-	ubus_send_reply(ctx, req, b.head);
+++	if (validation_run(v, blobmsg_get_string(tb[VALIDATE_FIRMWARE_IMAGE_PATH])) != VJSON_CONTINUE) {
+++		validation_free(v);
+++		return UBUS_STATUS_UNKNOWN_ERROR;
+++	}
+++
+++	ubus_defer_request(ctx, req, &v->req);
++ 
++ 	return UBUS_STATUS_OK;
++ }
++@@ -763,9 +843,11 @@ static void sysupgrade_error(struct ubus_context *ctx,
++ 	ubus_send_reply(ctx, req, b.head);
++ }
++ 
++-static int sysupgrade(struct ubus_context *ctx, struct ubus_object *obj,
++-		      struct ubus_request_data *req, const char *method,
++-		      struct blob_attr *msg)
+++/*
+++ * sysupgrade_validated_status - check the validation's result and start the
+++ * upgrade, which replaces procd; return the status the request ends with
+++ */
+++static int sysupgrade_validated_status(struct validation *v)
++ {
++ 	enum {
++ 		VALIDATION_VALID,
++@@ -781,27 +863,18 @@ static int sysupgrade(struct ubus_context *ctx, struct ubus_object *obj,
++ 	struct blob_attr *validation[__VALIDATION_MAX];
++ 	struct blob_attr *tb[__SYSUPGRADE_MAX];
++ 	bool valid, forceable, allow_backup;
++-	enum vjson_state ret = VJSON_ERROR;
++-	char *err;
++ 
++-	if (!msg)
++-		return UBUS_STATUS_INVALID_ARGUMENT;
++-
++-	blobmsg_parse(sysupgrade_policy, __SYSUPGRADE_MAX, tb, blob_data(msg), blob_len(msg));
++-	if (!tb[SYSUPGRADE_PATH] || !tb[SYSUPGRADE_PREFIX])
++-		return UBUS_STATUS_INVALID_ARGUMENT;
++-
++-	ret = validate_firmware_image_call(blobmsg_get_string(tb[SYSUPGRADE_PATH]), &err);
++-	if (ret != VJSON_SUCCESS) {
++-		sysupgrade_error(ctx, req, err);
+++	if (v->state != VJSON_SUCCESS) {
+++		sysupgrade_error(v->ctx, &v->req, v->err);
++ 		return UBUS_STATUS_UNKNOWN_ERROR;
++ 	}
++ 
++-	blobmsg_parse(validation_policy, __VALIDATION_MAX, validation, blob_data(b.head), blob_len(b.head));
+++	blobmsg_parse(sysupgrade_policy, __SYSUPGRADE_MAX, tb, blob_data(v->msg), blob_len(v->msg));
+++	blobmsg_parse(validation_policy, __VALIDATION_MAX, validation, blob_data(v->result.head), blob_len(v->result.head));
++ 
++ 	if (!validation[VALIDATION_VALID] || !validation[VALIDATION_FORCEABLE] ||
++ 	    !validation[VALIDATION_ALLOW_BACKUP]) {
++-		sysupgrade_error(ctx, req, "Validation script provided invalid input");
+++		sysupgrade_error(v->ctx, &v->req, "Validation script provided invalid input");
++ 		return UBUS_STATUS_INVALID_ARGUMENT;
++ 	}
++ 
++@@ -811,14 +884,14 @@ static int sysupgrade(struct ubus_context *ctx, struct ubus_object *obj,
++ 
++ 	if (!valid) {
++ 		if (!forceable) {
++-			sysupgrade_error(ctx, req, "Firmware image is broken and cannot be installed");
+++			sysupgrade_error(v->ctx, &v->req, "Firmware image is broken and cannot be installed");
++ 			return UBUS_STATUS_NOT_SUPPORTED;
++ 		} else if (!tb[SYSUPGRADE_FORCE] || !blobmsg_get_bool(tb[SYSUPGRADE_FORCE])) {
++-			sysupgrade_error(ctx, req, "Firmware image is invalid");
+++			sysupgrade_error(v->ctx, &v->req, "Firmware image is invalid");
++ 			return UBUS_STATUS_NOT_SUPPORTED;
++ 		}
++ 	} else if (!allow_backup && tb[SYSUPGRADE_BACKUP]) {
++-		sysupgrade_error(ctx, req, "Firmware image doesn't allow preserving a backup");
+++		sysupgrade_error(v->ctx, &v->req, "Firmware image doesn't allow preserving a backup");
++ 		return UBUS_STATUS_NOT_SUPPORTED;
++ 	}
++ 
++@@ -834,6 +907,42 @@ static int sysupgrade(struct ubus_context *ctx, struct ubus_object *obj,
++ 	return UBUS_STATUS_UNKNOWN_ERROR;
++ }
++ 
+++static void sysupgrade_validated(struct validation *v)
+++{
+++	ubus_complete_deferred_request(v->ctx, &v->req, sysupgrade_validated_status(v));
+++}
+++
+++static int sysupgrade(struct ubus_context *ctx, struct ubus_object *obj,
+++		      struct ubus_request_data *req, const char *method,
+++		      struct blob_attr *msg)
+++{
+++	struct blob_attr *tb[__SYSUPGRADE_MAX];
+++	struct validation *v;
+++
+++	if (!msg)
+++		return UBUS_STATUS_INVALID_ARGUMENT;
+++
+++	blobmsg_parse(sysupgrade_policy, __SYSUPGRADE_MAX, tb, blob_data(msg), blob_len(msg));
+++	if (!tb[SYSUPGRADE_PATH] || !tb[SYSUPGRADE_PREFIX])
+++		return UBUS_STATUS_INVALID_ARGUMENT;
+++
+++	v = validation_new(ctx, msg, sysupgrade_validated);
+++	if (!v) {
+++		sysupgrade_error(ctx, req, "Firmware image couldn't be validated: out of memory");
+++		return UBUS_STATUS_UNKNOWN_ERROR;
+++	}
+++
+++	if (validation_run(v, blobmsg_get_string(tb[SYSUPGRADE_PATH])) != VJSON_CONTINUE) {
+++		sysupgrade_error(ctx, req, v->err);
+++		validation_free(v);
+++		return UBUS_STATUS_UNKNOWN_ERROR;
+++	}
+++
+++	ubus_defer_request(ctx, req, &v->req);
+++
+++	return UBUS_STATUS_OK;
+++}
+++
++ static void
++ procd_subscribe_cb(struct ubus_context *ctx, struct ubus_object *obj)
++ {

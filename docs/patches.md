@@ -579,4 +579,18 @@ Verification log: `tests/build/test_boards.py` runs the patched check on a stand
 
 2026-10-12, on the VM with the dev profile: the first `just build r4s dev` after the patch found a toolchain whose record named a git commit, built it anew as a whole, Rust's host toolchain with it, and built the R4S anew. A second `just build r4s dev` compiled nothing: its time report held only the kernel's two forced passes (41 s), and ccache saw no cacheable call. `just build r6s dev` then kept the toolchain and built the R6S anew, as its build directory had no record yet.
 
+### procd: firmware images validated without blocking
+
+Patch: `patches/openwrt/0039-procd-validate-firmware-images-without-blocking.patch` (adds the procd patch `package/system/procd/patches/100-system-validate-images-without-blocking-the-main-loop.patch`), for procd, carried by openwrt/openwrt until then.
+
+Problem: procd's `system` object validates an upgrade image, for `validate_firmware_image` and in `sysupgrade` before the upgrade starts, by running `/usr/libexec/validate_firmware_image` and reading its output with a blocking `read()` in its main loop until the script ends. Meanwhile procd answers no ubus call, supervises no service and feeds no watchdog. A validation longer than procd's 30 s watchdog timeout resets the device before the upgrade begins. The validation script opens the image several times (fwtool's signature and metadata checks, then `platform_check_image`), so a large image on a slow device can take that long. The result went into a global `blob_buf`, and the error message into a static buffer.
+
+Why it matters here: in the emulator on a slow host, the A/B tests' upgrades reset the router now and then before they began, and the trial came back on the wrong slot (CI runs 37293958173, 38252151081 and 38696888543). On the VM, with the session on four host cores that `stress-ng` slows, the A/B upgrade module reset seven times a run, and a monitor in the guest found procd in `anon_pipe_read` for the last 22 to 28 s before each reset (`procd-async-validation`).
+
+What the patch does: a validation keeps its pipe's read end, non-blocking, in procd's event loop, with its own JSON tokenizer, result and error message, and the request deferred. When the output holds a whole JSON object, fails or ends, it answers the request: `validate_firmware_image` with the result, and `sysupgrade` by checking the result and starting the upgrade, with the same replies and statuses as before. Both ends of the pipe are close-on-exec, so the services procd starts meanwhile do not inherit them. `PKG_RELEASE` goes to 3.
+
+Alternatives considered: pinging the watchdog while reading would leave ubus and service supervision waiting; a thread would be the first in procd, whose event loop already serves the job; a time limit on the validation would be a new policy, which the old code did not have.
+
+Verification log: see the `procd-async-validation` change.
+
 2026-10-13, on the VM: with a scratch GCC patch that changes nothing built (a new file in GCC's source), `just build r4s dev` built the toolchain anew and compiled all 475 stages of the R4S, at 14.8 % ccache hits, as the new compiler differs; `just build r6s dev` kept that toolchain and compiled all 481 stages of the R6S. With the patch removed, the R4S's build built the toolchain anew again, and both boards compiled every stage anew, at 99.99 % hits: the toolchain built without the patch is the one built before it, whose entries ccache kept. CI's run 38305783785 built the toolchain in the ci profile, which is buildbot mode, and neither board's build compiled any part of it.
