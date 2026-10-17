@@ -1,5 +1,6 @@
 """firmware/ab-upgrade: an upgrade writes the other slot, hands the configuration on, tries it."""
 
+import time
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
@@ -17,6 +18,11 @@ UPGRADE_IMAGE = "/tmp/sysupgrade.tar.gz"  # noqa: S108 (a path on the router)
 # Slow enough that a power cut lands in the middle of writing a slot.
 THROTTLED_WRITE = 2 << 20
 HOSTNAME = "upgraded"
+# An image whose every read waits: a FIFO, whose opening waits for a writer.
+SLOW_IMAGE = "/tmp/slow-image"  # noqa: S108 (a path on the router)
+VALIDATION = "/tmp/validation"  # noqa: S108 (a path on the router)
+# How long the validation waits: longer than procd's watchdog timeout (30 s).
+SLOW_SECONDS = 45
 
 
 def _upgrade(router: Router, image: Path, *options: str) -> None:
@@ -123,3 +129,32 @@ def test_manual_switch_back_to_slot_a(router: Router, upgrade_image: Path) -> No
     router.wait_rebooted(previous_boot)
     assert slot(router) == "a"
     _confirmed(router, "a")
+
+
+@spec(
+    CAPABILITY,
+    "The system stays responsive while it checks an image",
+    "A validation slower than the watchdog",
+)
+def test_a_slow_validation_keeps_the_system_going(router: Router) -> None:
+    emulator = router.emulator
+    logged = len(emulator.logged())
+    previous_boot = router.boot_id()
+    router.run(f"mkfifo {SLOW_IMAGE}")
+    request = f'{{"path": "{SLOW_IMAGE}"}}'
+    router.detach(
+        f"ubus -t 300 call system validate_firmware_image '{request}' > {VALIDATION} 2>&1;"
+        f" echo exit=$? >> {VALIDATION}"
+    )
+    deadline = time.monotonic() + SLOW_SECONDS
+    while time.monotonic() < deadline:
+        router.run("ubus -t 10 call system board >/dev/null", timeout=30)
+        time.sleep(5)
+    assert router.boot_id() == previous_boot
+    assert "watchdog_perform_action" not in emulator.logged()[logged:]
+    # Each of the image's reads now ends at once, with an empty image.
+    router.detach(f"while :; do : > {SLOW_IMAGE}; done")
+    router.run(f"until grep -q '^exit=' {VALIDATION}; do sleep 1; done", timeout=120)
+    validation = router.run(f"cat {VALIDATION}")
+    assert validation.endswith("exit=0")
+    assert '"valid": false' in validation
