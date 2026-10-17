@@ -8,10 +8,10 @@
 
 ## 2. procd (design D1, D2, D3)
 
-- [ ] 2.1 Write the procd patch that validates firmware images in the event loop (D1, D2), as `patches/openwrt/0039-procd-validate-firmware-images-without-blocking.patch` with `PKG_RELEASE` 3, and its write-up in `docs/patches.md` (D3).
+- [x] 2.1 Write the procd patch that validates firmware images in the event loop (D1, D2), as `patches/openwrt/0039-procd-validate-firmware-images-without-blocking.patch` with `PKG_RELEASE` 3, and its write-up in `docs/patches.md` (D3).
 
   Verify: procd builds for both boards with no new warning; `just check` passes.
-- [ ] 2.2 Run the test on both boards with the patch.
+- [x] 2.2 Run the test on both boards with the patch.
 
   Verify: it passes on both boards.
 

@@ -55,7 +55,7 @@ Alternatives considered:
 - The image path is a FIFO on the router (`mkfifo`). A FIFO's open waits for a writer, so every read of the image by the script waits, on any host, for as long as the test likes.
 - The test starts `ubus -t 300 call system validate_firmware_image` on it, detached, and writes its output and exit status to a file.
 - For 45 s, more than procd's 30 s timeout, `ubus call system board` must answer within 10 s every 5 s. Then the router's boot ID must be unchanged and `qemu.log` must hold no new watchdog action.
-- The test then ends every process that has the FIFO open, until the call has returned, so each check that waits on the image fails. Closing a writer's end would not do: fwtool opens the image read-write, and a reader that is itself a writer never sees the end of a FIFO's input. The validation must end, and the call must return the result: an invalid image.
+- The test then ends each check that waits on the image, until the call has returned. A loop opens and closes the FIFO for writing again and again, so a check that waits to read it, or reads it, gets an empty image. A check that holds it read-write never sees the end of a FIFO's input, being a writer itself (fwtool), so the test ends its process (`/proc/<pid>/fdinfo` names the mode), and the check fails. Ending every holder would miss a check that still waits to open the FIFO, which has no descriptor yet (`dd if=` and `cat <` in `get_image`); a writer alone would never release fwtool. The validation must end, and the call must return the result: an invalid image.
 
 Without the patch, the first `system board` call after the validation's start times out, and the watchdog resets the router after 30 s.
 
