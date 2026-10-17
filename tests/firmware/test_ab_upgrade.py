@@ -21,8 +21,10 @@ HOSTNAME = "upgraded"
 # An image whose every read waits: a FIFO, whose opening waits for a writer.
 SLOW_IMAGE = "/tmp/slow-image"  # noqa: S108 (a path on the router)
 VALIDATION = "/tmp/validation"  # noqa: S108 (a path on the router)
-# How long the validation waits: longer than procd's watchdog timeout (30 s).
+# How long the validation waits: longer than procd's watchdog timeout (30 s); and
+# how long it may then take to end, the call's own limit.
 SLOW_SECONDS = 45
+VALIDATION_LIMIT = 300
 
 
 def _upgrade(router: Router, image: Path, *options: str) -> None:
@@ -143,7 +145,8 @@ def test_a_slow_validation_keeps_the_system_going(router: Router) -> None:
     router.run(f"mkfifo {SLOW_IMAGE}")
     request = f'{{"path": "{SLOW_IMAGE}"}}'
     router.detach(
-        f"ubus -t 300 call system validate_firmware_image '{request}' > {VALIDATION} 2>&1;"
+        f"ubus -t {VALIDATION_LIMIT} call system validate_firmware_image '{request}'"
+        f" > {VALIDATION} 2>&1;"
         f" echo exit=$? >> {VALIDATION}"
     )
     deadline = time.monotonic() + SLOW_SECONDS
@@ -158,7 +161,7 @@ def test_a_slow_validation_keeps_the_system_going(router: Router) -> None:
         f"until grep -q '^exit=' {VALIDATION}; do for fd in /proc/[0-9]*/fd/*; do"
         f' [ "$(readlink "$fd")" = {SLOW_IMAGE} ] && kill "$(echo "$fd" | cut -d/ -f3)";'
         " done 2>/dev/null; sleep 1; done",
-        timeout=120,
+        timeout=VALIDATION_LIMIT,
     )
     validation = router.run(f"cat {VALIDATION}")
     assert validation.endswith("exit=0")
