@@ -152,9 +152,14 @@ def test_a_slow_validation_keeps_the_system_going(router: Router) -> None:
         time.sleep(5)
     assert router.boot_id() == previous_boot
     assert "watchdog_perform_action" not in emulator.logged()[logged:]
-    # Each of the image's reads now ends at once, with an empty image.
-    router.detach(f"while :; do : > {SLOW_IMAGE}; done")
-    router.run(f"until grep -q '^exit=' {VALIDATION}; do sleep 1; done", timeout=120)
+    # Each check that waits on the image now fails: its process ends. fwtool opens
+    # the image for writing too, so no end of the FIFO's input would reach it.
+    router.run(
+        f"until grep -q '^exit=' {VALIDATION}; do for fd in /proc/[0-9]*/fd/*; do"
+        f' [ "$(readlink "$fd")" = {SLOW_IMAGE} ] && kill "$(echo "$fd" | cut -d/ -f3)";'
+        " done 2>/dev/null; sleep 1; done",
+        timeout=120,
+    )
     validation = router.run(f"cat {VALIDATION}")
     assert validation.endswith("exit=0")
     assert '"valid": false' in validation
