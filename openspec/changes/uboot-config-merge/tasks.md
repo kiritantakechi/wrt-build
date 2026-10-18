@@ -11,9 +11,10 @@
 - [x] 2.1 Add the two U-Boot Kconfig backports to uboot-rockchip's patches through the openwrt series' next patch, with `PKG_RELEASE` up, and their write-up in `docs/patches.md` (D1).
 
   Verify: `just check` passes.
-- [ ] 2.2 Have uboot-wrt-qemu take uboot-rockchip's patch directory, with `PKG_RELEASE` up (D2).
+- [x] 2.2 Have uboot-wrt-qemu take uboot-rockchip's patch directory, with `PKG_RELEASE` up (D2).
 
   Verify: both boards' and the emulator's U-Boot build, each `u-boot.config` the same as before; the test passes on both boards' build trees.
+  Result (2026-10-18): `just build` of both boards built uboot-rockchip and uboot-wrt-qemu anew, the emulator's source with both Kconfig patches applied; the six U-Boot `.config` files of the two trees (each board's, the emulator's and the host tools') are the same as before. The test passes on both trees. With patch 120 alone, a first build had the merge end with `CONFIG_ENV_ADDR_REDUND=` empty, and `make oldconfig </dev/null` after it wrote 1.1 GB of prompts in 20 s, which led to patch 121.
 
 ## 3. Integration (design D4)
 

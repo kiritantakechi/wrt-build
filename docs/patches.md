@@ -610,4 +610,4 @@ What the patches do:
 
 Alternatives considered: 120 alone ends the merge, but on the VM the `oldconfig` after it, with stdin from /dev/null, wrote 1.1 GB of prompts for the empty `ENV_ADDR_REDUND` in 20 s. Stopping `oldconfig` at the end of its input was a 2023 Linux series, dropped for breaking builds that run make with stdin from /dev/null. OpenWrt's `FAIL_ON_UNCONFIGURED` hack for its kernel's Kconfig is meant for OpenWrt only.
 
-Verification log: see the `uboot-config-merge` change.
+Verification log: the `build/boards` test "A fragment leaves a question for the next" configures a copy of the emulator's prepared U-Boot source as the build does. Without the patches, its merge was still asking after a minute; with 120 alone, the merge ended and the `oldconfig` after it was still asking (2026-10-18, both boards' build trees). With both, it passes on both boards' build trees, and both boards built anew with every U-Boot's `.config`, the boards' and the emulator's, the same as before (2026-10-18).
