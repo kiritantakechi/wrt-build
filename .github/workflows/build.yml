@@ -295,9 +295,18 @@ jobs:
       fail-fast: false
       matrix:
         board: ${{ fromJSON(needs.host-toolchain.outputs.boards) }}
+        # A board's system tests, each module in one suite (build/ci "System tests
+        # within job time limits"), each suite well within the limit on a runner
+        # 1.8 times slower than usual (ci-system-split D1).
         suite:
+          - name: upgrade
+            paths: firmware/test_ab_upgrade.py firmware/test_ab_layout.py
+          - name: boot
+            paths: firmware/test_boot_rollback.py firmware/test_health_check.py
           - name: system
-            paths: build firmware quality testing unit
+            paths: >-
+              build firmware/test_base_system.py firmware/test_kernel.py
+              firmware/test_rootfs.py firmware/test_toolchain.py quality testing unit
           - name: network
             paths: network
           - name: services
