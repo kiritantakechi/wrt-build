@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -41,6 +42,11 @@ NEUTRAL_CFLAGS = (
 LIBC = b"the toolchain's C library"
 # The stand-in Rust standard library for the target, in staging_dir/hostpkg/lib/rustlib.
 RUST_STD = Path("aarch64-unknown-linux-musl/lib/libstd.rlib")
+# A fragment that brings up a symbol without a default on the emulator's
+# defconfig, which keeps the environment in flash: the second copy's flash
+# address. U-Boot's merge must leave it unset, not ask (uboot-config-merge D3).
+QUESTION_FRAGMENT = "wrt-question.config"
+MERGE_SECONDS = 60
 RUST_STD_CONTENT = b"Rust's standard library"
 PATCHES = REPO / "patches" / "openwrt"
 # The check of the toolchain's record of its inputs in toolchain/Makefile, which
@@ -680,3 +686,43 @@ def test_a_board_build_that_compiles_the_toolchain_fails(tmp_path: Path) -> None
     assert result.returncode != 0
     assert "compiled part of the toolchain" in result.stderr
     assert "package/feeds/packages/rust [compile]" in result.stderr
+
+
+@spec(
+    CAPABILITY,
+    "U-Boot fragments merge without asking",
+    "A fragment leaves a question for the next",
+)
+def test_a_fragment_s_question_stays_unset(build_output: Path, tmp_path: Path) -> None:
+    tree = Path(os.environ["WRT_WORKDIR"]) / "openwrt"
+    sources = [
+        source
+        for build_dir in _build_dirs(tree, build_output)
+        for source in build_dir.glob("u-boot-wrt-qemu/u-boot-*")
+    ]
+    if not sources:
+        pytest.skip("no build tree with the emulator's U-Boot")
+    source = tmp_path / "u-boot"
+    shutil.copytree(
+        sources[0], source, symlinks=True, ignore=shutil.ignore_patterns("*.o", "*.a", ".*.cmd")
+    )
+    (source / "board" / QUESTION_FRAGMENT).write_text("CONFIG_ENV_REDUNDANT=y\n", encoding="utf-8")
+    # In the build environment, which has U-Boot's host tools; a merge that asks
+    # writes its question for ever, so its output goes nowhere.
+    merge = subprocess.Popen(
+        ["wrt-test-fhs", "-c", f"make -C {source} qemu_arm64_defconfig {QUESTION_FRAGMENT}"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        merge.wait(timeout=MERGE_SECONDS)
+    except subprocess.TimeoutExpired:
+        os.killpg(merge.pid, signal.SIGKILL)
+        merge.wait()
+        pytest.fail(f"the merge was still asking after {MERGE_SECONDS} s")
+    assert merge.returncode == 0
+    config = (source / ".config").read_text(encoding="utf-8").splitlines()
+    assert "CONFIG_ENV_REDUNDANT=y" in config
+    assert [line for line in config if line.startswith("CONFIG_ENV_ADDR_REDUND=")] == []

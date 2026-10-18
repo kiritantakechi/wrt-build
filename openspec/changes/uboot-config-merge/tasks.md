@@ -2,7 +2,7 @@
 
 ## 1. The test (design D3)
 
-- [ ] 1.1 Add the `build/boards` test "A fragment leaves a question for the next" (D3).
+- [x] 1.1 Add the `build/boards` test "A fragment leaves a question for the next" (D3).
 
   Verify: `just check` passes; `spec-coverage --change uboot-config-merge` reports the scenario covered; the test fails on the VM's build tree without the patch.
 
