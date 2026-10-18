@@ -22,9 +22,10 @@
 
   Verify: all pass.
   Result (2026-10-18): R4S 13 passed, R6S 13 passed, on the builds with both patches. A first run under the Mac's batch load (29 to 66) timed out throughout and was discarded.
-- [ ] 3.2 Get a green CI run for both boards.
+- [x] 3.2 Get a green CI run for both boards.
 
   Verify: record the run in `docs/ci.md`.
+  Result (2026-10-18): run 39153016294 passed, the upgrade drill included.
 
 ## Workflow follow-up
 
