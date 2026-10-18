@@ -5,11 +5,14 @@
 
 include $(TOPDIR)/rules.mk
 
-# Version and hash come from uboot-rockchip, so the two builds cannot drift apart.
-UBOOT_ROCKCHIP := $(TOPDIR)/package/boot/uboot-rockchip/Makefile
-PKG_VERSION := $(shell sed -n 's/^PKG_VERSION:=//p' $(UBOOT_ROCKCHIP))
-PKG_HASH := $(shell sed -n 's/^PKG_HASH:=//p' $(UBOOT_ROCKCHIP))
-PKG_RELEASE:=1
+# Version, hash and patches come from uboot-rockchip, so the two builds cannot
+# drift apart; a changed patch prepares this one again too.
+UBOOT_ROCKCHIP := $(TOPDIR)/package/boot/uboot-rockchip
+PKG_VERSION := $(shell sed -n 's/^PKG_VERSION:=//p' $(UBOOT_ROCKCHIP)/Makefile)
+PKG_HASH := $(shell sed -n 's/^PKG_HASH:=//p' $(UBOOT_ROCKCHIP)/Makefile)
+PKG_RELEASE:=2
+PATCH_DIR := $(UBOOT_ROCKCHIP)/patches
+PKG_FILE_DEPENDS += $(PATCH_DIR)/
 
 PKG_MAINTAINER:=kiritantakechi <kiritantakechi@gmail.com>
 

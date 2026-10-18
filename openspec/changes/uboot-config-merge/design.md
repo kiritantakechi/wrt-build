@@ -31,7 +31,7 @@ Alternatives considered:
 
 ### D2. The patch's place, and the emulator's U-Boot
 
-The openwrt series' next patch adds the U-Boot patch to `package/boot/uboot-rockchip/patches/` and raises uboot-rockchip's `PKG_RELEASE`. uboot-wrt-qemu sets `PATCH_DIR` to that directory, as it takes the version and hash from that package, and raises its `PKG_RELEASE`. The emulator's U-Boot then carries all of the boards' patches: rockchip board additions and mkimage changes, which do not touch `qemu_arm64`, and every patch to come.
+The openwrt series' next patch adds the U-Boot patch to `package/boot/uboot-rockchip/patches/` and raises uboot-rockchip's `PKG_RELEASE`. uboot-wrt-qemu sets `PATCH_DIR` to that directory, as it takes the version and hash from that package, counts it among its file dependencies (`PKG_FILE_DEPENDS`), so a changed patch prepares its source again, and raises its `PKG_RELEASE`. The emulator's U-Boot then carries all of the boards' patches: rockchip board additions and mkimage changes, which do not touch `qemu_arm64`, and every patch to come.
 
 ### D3. The test
 
