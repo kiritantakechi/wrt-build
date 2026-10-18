@@ -1,0 +1,155 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Sun, 18 Oct 2026 20:29:07 +0800
+Subject: [PATCH] uboot-rockchip: configure without asking
+
+A configuration fragment that brings up an int or hex symbol without a
+default makes U-Boot's build ask for it for ever. The fragment's merge
+pipes `yes ""` into `make oldconfig`, and an empty answer is no value
+for such a symbol, so it is asked again; were the merge to end, every
+oldconfig or syncconfig after it would ask again at the end of its
+input, as the oldconfig after scripts/config in include/u-boot.mk does.
+Turning on a second environment copy on a defconfig that keeps the
+environment in flash does it (ENV_ADDR_REDUND), and the build's log of
+the question grows without end.
+
+Backport the two Linux fixes U-Boot's Kconfig lacks: the merge runs
+olddefconfig (3266c806dc86), and such a symbol defaults to zero
+(6262afa10ef7). Both are meant for U-Boot upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/boot/uboot-rockchip/Makefile          |  2 +-
+ ...olddefconfig-after-merging-fragments.patch | 33 +++++++++
+ ...zero-if-int-hex-symbol-lacks-default.patch | 68 +++++++++++++++++++
+ 3 files changed, 102 insertions(+), 1 deletion(-)
+ create mode 100644 package/boot/uboot-rockchip/patches/120-kconfig-run-olddefconfig-after-merging-fragments.patch
+ create mode 100644 package/boot/uboot-rockchip/patches/121-kconfig-default-to-zero-if-int-hex-symbol-lacks-default.patch
+
+diff --git a/package/boot/uboot-rockchip/Makefile b/package/boot/uboot-rockchip/Makefile
+index 8b38de5..e07a746 100644
+--- a/package/boot/uboot-rockchip/Makefile
++++ b/package/boot/uboot-rockchip/Makefile
+@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
+ include $(INCLUDE_DIR)/kernel.mk
+ 
+ PKG_VERSION:=2026.07
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ PKG_HASH:=78e8bfc382fe388f9b55aa1daf8c563522a037779b5d4c349d1415e381f1243e
+ 
+ PKG_MAINTAINER:=Sarah Maedel <openwrt@tbspace.de>
+diff --git a/package/boot/uboot-rockchip/patches/120-kconfig-run-olddefconfig-after-merging-fragments.patch b/package/boot/uboot-rockchip/patches/120-kconfig-run-olddefconfig-after-merging-fragments.patch
+new file mode 100644
+index 0000000..49409d3
+--- /dev/null
++++ b/package/boot/uboot-rockchip/patches/120-kconfig-run-olddefconfig-after-merging-fragments.patch
+@@ -0,0 +1,33 @@
++From 3266c806dc8692e079768ee2814498dcd6a91e61 Mon Sep 17 00:00:00 2001
++From: Masahiro Yamada <yamada.masahiro@socionext.com>
++Date: Wed, 5 Jun 2019 03:14:53 +0900
++Subject: [PATCH] kconfig: run olddefconfig instead of oldconfig after merging
++ fragments
++
++'make olddefconfig' is non-interactive, so we can drop 'yes'.
++The behavior is equivalent.
++
++Signed-off-by: Masahiro Yamada <yamada.masahiro@socionext.com>
++[ Linux commit 3266c806dc8692e079768ee2814498dcd6a91e61. Not equivalent
++  in U-Boot, whose Kconfig gives an int or hex symbol without a default
++  an empty value, which `yes ""` cannot answer: a defconfig with
++  CONFIG_ENV_IS_IN_FLASH and a fragment with CONFIG_ENV_REDUNDANT=y bring
++  up ENV_ADDR_REDUND, and the merge asks for it for ever ]
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++ scripts/kconfig/Makefile | 2 +-
++ 1 file changed, 1 insertion(+), 1 deletion(-)
++
++diff --git a/scripts/kconfig/Makefile b/scripts/kconfig/Makefile
++index abc34f6..53c1b43 100644
++--- a/scripts/kconfig/Makefile
+++++ b/scripts/kconfig/Makefile
++@@ -108,7 +108,7 @@ configfiles=$(wildcard $(srctree)/kernel/configs/$@ \
++ %.config: $(obj)/conf
++ 	$(if $(call configfiles),, $(error No configuration exists for this target on this architecture))
++ 	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/kconfig/merge_config.sh -m .config $(configfiles)
++-	+$(Q)yes "" | $(MAKE) -f $(srctree)/Makefile oldconfig
+++	$(Q)$(MAKE) -f $(srctree)/Makefile olddefconfig
++ 
++ PHONY += kvmconfig
++ kvmconfig: kvm_guest.config
+diff --git a/package/boot/uboot-rockchip/patches/121-kconfig-default-to-zero-if-int-hex-symbol-lacks-default.patch b/package/boot/uboot-rockchip/patches/121-kconfig-default-to-zero-if-int-hex-symbol-lacks-default.patch
+new file mode 100644
+index 0000000..78d9a1a
+--- /dev/null
++++ b/package/boot/uboot-rockchip/patches/121-kconfig-default-to-zero-if-int-hex-symbol-lacks-default.patch
+@@ -0,0 +1,68 @@
++From 6262afa10ef7cc8fdf39b81a36f9546b68810431 Mon Sep 17 00:00:00 2001
++From: Masahiro Yamada <masahiroy@kernel.org>
++Date: Sun, 26 Nov 2023 01:35:59 +0900
++Subject: [PATCH] kconfig: default to zero if int/hex symbol lacks default
++ property
++
++When a default property is missing in an int or hex symbol, it defaults
++to an empty string, which is not a valid symbol value.
++
++It results in an incorrect .config, and can also lead to an infinite
++loop in scripting.
++
++Use "0" for int and "0x0" for hex as a default value.
++
++Signed-off-by: Masahiro Yamada <masahiroy@kernel.org>
++Reviewed-by: Yoann Congal <yoann.congal@smile.fr>
++[ Linux commit 6262afa10ef7cc8fdf39b81a36f9546b68810431. U-Boot's
++  sym_calc_value() starts a number from symbol_empty, so its int and hex
++  cases set the tristate as well. Without it, an oldconfig or syncconfig
++  that reads no input asks such a symbol for ever, as one does after a
++  build adjusts a merged .config with scripts/config ]
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++ scripts/kconfig/symbol.c | 20 ++++++++++++++------
++ 1 file changed, 14 insertions(+), 6 deletions(-)
++
++diff --git a/scripts/kconfig/symbol.c b/scripts/kconfig/symbol.c
++index 5245804..7905c1c 100644
++--- a/scripts/kconfig/symbol.c
+++++ b/scripts/kconfig/symbol.c
++@@ -343,7 +343,13 @@ void sym_calc_value(struct symbol *sym)
++ 
++ 	switch (sym->type) {
++ 	case S_INT:
+++		newval.val = "0";
+++		newval.tri = no;
+++		break;
++ 	case S_HEX:
+++		newval.val = "0x0";
+++		newval.tri = no;
+++		break;
++ 	case S_STRING:
++ 		newval = symbol_empty.curr;
++ 		break;
++@@ -753,15 +759,17 @@ const char *sym_get_string_default(struct symbol *sym)
++ 		case yes: return "y";
++ 		}
++ 	case S_INT:
+++		if (!str[0])
+++			str = "0";
+++		break;
++ 	case S_HEX:
++-		return str;
++-	case S_STRING:
++-		return str;
++-	case S_OTHER:
++-	case S_UNKNOWN:
+++		if (!str[0])
+++			str = "0x0";
+++		break;
+++	default:
++ 		break;
++ 	}
++-	return "";
+++	return str;
++ }
++ 
++ const char *sym_get_string_value(struct symbol *sym)

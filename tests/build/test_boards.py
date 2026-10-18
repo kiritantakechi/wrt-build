@@ -42,11 +42,13 @@ NEUTRAL_CFLAGS = (
 LIBC = b"the toolchain's C library"
 # The stand-in Rust standard library for the target, in staging_dir/hostpkg/lib/rustlib.
 RUST_STD = Path("aarch64-unknown-linux-musl/lib/libstd.rlib")
-# A fragment that brings up a symbol without a default on the emulator's
-# defconfig, which keeps the environment in flash: the second copy's flash
-# address. U-Boot's merge must leave it unset, not ask (uboot-config-merge D3).
+# Fragments on the emulator's defconfig, which keeps the environment in flash:
+# the first brings up the second environment copy, whose flash address is a
+# number without a default, and the second sets it (uboot-config-merge D3).
 QUESTION_FRAGMENT = "wrt-question.config"
-MERGE_SECONDS = 60
+ANSWER_FRAGMENT = "wrt-answer.config"
+ANSWER = "0x40000"
+CONFIGURE_SECONDS = 60
 RUST_STD_CONTENT = b"Rust's standard library"
 PATCHES = REPO / "patches" / "openwrt"
 # The check of the toolchain's record of its inputs in toolchain/Makefile, which
@@ -688,12 +690,33 @@ def test_a_board_build_that_compiles_the_toolchain_fails(tmp_path: Path) -> None
     assert "package/feeds/packages/rust [compile]" in result.stderr
 
 
-@spec(
-    CAPABILITY,
-    "U-Boot fragments merge without asking",
-    "A fragment leaves a question for the next",
-)
-def test_a_fragment_s_question_stays_unset(build_output: Path, tmp_path: Path) -> None:
+def _configure(source: Path, *targets: str) -> dict[str, str]:
+    """Run U-Boot's ``make targets`` on ``source`` without input; return the values of its .config.
+
+    It runs in the build environment, which has U-Boot's host tools. A step
+    that asks writes its question for ever, so its output goes nowhere.
+    """
+    command = f"make -C {source} {' '.join(targets)}"
+    step = subprocess.Popen(
+        ["wrt-test-fhs", "-c", command],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        step.wait(timeout=CONFIGURE_SECONDS)
+    except subprocess.TimeoutExpired:
+        os.killpg(step.pid, signal.SIGKILL)
+        step.wait()
+        pytest.fail(f"{command} was still asking after {CONFIGURE_SECONDS} s")
+    assert step.returncode == 0, command
+    lines = (source / ".config").read_text(encoding="utf-8").splitlines()
+    return dict(line.split("=", 1) for line in lines if line.startswith("CONFIG_"))
+
+
+@spec(CAPABILITY, "U-Boot configured without asking", "A fragment leaves a question for the next")
+def test_a_fragment_s_question_is_settled(build_output: Path, tmp_path: Path) -> None:
     tree = Path(os.environ["WRT_WORKDIR"]) / "openwrt"
     sources = [
         source
@@ -707,22 +730,15 @@ def test_a_fragment_s_question_stays_unset(build_output: Path, tmp_path: Path) -
         sources[0], source, symlinks=True, ignore=shutil.ignore_patterns("*.o", "*.a", ".*.cmd")
     )
     (source / "board" / QUESTION_FRAGMENT).write_text("CONFIG_ENV_REDUNDANT=y\n", encoding="utf-8")
-    # In the build environment, which has U-Boot's host tools; a merge that asks
-    # writes its question for ever, so its output goes nowhere.
-    merge = subprocess.Popen(
-        ["wrt-test-fhs", "-c", f"make -C {source} qemu_arm64_defconfig {QUESTION_FRAGMENT}"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
+    (source / "board" / ANSWER_FRAGMENT).write_text(
+        f"CONFIG_ENV_ADDR_REDUND={ANSWER}\n", encoding="utf-8"
     )
-    try:
-        merge.wait(timeout=MERGE_SECONDS)
-    except subprocess.TimeoutExpired:
-        os.killpg(merge.pid, signal.SIGKILL)
-        merge.wait()
-        pytest.fail(f"the merge was still asking after {MERGE_SECONDS} s")
-    assert merge.returncode == 0
-    config = (source / ".config").read_text(encoding="utf-8").splitlines()
-    assert "CONFIG_ENV_REDUNDANT=y" in config
-    assert [line for line in config if line.startswith("CONFIG_ENV_ADDR_REDUND=")] == []
+    # Left to no later fragment, the address is zero, as in Linux, and the
+    # oldconfig after include/u-boot.mk's own changes asks nothing either.
+    values = _configure(source, "qemu_arm64_defconfig", QUESTION_FRAGMENT)
+    assert values["CONFIG_ENV_REDUNDANT"] == "y"
+    assert values["CONFIG_ENV_ADDR_REDUND"] == "0x0"
+    assert _configure(source, "oldconfig") == values
+    # A later fragment sets it.
+    values = _configure(source, "qemu_arm64_defconfig", QUESTION_FRAGMENT, ANSWER_FRAGMENT)
+    assert values["CONFIG_ENV_ADDR_REDUND"] == ANSWER
