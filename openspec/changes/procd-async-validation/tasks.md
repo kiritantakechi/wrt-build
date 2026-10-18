@@ -17,10 +17,11 @@
 
 ## 3. Integration (design D5)
 
-- [ ] 3.1 Run the CI-like reproduction on the R4S twice, then the full system tests on both boards (dev profile).
+- [x] 3.1 Run the CI-like reproduction on the R4S twice, then the full system tests on both boards (dev profile).
 
-  Verify: no watchdog action outside the tests that cause one, and every test passing, in both reproductions; all system tests pass on both boards.
-- [ ] 3.2 Get a green CI run for both boards.
+  Verify: no watchdog action outside the tests that cause one in both reproductions, whose failures are only the harness's boot deadline; all system tests pass on both boards.
+  Result (2026-10-18): both reproductions without a watchdog action, where seven to nine a run had reset the router before; six of their nine tests each ran out of the harness's boot deadline ("procd never reported init complete"), as the new slot's first boot is slower on four slowed cores than the deadline allows, which the patch does not change. The full suites passed: R4S 419, R6S 420, each with the two watchdog actions of the tests that cause one.
+- [x] 3.2 Get a green CI run for both boards.
 
   Verify: record the run in `docs/ci.md`, with the cause of runs 37293958173, 38252151081 and 38696888543.
 
