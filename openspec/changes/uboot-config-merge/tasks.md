@@ -8,7 +8,7 @@
 
 ## 2. The patch (design D1, D2)
 
-- [ ] 2.1 Add the U-Boot patch to uboot-rockchip's patches through the openwrt series' next patch, with `PKG_RELEASE` up, and its write-up in `docs/patches.md` (D1).
+- [x] 2.1 Add the U-Boot patch to uboot-rockchip's patches through the openwrt series' next patch, with `PKG_RELEASE` up, and its write-up in `docs/patches.md` (D1).
 
   Verify: `just check` passes.
 - [ ] 2.2 Have uboot-wrt-qemu take uboot-rockchip's patch directory, with `PKG_RELEASE` up (D2).

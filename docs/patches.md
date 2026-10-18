@@ -579,6 +579,8 @@ Verification log: `tests/build/test_boards.py` runs the patched check on a stand
 
 2026-10-12, on the VM with the dev profile: the first `just build r4s dev` after the patch found a toolchain whose record named a git commit, built it anew as a whole, Rust's host toolchain with it, and built the R4S anew. A second `just build r4s dev` compiled nothing: its time report held only the kernel's two forced passes (41 s), and ccache saw no cacheable call. `just build r6s dev` then kept the toolchain and built the R6S anew, as its build directory had no record yet.
 
+2026-10-13, on the VM: with a scratch GCC patch that changes nothing built (a new file in GCC's source), `just build r4s dev` built the toolchain anew and compiled all 475 stages of the R4S, at 14.8 % ccache hits, as the new compiler differs; `just build r6s dev` kept that toolchain and compiled all 481 stages of the R6S. With the patch removed, the R4S's build built the toolchain anew again, and both boards compiled every stage anew, at 99.99 % hits: the toolchain built without the patch is the one built before it, whose entries ccache kept. CI's run 38305783785 built the toolchain in the ci profile, which is buildbot mode, and neither board's build compiled any part of it.
+
 ### procd: firmware images validated without blocking
 
 Patch: `patches/openwrt/0039-procd-validate-firmware-images-without-blocking.patch` (adds the procd patch `package/system/procd/patches/100-system-validate-images-without-blocking-the-main-loop.patch`), for procd, carried by openwrt/openwrt until then.
@@ -593,4 +595,14 @@ Alternatives considered: pinging the watchdog while reading would leave ubus and
 
 Verification log: the firmware/ab-upgrade test "A validation slower than the watchdog" validates a FIFO that nobody writes for 45 s. Without the patch, its first `ubus call system board` meanwhile times out; with it, procd answers throughout, the router keeps its boot, and the validation answers once its checks end (2026-10-17, both boards). The A/B upgrade module on four host cores that `stress-ng` slows reset the router seven to nine times a run without the patch, and not once in two runs with it (2026-10-18, R4S). CI run 39060253957 passed on both boards.
 
-2026-10-13, on the VM: with a scratch GCC patch that changes nothing built (a new file in GCC's source), `just build r4s dev` built the toolchain anew and compiled all 475 stages of the R4S, at 14.8 % ccache hits, as the new compiler differs; `just build r6s dev` kept that toolchain and compiled all 481 stages of the R6S. With the patch removed, the R4S's build built the toolchain anew again, and both boards compiled every stage anew, at 99.99 % hits: the toolchain built without the patch is the one built before it, whose entries ccache kept. CI's run 38305783785 built the toolchain in the ci profile, which is buildbot mode, and neither board's build compiled any part of it.
+### U-Boot: configuration fragments merged without asking
+
+Patch: `patches/openwrt/0040-uboot-rockchip-merge-configuration-fragments-without.patch` (adds the U-Boot patch `package/boot/uboot-rockchip/patches/120-kconfig-run-olddefconfig-after-merging-fragments.patch`, which the emulator's U-Boot takes too), for U-Boot, carried by openwrt/openwrt until then.
+
+Problem: U-Boot's `scripts/kconfig/Makefile` merges a configuration fragment (`make <defconfig> <fragment>.config`) and then pipes `yes ""` into `make oldconfig`. An empty answer takes a symbol's default, and Kconfig asks a hex, int or string symbol without one again: a fragment that brings such a symbol up, for a later fragment to settle, makes the merge ask for ever, and the build's log of the question grows without end. Linux replaced the pair with `olddefconfig` in 3266c806dc86 (2019); upstream U-Boot has not.
+
+Why it matters here: every board's U-Boot and the emulator's merge `wrt-ab.config` and a board fragment onto their defconfig. On 2026-10-15 the emulator's build asked for `ENV_ADDR_REDUND` for two hours and filled the work volume, once `wrt-ab.config` turned on the second environment copy while the emulator's defconfig still kept the environment in flash (`trial-boot-resilience`, `uboot-config-merge`).
+
+What the patch does: the rule runs `olddefconfig` after the merge, as Linux's does: the same configuration wherever a default exists, and a symbol without one left unset. `PKG_RELEASE` goes to 2. uboot-wrt-qemu takes uboot-rockchip's patch directory, as it takes its version and hash, so the emulator's U-Boot is built with the boards' patches.
+
+Verification log: see the `uboot-config-merge` change.
