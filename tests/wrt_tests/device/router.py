@@ -58,11 +58,12 @@ FAILSAFE_TIMEOUT = 120.0
 # (testing/emulation "The router back at its snapshot").
 CLOCK_SKEW = 2.0
 # A reading of the router's clock counts as precise once its round trip is this
-# short, and is taken this often at most; date -s sets whole seconds, which
-# rounding keeps within half of one (snapshot-return D2).
+# short, and is taken this often at most. date -s sets whole seconds, half of one
+# off at most once rounded, and the emulated clock runs over a percent slow, a
+# few tenths more by the time it is checked: a second (snapshot-return D2).
 CLOCK_ROUND_TRIP = 1.0
 CLOCK_READINGS = 5
-CLOCK_RESOLUTION = 0.5
+CLOCK_RESOLUTION = 1.0
 # Where a detached command's output goes on the router, which the reboot it leads
 # to clears; and how much of the console a reboot that does not come shows
 # (failure-diagnostics D1, D2).
