@@ -64,6 +64,9 @@ CLOCK_SKEW = 2.0
 CLOCK_ROUND_TRIP = 1.0
 CLOCK_READINGS = 5
 CLOCK_RESOLUTION = 1.0
+# The router's clock to the nanosecond: the image's BusyBox date prints whole
+# seconds only (no FEATURE_DATE_NANO), ucode's clock() gives the nanoseconds.
+READ_CLOCK = "ucode -e 'printf(\"%d.%09d\", ...clock())'"
 # Where a detached command's output goes on the router, which the reboot it leads
 # to clears; and how much of the console a reboot that does not come shows
 # (failure-diagnostics D1, D2).
@@ -292,7 +295,7 @@ class Router:
 
     def _read_clock(self) -> ClockReading:
         before = time.time()
-        shown = float(self.run("date +%s.%N"))
+        shown = float(self.run(READ_CLOCK))
         after = time.time()
         return ClockReading((before + after) / 2 - shown, after - before)
 
@@ -308,7 +311,10 @@ class Router:
         readings allow (snapshot-return D2).
         """
         measured = self.clock_reading()
-        step = f"$(date +%s.%N | awk '{{ printf \"%d\", $1 + {measured.offset:.3f} + 0.5 }}')"
+        step = (
+            "$(ucode -e 'let c = clock(); "
+            f"print(int(c[0] + c[1] / 1e9 + {measured.offset:.3f} + 0.5))')"
+        )
         self.run(f"date -s @{step} >/dev/null")
         checked = self.clock_reading()
         precision = CLOCK_RESOLUTION + (measured.round_trip + checked.round_trip) / 2
