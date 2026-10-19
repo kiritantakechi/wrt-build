@@ -54,8 +54,15 @@ CONSOLE_KNOCK = 15.0
 FAILSAFE_PROMPT = r"Press the \[f\] key and hit \[enter\] to enter failsafe mode"
 FAILSAFE_MARK = r"- failsafe -"
 FAILSAFE_TIMEOUT = 120.0
-# How far the router's clock may be off the runner's once set (snapshot-return D2).
+# How far the router's clock may be off the runner's at a return to the snapshot
+# (testing/emulation "The router back at its snapshot").
 CLOCK_SKEW = 2.0
+# A reading of the router's clock counts as precise once its round trip is this
+# short, and is taken this often at most; date -s sets whole seconds, which
+# rounding keeps within half of one (snapshot-return D2).
+CLOCK_ROUND_TRIP = 1.0
+CLOCK_READINGS = 5
+CLOCK_RESOLUTION = 0.5
 # Where a detached command's output goes on the router, which the reboot it leads
 # to clears; and how much of the console a reboot that does not come shows
 # (failure-diagnostics D1, D2).
@@ -74,6 +81,14 @@ def _port_open(address: str, port: int) -> bool:
             return True
     except OSError:
         return False
+
+
+@dataclass(frozen=True, slots=True)
+class ClockReading:
+    """The runner's clock minus the router's, and the round trip of the reading that measured it."""
+
+    offset: float
+    round_trip: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,11 +274,26 @@ class Router:
             time.sleep(2)
         self.set_clock()
 
-    def clock_skew(self) -> float:
-        """Return how far the router's clock is behind the runner's, in seconds."""
+    def clock_reading(self) -> ClockReading:
+        """Read how far the router's clock is behind the runner's.
+
+        The router read its clock somewhere within the reading's round trip, so
+        the offset is as precise as half of it. Of a few readings the first
+        quick one counts, else the quickest, as NTP prefers its quickest
+        exchanges; the first also makes a connection that may take a while.
+        """
+        best = self._read_clock()
+        for _ in range(CLOCK_READINGS - 1):
+            if best.round_trip <= CLOCK_ROUND_TRIP:
+                break
+            best = min(best, self._read_clock(), key=lambda reading: reading.round_trip)
+        return best
+
+    def _read_clock(self) -> ClockReading:
         before = time.time()
         shown = float(self.run("date +%s.%N"))
-        return (before + time.time()) / 2 - shown
+        after = time.time()
+        return ClockReading((before + after) / 2 - shown, after - before)
 
     def set_clock(self) -> None:
         """Set the router's clock to the runner's, as NTP does on a router in service.
@@ -271,15 +301,22 @@ class Router:
         The emulated internet has no time server: a router boots with the time
         of its newest file in /etc, and a restored snapshot rewinds the clock to
         when it was taken. What is signed now (a release's certificate) is valid
-        from now on, so the time is taken when the command can run, after a
-        first one has made the connection, which may take a while, and the clock
-        is checked (snapshot-return D2).
+        from now on. The clock is stepped by the offset a reading measured,
+        relative to the router's own, so how long the command takes to arrive
+        does not count, and a second reading checks it to the precision the two
+        readings allow (snapshot-return D2).
         """
-        self.run("true")
-        self.run(f"date -s @{round(time.time())} >/dev/null")
-        if abs(skew := self.clock_skew()) > CLOCK_SKEW:
-            side = "behind" if skew > 0 else "ahead of"
-            msg = f"the router's clock is {abs(skew):.1f} s {side} the runner's after setting it"
+        measured = self.clock_reading()
+        step = f"$(date +%s.%N | awk '{{ printf \"%d\", $1 + {measured.offset:.3f} + 0.5 }}')"
+        self.run(f"date -s @{step} >/dev/null")
+        checked = self.clock_reading()
+        precision = CLOCK_RESOLUTION + (measured.round_trip + checked.round_trip) / 2
+        if abs(checked.offset) > precision:
+            side = "behind" if checked.offset > 0 else "ahead of"
+            msg = (
+                f"the router's clock is {abs(checked.offset):.1f} s {side} the runner's after"
+                f" setting it, where its readings allow {precision:.1f} s"
+            )
             raise AssertionError(msg)
 
     def http(

@@ -169,7 +169,7 @@ def test_back_from_failsafe_mode(router: Router) -> None:
     started = time.monotonic()
     router.reset()
     assert time.monotonic() - started < RETURN_SECONDS
-    assert abs(router.clock_skew()) <= CLOCK_SKEW
+    assert abs(router.clock_reading().offset) <= CLOCK_SKEW
 
 
 @spec(CAPABILITY, "USB storage", "Hot-plug a USB disk")

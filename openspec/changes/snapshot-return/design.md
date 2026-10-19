@@ -29,13 +29,15 @@ Alternatives considered:
 - **The restored router announces itself** (a gratuitous ARP from the router): it would need a command channel before SSH works, the serial console, and a tool on the router for a fault of the harness.
 - **A shorter reachable time for the runner's neighbour entries**: it would shorten the wait, not remove it, and leave the cause.
 
-### D2. `set_clock()` takes the time when the command runs, and checks it
+### D2. `set_clock()` steps the clock by a measured offset, and checks it
 
-`set_clock()` first runs a command, which makes the connection, then `date -s @<the runner's time, rounded>`, then reads the router's clock (`date +%s.%N`) and compares it with the middle of that request's time on the runner. More than two seconds apart fails the call, naming the skew. A slow connection then cannot skew the clock, and a skew from any other cause is named where it arises, not as a refused signature later.
+`set_clock()` reads the router's clock (`date +%s.%N`) and compares the reading with the middle of its round trip on the runner, as NTP measures an offset: the router read its clock somewhere within the trip, so the offset is as precise as half of it. Of up to five readings, the first whose round trip is at most a second counts, else the quickest; the first reading also makes the connection, however long that takes. The router then steps its own clock by that offset (`date -s @$(date +%s.%N | awk ...)`, rounded to the whole second `date -s` sets), so the time the command takes to arrive does not count. A second reading checks the result: an offset larger than half a second plus half of both readings' round trips fails the call, naming the skew. A slow connection or a loaded runner then cannot skew the clock, and a skew from any other cause is named where it arises, not as a refused signature later.
+
+First measured on the VM, setting the runner's time sent in the command (`date -s @<time>`) left the router 2 to 7 s behind under the Mac's load, as long as the command took to arrive; a fixed two-second check then failed returns that were correct.
 
 Alternatives considered:
 - **A time server in the emulated internet**: the router's `ntpd` would step the clock only after its first exchanges, later than the tests need it.
-- **Correcting by the measured latency**: more arithmetic for a skew that D1 and the order of D2 already remove.
+- **The runner's time sent in the command, with a fixed tolerance**: the command's travel time is the error, and under load it exceeds any tolerance tight enough to matter.
 
 ### D3. The test
 
