@@ -24,9 +24,10 @@ if TYPE_CHECKING:
 CAPABILITY = "testing/emulation"
 DHCP_TIMEOUT = 60.0
 LAN = ipaddress.ip_network("10.0.0.0/24")
-# A return to the snapshot takes seconds; a stale link-layer address for the
-# router costs half a minute more (snapshot-return D3).
-RETURN_SECONDS = 15.0
+# A return to the snapshot takes seconds, 16 s on four host cores that stress-ng
+# slows as CI's slow runners; a stale link-layer address for the router costs
+# half a minute more (snapshot-return D3).
+RETURN_SECONDS = 25.0
 
 
 @spec(CAPABILITY, "Boot the shipped artifacts", "Verify artifact provenance")

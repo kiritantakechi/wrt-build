@@ -41,7 +41,7 @@ Alternatives considered:
 
 ### D3. The test
 
-`testing/emulation` "Back from failsafe mode", in `tests/testing/test_emulation.py`: the router reboots into failsafe mode as firmware/base-system's test does it (`f` at the console prompt), then `router.reset()` returns it to its snapshot. The test requires the return to take less than 15 s, where a stale link-layer address costs more than 30, and the router's clock afterwards within two seconds of the runner's.
+`testing/emulation` "Back from failsafe mode", in `tests/testing/test_emulation.py`: the router reboots into failsafe mode as firmware/base-system's test does it (`f` at the console prompt), then `router.reset()` returns it to its snapshot. The test requires the return to take less than 25 s, where a stale link-layer address costs more than 30 s on top (the return took 69 s without the fix, and 16 s with it on four host cores that `stress-ng` slows as CI's slow runners), and the router's clock afterwards within two seconds of the runner's.
 
 ### D4. Verification
 

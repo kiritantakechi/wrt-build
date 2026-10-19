@@ -5,7 +5,7 @@
 - [x] 1.1 Add the `testing/emulation` test "Back from failsafe mode" to `tests/testing/test_emulation.py` (D3).
 
   Verify: `just check` passes; `spec-coverage --change snapshot-return` reports the scenario covered; the test fails on the R6S without the fix.
-  Result (2026-10-19): without the fix, the return took 69 s on the R6S (limit 15 s); firmware/base-system's failsafe test, now on `Router.reboot_into_failsafe()`, passed.
+  Result (2026-10-19): without the fix, the return took 69 s on the R6S (the limit was 15 s then, 25 s since); firmware/base-system's failsafe test, now on `Router.reboot_into_failsafe()`, passed.
 
 ## 2. The return to the snapshot (design D1, D2)
 
