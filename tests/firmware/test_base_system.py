@@ -28,8 +28,6 @@ EXCLUDED_PACKAGES = (
 # Where the image keeps executables and libraries, and the mark of one UPX packed.
 EXECUTABLE_DIRS = ("bin", "sbin", "usr/bin", "usr/sbin", "lib", "usr/lib")
 UPX_MAGIC = b"UPX!"
-FAILSAFE_PROMPT = r"Press the \[f\] key and hit \[enter\] to enter failsafe mode"
-BOOT_TIMEOUT = 600.0
 UPGRADE_IMAGE = "/tmp/sysupgrade.tar.gz"  # noqa: S108 (a path on the router)
 
 
@@ -58,13 +56,7 @@ def test_default_lan_address(router: Router) -> None:
 
 @spec(CAPABILITY, "Default LAN address", "Enter failsafe mode")
 def test_failsafe_address(router: Router) -> None:
-    emulator = router.emulator
-    since = emulator.console.mark()
-    router.detach("sleep 1; reboot")
-    emulator.console.wait_for(FAILSAFE_PROMPT, since=since, timeout=BOOT_TIMEOUT)
-    emulator.send_keys("f\n")
-    emulator.console.wait_for(r"- failsafe -", since=since, timeout=120)
-    router.wait_ssh()
+    router.reboot_into_failsafe()
     assert router.returncode("[ -e /tmp/.failsafe ]") == 0
     assert f"inet {DEFAULT_LAN}/" in router.run("ip -4 addr")
 

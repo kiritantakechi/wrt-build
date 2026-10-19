@@ -3,6 +3,7 @@
 import ipaddress
 import lzma
 import re
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,7 @@ import pytest
 
 from wrt_tests import spec
 from wrt_tests.device.emu import boot_files, extract_fit_image, read_fit, sha256
+from wrt_tests.device.router import CLOCK_SKEW
 from wrt_tests.device.storage import PLUG_TIMEOUT, Disk, device
 from wrt_tests.model.poll import until
 
@@ -22,6 +24,9 @@ if TYPE_CHECKING:
 CAPABILITY = "testing/emulation"
 DHCP_TIMEOUT = 60.0
 LAN = ipaddress.ip_network("10.0.0.0/24")
+# A return to the snapshot takes seconds; a stale link-layer address for the
+# router costs half a minute more (snapshot-return D3).
+RETURN_SECONDS = 15.0
 
 
 @spec(CAPABILITY, "Boot the shipped artifacts", "Verify artifact provenance")
@@ -156,6 +161,15 @@ def test_a_watchdog_reset_is_logged(router: Router) -> None:
     router.wait_rebooted(previous_boot)
     assert "watchdog_perform_action" in emulator.logged()[logged:]
     assert "reboot: Restarting system" not in emulator.console.text(since)
+
+
+@spec(CAPABILITY, "The router back at its snapshot", "Back from failsafe mode")
+def test_back_from_failsafe_mode(router: Router) -> None:
+    router.reboot_into_failsafe()
+    started = time.monotonic()
+    router.reset()
+    assert time.monotonic() - started < RETURN_SECONDS
+    assert abs(router.clock_skew()) <= CLOCK_SKEW
 
 
 @spec(CAPABILITY, "USB storage", "Hot-plug a USB disk")

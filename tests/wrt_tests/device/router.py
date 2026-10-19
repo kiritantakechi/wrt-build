@@ -49,6 +49,12 @@ LOGIN_TIMEOUT = 180.0
 CONSOLE_READY = "console-ready"
 CONSOLE_END = "console-end"
 CONSOLE_KNOCK = 15.0
+# preinit's offer of failsafe mode on the console, and its answer to the key.
+FAILSAFE_PROMPT = r"Press the \[f\] key and hit \[enter\] to enter failsafe mode"
+FAILSAFE_MARK = r"- failsafe -"
+FAILSAFE_TIMEOUT = 120.0
+# How far the router's clock may be off the runner's once set (snapshot-return D2).
+CLOCK_SKEW = 2.0
 
 
 def _check(deadline: float, message: str) -> None:
@@ -237,6 +243,12 @@ class Router:
             time.sleep(2)
         self.set_clock()
 
+    def clock_skew(self) -> float:
+        """Return how far the router's clock is behind the runner's, in seconds."""
+        before = time.time()
+        shown = float(self.run("date +%s.%N"))
+        return (before + time.time()) / 2 - shown
+
     def set_clock(self) -> None:
         """Set the router's clock to the runner's, as NTP does on a router in service.
 
@@ -287,6 +299,16 @@ class Router:
             _check(deadline, "the router never rebooted")
             time.sleep(2)
         self.wait_ready(deadline - time.monotonic())
+
+    def reboot_into_failsafe(self) -> None:
+        """Reboot, take failsafe mode at the console's offer, and wait until SSH answers."""
+        console = self.emulator.console
+        since = console.mark()
+        self.detach("sleep 1; reboot")
+        console.wait_for(FAILSAFE_PROMPT, since=since, timeout=BOOT_TIMEOUT)
+        self.emulator.send_keys("f\n")
+        console.wait_for(FAILSAFE_MARK, since=since, timeout=FAILSAFE_TIMEOUT)
+        self.wait_ssh()
 
     def reboot(
         self, command: str = "reboot", *, while_off: Callable[[], object] | None = None
