@@ -1,0 +1,26 @@
+# Tasks
+
+## 1. The test (design D3)
+
+- [ ] 1.1 Add the `testing/emulation` test "Back from failsafe mode" to `tests/testing/test_emulation.py` (D3).
+
+  Verify: `just check` passes; `spec-coverage --change snapshot-return` reports the scenario covered; the test fails on the R6S without the fix.
+
+## 2. The return to the snapshot (design D1, D2)
+
+- [ ] 2.1 Have `Router.reset()` forget the router's link-layer address after `loadvm` (D1), and `set_clock()` connect first, set the time and check it (D2).
+
+  Verify: `just check` passes; the test passes on both boards; CI's R6S image in CI's order passes three sessions.
+
+## 3. Integration (design D4)
+
+- [ ] 3.1 Run the testing and firmware suites on both boards (dev profile).
+
+  Verify: all pass.
+- [ ] 3.2 Get a green CI run for both boards.
+
+  Verify: record the run in `docs/ci.md`, with the cause of runs 39120617912 and 39177086857.
+
+## Workflow follow-up
+
+- Sync the delta spec, archive the change, merge it to main and push Codeberg first, then GitHub.
