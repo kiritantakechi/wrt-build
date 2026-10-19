@@ -20,9 +20,10 @@
 
   Verify: all pass.
   Result (2026-10-19): R6S 107 passed, R4S 106 passed and 1 skipped; the testing suite on the R6S on four host cores that `stress-ng` slows, 37 passed. The first rounds found the check of D2 too strict for a loaded host (the command's travel time) and BusyBox's whole-second `date`, both fixed before these runs.
-- [ ] 3.2 Get a green CI run for both boards.
+- [x] 3.2 Get a green CI run for both boards.
 
   Verify: record the run in `docs/ci.md`, with the cause of runs 39120617912 and 39177086857.
+  Result (2026-10-19): run 39312523546 passed, the upgrade drill included; recorded with the cause of both runs.
 
 ## Workflow follow-up
 

@@ -22,9 +22,10 @@
 
   Verify: they show what D2 and D3 say.
   Result (2026-10-19, R6S): the online test's report has a "datapath" section with both clients' addresses and routes (the IPv6 default route with its expiry), the router's `ifstatus wan` and `wan6` with their uptimes, its log lines of pppd and odhcpd ("No default route present, setting ra_lifetime to 0!" while it dialled), and the ISP's session and pppd log. The missing reboot's `TimeoutError` names the command, its output at 10.0.0.1 and the console since.
-- [ ] 3.2 Get a green CI run for both boards, with snapshot-return.
+- [x] 3.2 Get a green CI run for both boards, with snapshot-return.
 
   Verify: record the run in `docs/ci.md`.
+  Result (2026-10-19): run 39312523546 passed, the upgrade drill included.
 
 ## Workflow follow-up
 
