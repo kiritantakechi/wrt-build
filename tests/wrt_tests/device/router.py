@@ -255,9 +255,16 @@ class Router:
         The emulated internet has no time server: a router boots with the time
         of its newest file in /etc, and a restored snapshot rewinds the clock to
         when it was taken. What is signed now (a release's certificate) is valid
-        from now on.
+        from now on, so the time is taken when the command can run, after a
+        first one has made the connection, which may take a while, and the clock
+        is checked (snapshot-return D2).
         """
-        self.run(f"date -s @{int(time.time())} >/dev/null")
+        self.run("true")
+        self.run(f"date -s @{round(time.time())} >/dev/null")
+        if abs(skew := self.clock_skew()) > CLOCK_SKEW:
+            side = "behind" if skew > 0 else "ahead of"
+            msg = f"the router's clock is {abs(skew):.1f} s {side} the runner's after setting it"
+            raise AssertionError(msg)
 
     def http(
         self,
@@ -341,7 +348,13 @@ class Router:
             service.address = self.address = original
 
     def reset(self) -> None:
-        """Return to the state right after boot (the emulator's snapshot), at the time of now."""
+        """Return to the state right after boot (the emulator's snapshot), at the time of now.
+
+        The runner forgets the router's link-layer address: the router at its
+        snapshot may have another one than since (failsafe mode's), and nothing
+        on the link says so (snapshot-return D1).
+        """
         self.disconnect()
         self.emulator.restore()
+        subprocess.run(["ip", "neigh", "flush", "to", self.address], check=True)
         self.set_clock()
