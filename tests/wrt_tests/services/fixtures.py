@@ -4,6 +4,7 @@ A module dials in at the emulated ISP once; dae, the emulated internet's names
 and CA, and the test app's Pod build on that session.
 """
 
+from collections.abc import Generator  # noqa: TC003 (pluggy reads the hook's annotations)
 from typing import TYPE_CHECKING
 
 import pytest
@@ -20,6 +21,25 @@ if TYPE_CHECKING:
     from wrt_tests.device.storage import Disk
     from wrt_tests.sandbox.isp import Isp
     from wrt_tests.sandbox.net import Network
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[None]
+) -> Generator[None, pytest.TestReport, pytest.TestReport]:
+    """Add the datapath's state to the report of a test that failed with the router online.
+
+    ``funcargs`` holds the values of the test's whole fixture closure, so a test
+    on a fixture built on ``online`` has it too (failure-diagnostics D3).
+    """
+    del call
+    report = yield
+    if report.when == "call" and report.failed:
+        funcargs = getattr(item, "funcargs", {})
+        online = next((value for value in funcargs.values() if isinstance(value, Online)), None)
+        if online is not None:
+            report.sections.append(("datapath", online.state()))
+    return report
 
 
 @pytest.fixture(scope="module")

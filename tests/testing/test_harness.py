@@ -1,4 +1,4 @@
-"""testing/harness: one test per scenario, a locked toolchain, and a schema per data file."""
+"""testing/harness: scenarios and tests, the toolchain, data schemas, waits, failure reports."""
 
 import json
 import re
@@ -8,7 +8,8 @@ import sys
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
 
@@ -19,11 +20,15 @@ from wrt_tests.model.data import DataError, read_json, read_toml
 from wrt_tests.model.outputs import EmulationSource, Manifest, Release, ToolchainRecord
 from wrt_tests.model.poll import until
 from wrt_tests.model.undefined_behavior import Diagnostic, Review
+from wrt_tests.services.fixtures import pytest_runtest_makereport
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from pydantic import BaseModel
+
+    from wrt_tests.device.router import Router
+    from wrt_tests.services.datapath import Online
 
 CAPABILITY = "testing/harness"
 TESTS_DIR = Path(__file__).resolve().parents[1]
@@ -299,3 +304,47 @@ def test_a_wait_goes_on_through_empty_answers() -> None:
 def test_a_wait_without_an_answer_names_what_it_waited_for() -> None:
     with pytest.raises(TimeoutError, match=re.escape("no listener within 0.2 s")):
         until(_answers(*EMPTY_ANSWERS), timeout=0.2, what="listener", every=0.01)
+
+
+# A detached command that ends without the reboot the harness then waits for.
+NEVER_REBOOTING = "this command ends without a reboot"
+SECTION = re.compile(r"(?ms)^--- (.+?)\n(.*?)(?=^--- |\Z)")
+
+
+@spec(CAPABILITY, "Failures name the router's state", "A reboot that does not come")
+def test_a_reboot_that_does_not_come_names_its_command(router: Router) -> None:
+    previous_boot = router.boot_id()
+    command = f"echo '{NEVER_REBOOTING}'; exit 3"
+    router.detach(command)
+    with pytest.raises(TimeoutError) as raised:
+        router.wait_rebooted(previous_boot, timeout=10)
+    command_note, output_note, console_note = raised.value.__notes__
+    assert command_note == f"the reboot was to follow: {command}"
+    assert output_note == f"its output, at {router.address}:\n{NEVER_REBOOTING}"
+    assert console_note.startswith("the console since:")
+
+
+def _call_report(item: object, outcome: Literal["passed", "failed"]) -> pytest.TestReport:
+    """Return what the services layer's report hook makes of a call's report on ``item``."""
+    report = pytest.TestReport("demo", ("demo", 0, "demo"), {}, outcome, None, "call")
+    call = pytest.CallInfo.from_call(lambda: None, "call")
+    hook = pytest_runtest_makereport(cast("pytest.Item", item), call)
+    next(hook)
+    try:
+        hook.send(report)
+    except StopIteration as stopped:
+        return cast("pytest.TestReport", stopped.value)
+    msg = "the report hook did not return a report"
+    raise AssertionError(msg)
+
+
+@spec(CAPABILITY, "Failures name the router's state", "A failing test with the router online")
+def test_a_failing_online_test_names_the_datapath(online: Online) -> None:
+    item = SimpleNamespace(funcargs={"online": online})
+    sections = dict(_call_report(item, "failed").sections)
+    parts = dict(SECTION.findall(sections["datapath"]))
+    assert "default via " in parts["client-a$ ip -6 route"]
+    assert '"up": true' in parts["router$ ifstatus wan"]
+    assert online.session.interface in parts["ISP sessions"]
+    assert parts["ISP pppd log"].strip()
+    assert _call_report(item, "passed").sections == []

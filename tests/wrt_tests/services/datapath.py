@@ -13,6 +13,7 @@ import shlex
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING, Any, Self, cast
 
 from wrt_tests.model.poll import until
@@ -45,6 +46,15 @@ DAE = {"tcx/ingress": ["tproxy_lan_ingress_l2"], "tcx/egress": ["tproxy_lan_egre
 # instance, "ubus:einat[instance1] nat 0".
 EINAT_RULE = re.compile(r"ubus:einat\[\w+\] (nat|rule) \d+")
 LAN_CLIENTS = ("client-a", "client-b")
+# What a failure's report shows of the datapath (failure-diagnostics D3): each LAN
+# client's addresses and routes, the router's WAN and its log, the ISP's log.
+CLIENT_STATE = (("ip", "addr", "show", "dev", "eth0"), ("ip", "-4", "route"), ("ip", "-6", "route"))
+ROUTER_STATE = (
+    "ifstatus wan",
+    "ifstatus wan6",
+    "logread | grep -e pppd -e odhcp6c -e odhcpd -e netifd | tail -n 40",
+)
+ISP_LOG_LINES = 40
 # What a wait for the datapath on pppoe-wan reports when it times out: which device
 # qosify took for each of its interfaces and whether it set it up, the device as
 # it is now, what tc holds on it, and the end of the log. tailscaled logs every
@@ -316,6 +326,36 @@ class Online:
             self.network.renew(name)
             self.asked[name] = time.monotonic()
         return False
+
+    def state(self) -> str:
+        """Return the datapath's state as text, for a failure's report (failure-diagnostics D3).
+
+        Each part is read on its own, and one that cannot be read says why.
+        """
+        parts = [
+            _part(f"{name}$ {' '.join(command)}", partial(self.client(name).run, *command))
+            for name in LAN_CLIENTS
+            for command in CLIENT_STATE
+        ]
+        parts += [
+            _part(f"router$ {command}", partial(self.router.poll, command))
+            for command in ROUTER_STATE
+        ]
+        parts += [
+            _part("ISP sessions", lambda: "\n".join(map(str, self.isp.sessions()))),
+            _part("ISP pppd log", partial(self.isp.log, ISP_LOG_LINES)),
+        ]
+        return "\n".join(parts)
+
+
+def _part(title: str, read: Callable[[], str | None]) -> str:
+    """Return ``title`` and what ``read`` returns, or why it returned nothing."""
+    try:
+        shown = read()
+    # A report of a failure must not fail itself: any error is shown instead.
+    except Exception as error:  # noqa: BLE001
+        shown = f"({type(error).__name__}: {error})"
+    return f"--- {title}\n{'(no answer)' if shown is None else shown}"
 
 
 def dae_start(router: Router, config: str = DAE_CONFIG) -> None:

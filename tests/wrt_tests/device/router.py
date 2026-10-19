@@ -12,6 +12,7 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from labgrid.driver import ExecutionError
@@ -55,6 +56,11 @@ FAILSAFE_MARK = r"- failsafe -"
 FAILSAFE_TIMEOUT = 120.0
 # How far the router's clock may be off the runner's once set (snapshot-return D2).
 CLOCK_SKEW = 2.0
+# Where a detached command's output goes on the router, which the reboot it leads
+# to clears; and how much of the console a reboot that does not come shows
+# (failure-diagnostics D1, D2).
+DETACHED_LOG = "/tmp/wrt-detached.log"  # noqa: S108 (a path on the router)
+CONSOLE_LINES = 60
 
 
 def _check(deadline: float, message: str) -> None:
@@ -68,6 +74,15 @@ def _port_open(address: str, port: int) -> bool:
             return True
     except OSError:
         return False
+
+
+@dataclass(frozen=True, slots=True)
+class Detached:
+    """A command detached on the router: what it was, where it ran, the console's mark then."""
+
+    command: str
+    address: str
+    console_mark: int
 
 
 class Router:
@@ -85,6 +100,7 @@ class Router:
         self.ssh: SSHDriver = target.get_driver("SSHDriver", activate=False)
         self.ssh.keyfile = str(key)
         self.address = str(target.get_resource("NetworkService").address)
+        self.detached: Detached | None = None
 
     def _connected(self) -> SSHDriver:
         self.target.activate(self.ssh)
@@ -286,8 +302,14 @@ class Router:
             return int(error.code), str(error.read().decode(errors="replace"))
 
     def detach(self, command: str) -> None:
-        """Start a command that outlives the connection (reboot, sysupgrade, ...)."""
-        self.run(f"({command}) >/dev/null 2>&1 </dev/null &")
+        """Start a command that outlives the connection (reboot, sysupgrade, ...).
+
+        Its output goes to a file on the router, which the reboot it leads to
+        clears; a command that does not reboot the router leaves it for the
+        wait to show (failure-diagnostics D1).
+        """
+        self.detached = Detached(command, self.address, self.emulator.console.mark())
+        self.run(f"({command}) >{DETACHED_LOG} 2>&1 </dev/null &")
 
     def boot_id(self) -> str:
         """Return the kernel's boot ID, which changes with every boot."""
@@ -302,10 +324,39 @@ class Router:
         ready, which sets its clock, starts then, never on the old one.
         """
         deadline = time.monotonic() + timeout
-        while (boot := self.poll(BOOT_ID)) is None or boot == previous_boot:
-            _check(deadline, "the router never rebooted")
-            time.sleep(2)
+        try:
+            while (boot := self.poll(BOOT_ID)) is None or boot == previous_boot:
+                _check(deadline, "the router never rebooted")
+                time.sleep(2)
+        except TimeoutError as error:
+            for note in self._detached_notes():
+                error.add_note(note)
+            raise
         self.wait_ready(deadline - time.monotonic())
+
+    def _detached_notes(self) -> list[str]:
+        """Return what the harness can see of the last detached command (failure-diagnostics D2).
+
+        The command, its output as the system it ran on still holds it, and the
+        console since; a part that cannot be had says so.
+        """
+        detached = self.detached
+        if detached is None:
+            return ["no command was detached on the router"]
+        with self.moved_to(detached.address):
+            output = self.poll(f"cat {DETACHED_LOG}")
+        shown = (
+            f"its output, at {detached.address}:\n{output}"
+            if output is not None
+            else f"no system answered at {detached.address}"
+        )
+        console = self.emulator.console.text(detached.console_mark)
+        lines = _TERMINAL_CONTROL.sub("", console).splitlines()[-CONSOLE_LINES:]
+        return [
+            f"the reboot was to follow: {detached.command}",
+            shown,
+            "the console since:\n" + "\n".join(lines),
+        ]
 
     def reboot_into_failsafe(self) -> None:
         """Reboot, take failsafe mode at the console's offer, and wait until SSH answers."""

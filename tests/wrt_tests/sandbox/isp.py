@@ -50,6 +50,8 @@ WAN_PREFIX = "2001:db8:0:1::/64"
 WAN_GATEWAY = "2001:db8:0:1::1"
 DELEGATED_PREFIX = ipaddress.IPv6Network("2001:db8:100::/56")
 SESSION_TIMEOUT = 60
+# The ISP's pppd log, in its working directory.
+PPPD_LOG = "pppd.log"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +70,13 @@ class Isp:
         """Wrap the ``isp`` namespace; ``workdir`` is the one ``configure`` was given."""
         self.netns = netns
         self.registry = workdir / "sessions"
+        self.log_file = workdir / PPPD_LOG
+
+    def log(self, lines: int) -> str:
+        """Return the last ``lines`` lines of the ISP's pppd log."""
+        return "\n".join(
+            self.log_file.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]
+        )
 
     def sessions(self) -> list[Session]:
         """Return the sessions whose IPCP is up."""
@@ -229,7 +238,7 @@ def configure(etc: Path, workdir: Path) -> None:
                 "novj",
                 "+ipv6",
                 "debug",
-                f"logfile {workdir / 'pppd.log'}",
+                f"logfile {workdir / PPPD_LOG}",
                 *(f"{name}-script {workdir / name}" for name in scripts),
                 "",
             )
