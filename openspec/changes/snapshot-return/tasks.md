@@ -9,9 +9,10 @@
 
 ## 2. The return to the snapshot (design D1, D2)
 
-- [ ] 2.1 Have `Router.reset()` forget the router's link-layer address after `loadvm` (D1), and `set_clock()` connect first, set the time and check it (D2).
+- [x] 2.1 Have `Router.reset()` forget the router's link-layer address after `loadvm` (D1), and `set_clock()` connect first, set the time and check it (D2).
 
   Verify: `just check` passes; the test passes on both boards; CI's R6S image in CI's order passes three sessions.
+  Result (2026-10-19): the test passes on both boards (with the failsafe test and `tests/testing/test_harness.py`, 27 passed each). CI's R6S image of run 39177086857, in CI's order of `firmware/test_base_system.py`'s first three tests, passed three sessions of three, where five of five had failed.
 
 ## 3. Integration (design D4)
 

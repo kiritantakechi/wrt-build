@@ -2,18 +2,19 @@
 
 ## 1. The tests (design D4)
 
-- [ ] 1.1 Add the `testing/harness` tests "A reboot that does not come" and "A failing test with the router online" to `tests/testing/test_harness.py` (D4).
+- [x] 1.1 Add the `testing/harness` tests "A reboot that does not come" and "A failing test with the router online" to `tests/testing/test_harness.py` (D4).
 
   Verify: `just check` passes; `spec-coverage --change failure-diagnostics` reports both scenarios covered.
 
 ## 2. The diagnostics (design D1, D2, D3)
 
-- [ ] 2.1 Keep a detached command's output on the router, and add the notes of a reboot that does not come (D1, D2).
+- [x] 2.1 Keep a detached command's output on the router, and add the notes of a reboot that does not come (D1, D2).
 
   Verify: `just check` passes; the first test passes on both boards.
-- [ ] 2.2 Add `Online.state()`, `Isp.log()` and the hook that adds the datapath section (D3).
+- [x] 2.2 Add `Online.state()`, `Isp.log()` and the hook that adds the datapath section (D3).
 
   Verify: `just check` passes; the second test passes on both boards.
+  Result (2026-10-19): both tests pass on both boards, with the rest of `tests/testing/test_harness.py`.
 
 ## 3. Integration (design D5)
 
