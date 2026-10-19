@@ -2,6 +2,6 @@
 #   <name> <git-url> <commit-sha> <commit-epoch>
 # The openwrt commit epoch is the build's SOURCE_DATE_EPOCH.
 # Update only through the weekly bump (see docs/upstream-lock.md).
-openwrt  https://github.com/openwrt/openwrt.git   101929399c12644ac8c3fe9b11b83c93fe9ee755 1790539644
-packages https://github.com/openwrt/packages.git  a637759c3aae15f112bff2f3a845c74ee331b978 1790539812
-luci     https://github.com/openwrt/luci.git      05dc750ddb5e5c4aacf4ae0635bbf8b14a494909 1790527334
+openwrt  https://github.com/openwrt/openwrt.git   5b8554a95eee055c5bee96f6f2dfd3beb241e0e7 1792400156
+packages https://github.com/openwrt/packages.git  8d2dbcca8e0e654e62b1f696bc348d330a63bd1e 1792399200
+luci     https://github.com/openwrt/luci.git      0a601b651af34ae4a83dd89f417dccdc474ec348 1792348680
