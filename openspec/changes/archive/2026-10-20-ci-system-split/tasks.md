@@ -11,9 +11,10 @@
 
 ## 2. Integration (design D3)
 
-- [ ] 2.1 Get a green CI run for both boards with the six suites.
+- [x] 2.1 Get a green CI run for both boards with the six suites.
 
   Verify: record the run in `docs/ci.md`, each test job's time, the longest under 80 min.
+  Result (2026-10-20): run 39337272181 passed, the upgrade drill included; the longest test job, the R4S's `upgrade`, took 73 min. The branch's two runs before had failed in the R6S's `system` job on a fault of the harness that the split's order exposed, fixed by snapshot-return.
 
 ## Workflow follow-up
 
