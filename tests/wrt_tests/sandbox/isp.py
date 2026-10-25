@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
     from wrt_tests.sandbox.net import Netns
@@ -99,7 +99,7 @@ class Isp:
         return found[0]
 
     @contextmanager
-    def blocking(self, destination: str) -> Iterator[None]:
+    def blocking(self, destination: str) -> Generator[None]:
         """Refuse what the customers send to ``destination``, as an ISP that filters it."""
         first = ipaddress.IPv4Address(POOL_START)
         (pool,) = ipaddress.summarize_address_range(first, first + POOL_SIZE - 1)

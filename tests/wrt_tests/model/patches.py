@@ -55,7 +55,7 @@ def without_write_up(patches: dict[str, str | None], titles: dict[str, str]) -> 
     return [
         path
         for path, status in patches.items()
-        if status and status.split(" ")[0] in MEANT_FOR_UPSTREAM and path not in named
+        if status is not None and status.split(" ")[0] in MEANT_FOR_UPSTREAM and path not in named
     ]
 
 

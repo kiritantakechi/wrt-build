@@ -63,7 +63,7 @@ def profile(manifest: Manifest) -> str:
 @pytest.fixture(scope="session")
 def release_keys(tmp_path_factory: pytest.TempPathFactory) -> Keys | None:
     """Return the session's release keys, or None when $WRT_SIGNED names a signed build."""
-    if os.environ.get(SIGNED_ENV):
+    if os.environ.get(SIGNED_ENV, ""):
         return None
     return Keys.make(tmp_path_factory.mktemp("keys"))
 

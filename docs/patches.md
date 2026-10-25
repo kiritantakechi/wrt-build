@@ -67,7 +67,7 @@ Why it matters here: since r4s-ab-rollback, the emulator boots the factory image
 
 What the patch does: it gives `sdhci-pci` a description of its own: the PCI device state first, then the shared controller state. Its migration section is then named `sdhci-pci` rather than `sdhci`, so a stream from an earlier QEMU no longer loads into `sdhci-pci`; such a stream holds no PCI state, and its guest lost the card anyway. `flake.nix` builds the emulator's QEMU (aarch64 guests only) with it, and with every other patch in `patches/qemu/`.
 
-Verification log: 2026-09-29, QEMU 11.1.1 builds with the patch, and the emulation tests, which restore a snapshot between every two tests, pass with the SD card.
+Verification log: 2026-09-29, QEMU 11.1.1 builds with the patch, and the emulation tests, which restore a snapshot between every two tests, pass with the SD card. 2026-10-26, QEMU 11.1.2 builds with it; its `sdhci-pci.c` still migrates no PCI state.
 
 ### einat marks the inbound packets it translates back
 

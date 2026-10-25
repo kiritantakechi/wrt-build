@@ -105,7 +105,7 @@ def load_scenarios(openspec_dir: Path) -> list[Scenario]:
     archived = openspec_dir / "specs"
     for spec_file in sorted(archived.glob("*/*/spec.md")):
         for scenario in parse_spec(spec_file, _capability(spec_file, archived), change=None):
-            if new := renamed.get((scenario.id.capability, scenario.id.requirement)):
+            if (new := renamed.get((scenario.id.capability, scenario.id.requirement))) is not None:
                 scenarios.append(replace(scenario, id=replace(scenario.id, requirement=new)))
             else:
                 scenarios.append(scenario)

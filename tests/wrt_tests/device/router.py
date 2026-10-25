@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, cast
 from labgrid.driver import ExecutionError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
     from pathlib import Path
 
     from labgrid import Target
@@ -430,7 +430,7 @@ class Router:
         self.wait_rebooted(previous_boot)
 
     @contextmanager
-    def moved_to(self, address: str) -> Iterator[None]:
+    def moved_to(self, address: str) -> Generator[None]:
         """Reach the router at another LAN address inside the block."""
         service = self.target.get_resource("NetworkService")
         original = self.address

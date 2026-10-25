@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
     from wrt_tests.device.router import Router
     from wrt_tests.services.datapath import Online
@@ -59,7 +59,7 @@ def forget_learnt(router: Router) -> None:
 
 
 @contextmanager
-def rules(router: Router, *lines: str) -> Iterator[None]:
+def rules(router: Router, *lines: str) -> Generator[None]:
     """Have qosify classify by ``lines`` too, in its rule files' syntax, for the block."""
     forget_learnt(router)
     router.run(f"printf '%s\\n' {shlex.join(lines)} >{RULES} && /etc/init.d/qosify reload")

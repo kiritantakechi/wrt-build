@@ -389,11 +389,11 @@ class Network(AbstractContextManager["Network"]):
         ip("link", "set", "lo", "up")
         for bridge in self.topology.bridges:
             ip("link", "add", "name", bridge.name, "type", "bridge")
-            if bridge.tap:
+            if bridge.tap is not None:
                 ip("tuntap", "add", "dev", bridge.tap, "mode", "tap")
                 ip("link", "set", bridge.tap, "master", bridge.name, "up")
             ip("link", "set", bridge.name, "up")
-            if bridge.address:
+            if bridge.address is not None:
                 ip("addr", "add", bridge.address, "dev", bridge.name)
         for namespace in self.topology.namespaces:
             self.add(namespace)

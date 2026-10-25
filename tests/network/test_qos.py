@@ -20,7 +20,7 @@ from wrt_tests.services import qos
 from wrt_tests.services.datapath import WAN, hooks
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator, Iterator
 
     from wrt_tests.device.router import Router
     from wrt_tests.services.datapath import Online
@@ -76,7 +76,7 @@ def _set_wan(router: Router, options: dict[str, str]) -> None:
 
 
 @contextmanager
-def _ingress_shaped(router: Router, rate: int) -> Iterator[None]:
+def _ingress_shaped(router: Router, rate: int) -> Generator[None]:
     """Shape pppoe-wan's ingress with cake at ``rate`` bit/s for the block."""
     options = ("ingress", "bandwidth_down")
     previous = {

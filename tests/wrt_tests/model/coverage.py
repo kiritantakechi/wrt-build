@@ -254,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     scenarios = load_scenarios(args.openspec)
-    unknown = sorted(set(args.change) - {s.change for s in scenarios if s.change})
+    unknown = sorted(set(args.change) - {s.change for s in scenarios if s.change is not None})
     if unknown:
         parser.error(f"no such change with specs: {', '.join(unknown)}")
     tests = collect_tests(args.tests.resolve())
@@ -266,9 +266,9 @@ def main(argv: list[str] | None = None) -> int:
     missing: list[Scenario] = []
     totals: Counter[str] = Counter()
     for scenario in sorted(scenarios, key=lambda s: (s.change or "", s.id)):
-        if found := by_scenario.get(scenario.id):
+        if (found := by_scenario.get(scenario.id)) is not None:
             status, detail = "covered", str(found[0])
-        elif by := elsewhere.get(scenario.id):
+        elif (by := elsewhere.get(scenario.id)) is not None:
             status, detail = "elsewhere", by
         else:
             status, detail = "MISSING", ""
@@ -287,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
     for error in errors:
         print(f"error: {error}", file=sys.stderr)
     for scenario in missing:
-        change = f"{scenario.change}: " if scenario.change else ""
+        change = "" if scenario.change is None else f"{scenario.change}: "
         print(f"error: {change}no test for {scenario.id}", file=sys.stderr)
     return 1 if errors or missing else 0
 

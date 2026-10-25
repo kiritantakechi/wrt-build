@@ -79,5 +79,5 @@ def test_a_renamed_requirement_keeps_its_scenarios(tmp_path: Path) -> None:
         path.parent.mkdir(parents=True)
         path.write_text(text)
     assert parse_renames(delta) == {"Old name": "New name"}
-    archived_ids = [scenario.id for scenario in load_scenarios(tmp_path) if not scenario.change]
+    archived_ids = [scenario.id for scenario in load_scenarios(tmp_path) if scenario.change is None]
     assert archived_ids == [ScenarioId("demo/widget", "New name", "fourth")]
