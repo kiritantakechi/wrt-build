@@ -30,7 +30,7 @@ Upstream-Status: Pending
  2 files changed, 36 insertions(+), 8 deletions(-)
 
 diff --git a/package/system/procd/Makefile b/package/system/procd/Makefile
-index 4512b1f..22e7f83 100644
+index 21868ce..7a29b50 100644
 --- a/package/system/procd/Makefile
 +++ b/package/system/procd/Makefile
 @@ -8,7 +8,7 @@
@@ -43,10 +43,10 @@ index 4512b1f..22e7f83 100644
  PKG_SOURCE_PROTO:=git
  PKG_SOURCE_URL=$(PROJECT_GIT)/project/procd.git
 diff --git a/package/system/procd/files/procd.sh b/package/system/procd/files/procd.sh
-index 2f2c7ae..e403f74 100644
+index 855d968..8d55fb3 100644
 --- a/package/system/procd/files/procd.sh
 +++ b/package/system/procd/files/procd.sh
-@@ -368,6 +368,7 @@ _procd_add_mount_trigger() {
+@@ -369,6 +369,7 @@ _procd_add_mount_trigger() {
  	_procd_add_array_data "$1"
  	local action="$2"
  	local multi=0
@@ -54,7 +54,7 @@ index 2f2c7ae..e403f74 100644
  	shift ; shift
  
  	json_add_array
-@@ -389,7 +390,7 @@ _procd_add_mount_trigger() {
+@@ -390,7 +391,7 @@ _procd_add_mount_trigger() {
  	[ $multi = 1 ] && json_close_array
  
  	json_add_array
@@ -63,7 +63,7 @@ index 2f2c7ae..e403f74 100644
  	json_close_array
  
  	json_close_array
-@@ -397,19 +398,35 @@ _procd_add_mount_trigger() {
+@@ -398,19 +399,35 @@ _procd_add_mount_trigger() {
  	json_close_array
  }
  
@@ -105,7 +105,7 @@ index 2f2c7ae..e403f74 100644
  procd_get_mountpoints() {
  	(
  		__procd_check_mount() {
-@@ -436,6 +453,14 @@ _procd_add_reload_mount_trigger() {
+@@ -437,6 +454,14 @@ _procd_add_reload_mount_trigger() {
  	_procd_add_action_mount_trigger reload "$@"
  }
  
@@ -120,7 +120,7 @@ index 2f2c7ae..e403f74 100644
  _procd_add_raw_trigger() {
  	json_add_array
  	_procd_add_array_data "$1"
-@@ -699,6 +724,9 @@ _procd_wrapper \
+@@ -700,6 +725,9 @@ _procd_wrapper \
  	procd_add_action_mount_trigger \
  	procd_add_reload_mount_trigger \
  	procd_add_restart_mount_trigger \

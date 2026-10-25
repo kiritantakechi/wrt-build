@@ -17,12 +17,12 @@ Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
  package/system/fstools/Makefile               |  2 +-
- ...-point-of-a-removed-device-s-unmount.patch | 75 +++++++++++++++++++
- 2 files changed, 76 insertions(+), 1 deletion(-)
+ ...-point-of-a-removed-device-s-unmount.patch | 77 +++++++++++++++++++
+ 2 files changed, 78 insertions(+), 1 deletion(-)
  create mode 100644 package/system/fstools/patches/101-block-report-the-mount-point-of-a-removed-device-s-unmount.patch
 
 diff --git a/package/system/fstools/Makefile b/package/system/fstools/Makefile
-index 2a6405b..2521dfa 100644
+index 24e5e8e..677bc89 100644
 --- a/package/system/fstools/Makefile
 +++ b/package/system/fstools/Makefile
 @@ -8,7 +8,7 @@
@@ -36,10 +36,10 @@ index 2a6405b..2521dfa 100644
  PKG_SOURCE_URL=$(PROJECT_GIT)/project/fstools.git
 diff --git a/package/system/fstools/patches/101-block-report-the-mount-point-of-a-removed-device-s-unmount.patch b/package/system/fstools/patches/101-block-report-the-mount-point-of-a-removed-device-s-unmount.patch
 new file mode 100644
-index 0000000..469a2eb
+index 0000000..2be621e
 --- /dev/null
 +++ b/package/system/fstools/patches/101-block-report-the-mount-point-of-a-removed-device-s-unmount.patch
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,77 @@
 +From: kiritantakechi <kiritantakechi@gmail.com>
 +Subject: [PATCH] block: report the mount point of a removed device's unmount
 +
@@ -56,37 +56,39 @@ index 0000000..469a2eb
 +
 +Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 +---
-+ block.c  | 8 ++++++--
-+ blockd.c | 8 ++------
-+ 2 files changed, 8 insertions(+), 8 deletions(-)
++ block.c  | 10 +++++++---
++ blockd.c |  8 ++------
++ 2 files changed, 9 insertions(+), 9 deletions(-)
 +
 +diff --git a/block.c b/block.c
-+index c08da16..0614c0c 100644
++index b179348..176a4d5 100644
 +--- a/block.c
 ++++ b/block.c
-+@@ -1269,11 +1269,15 @@ static int mount_action(char *action, char *device, const char *options, int typ
++@@ -1607,12 +1607,16 @@ static int mount_action(char *action, char *device, const char *options, int typ
 + 		return -1;
 + 
 + 	if (!strcmp(action, "remove")) {
++-		if (type == TYPE_HOTPLUG)
++-			blockd_notify("hotplug", device, NULL, NULL);
++-
 ++		/*
 ++		 * Unmount before blockd forgets the device, so that it still
 ++		 * knows the mount point to report the unmount for.
 ++		 */
-++		umount_device(device, type, true);
-++
-+ 		if (type == TYPE_HOTPLUG)
-+ 			blockd_notify("hotplug", device, NULL, NULL);
++ 		if (config_load(NULL) || netmount_umount(device))
++ 			umount_device(device, type, true);
 + 
-+-		umount_device(device, type, true);
-+-
+++		if (type == TYPE_HOTPLUG)
+++			blockd_notify("hotplug", device, NULL, NULL);
+++
 + 		return 0;
 + 	} else if (strcmp(action, "add")) {
 + 		ULOG_ERR("Unkown action %s\n", action);
 +diff --git a/blockd.c b/blockd.c
-+index 902671f..99dada0 100644
++index 00c1c3a..f077918 100644
 +--- a/blockd.c
 ++++ b/blockd.c
-+@@ -421,7 +421,6 @@ static int blockd_umount(struct ubus_context *ctx, struct ubus_object *obj,
++@@ -417,7 +417,6 @@ static int blockd_umount(struct ubus_context *ctx, struct ubus_object *obj,
 + 	struct blockd_umount_context *c;
 + 	static const char *action = "remove";
 + 	char *devname;
@@ -94,7 +96,7 @@ index 0000000..469a2eb
 + 	struct device *device;
 + 	int err;
 + 
-+@@ -432,10 +431,6 @@ static int blockd_umount(struct ubus_context *ctx, struct ubus_object *obj,
++@@ -428,10 +427,6 @@ static int blockd_umount(struct ubus_context *ctx, struct ubus_object *obj,
 + 
 + 	devname = blobmsg_get_string(data[MOUNT_DEVICE]);
 + 	device = vlist_find(&devices, devname, device, node);
@@ -105,7 +107,7 @@ index 0000000..469a2eb
 + 
 + 	c = calloc(1, sizeof(*c));
 + 	if (!c)
-+@@ -450,7 +445,8 @@ static int blockd_umount(struct ubus_context *ctx, struct ubus_object *obj,
++@@ -446,7 +441,8 @@ static int blockd_umount(struct ubus_context *ctx, struct ubus_object *obj,
 + 		return UBUS_STATUS_UNKNOWN_ERROR;
 + 	}
 + 

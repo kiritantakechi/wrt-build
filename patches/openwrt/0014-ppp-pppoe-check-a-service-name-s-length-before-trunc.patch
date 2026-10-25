@@ -23,13 +23,13 @@ Upstream-Status: Pending
  create mode 100644 package/network/services/ppp/patches/209-pppoe-check-a-service-name-s-length-before-truncating-it.patch
 
 diff --git a/package/network/services/ppp/Makefile b/package/network/services/ppp/Makefile
-index ad5f32a..c0da96a 100644
+index c67e2b5..30da13f 100644
 --- a/package/network/services/ppp/Makefile
 +++ b/package/network/services/ppp/Makefile
 @@ -10,7 +10,7 @@ include $(INCLUDE_DIR)/kernel.mk
  
  PKG_NAME:=ppp
- PKG_VERSION:=2.5.3
+ PKG_VERSION:=2.5.4
 -PKG_RELEASE:=2
 +PKG_RELEASE:=3
  

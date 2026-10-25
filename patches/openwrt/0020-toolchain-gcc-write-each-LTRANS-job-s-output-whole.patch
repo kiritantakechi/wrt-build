@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kiritantakechi <kiritantakechi@gmail.com>
 Date: Tue, 6 Oct 2026 02:40:53 +0800
-Subject: [PATCH 5/5] toolchain: gcc: write each LTRANS job's output whole
+Subject: [PATCH] toolchain: gcc: write each LTRANS job's output whole
 
 When lto-wrapper runs a link's LTRANS jobs in parallel through make, the
 jobs write their diagnostics to the same stream as they go, in pieces,

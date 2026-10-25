@@ -1,8 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kiritantakechi <kiritantakechi@gmail.com>
 Date: Fri, 9 Oct 2026 22:17:38 +0800
-Subject: [PATCH] toolchain: gcc: no flexible array size without its
- object's initializer
+Subject: [PATCH] toolchain: gcc: no flexible array size without its object's
+ initializer
 
 Under LTO, a partition that does not define an object cannot see its
 initializer, and GCC then took the size of an initialized flexible

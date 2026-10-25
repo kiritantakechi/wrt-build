@@ -1,8 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kiritantakechi <kiritantakechi@gmail.com>
 Date: Tue, 6 Oct 2026 02:40:53 +0800
-Subject: [PATCH 4/5] tools: libtool: pass every sanitizer option through to
- the link
+Subject: [PATCH] tools: libtool: pass every sanitizer option through to the
+ link
 
 libtool passes -fsanitize=* to the link but drops the sanitizers' other
 options, -fsanitize-trap=* among them, which decide whether the link

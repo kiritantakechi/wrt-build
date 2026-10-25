@@ -356,8 +356,8 @@ def _tree_to_check_toolchain(workdir: Path) -> Path:
         "TOOLCHAIN_DIR_NAME := toolchain\n"
         "TOOLCHAIN_DIR := $(TOPDIR)/staging_dir/$(TOOLCHAIN_DIR_NAME)\n"
         "BUILD_DIR_TOOLCHAIN := $(TOPDIR)/build_dir/$(TOOLCHAIN_DIR_NAME)\n"
-        "toolchain_inputs := $(TOPDIR)/inputs\n"
-        "find_md5_reproducible = cat $(1)\n" + _toolchain_check()
+        "toolchain_hash = $(shell cat $(TOPDIR)/inputs)\n"
+        "toolchain_record = $(toolchain_hash)\n" + _toolchain_check()
     )
     return tree
 

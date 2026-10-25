@@ -15,18 +15,18 @@ Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
  package/network/config/qosify/Makefile        |  2 +-
- ...e-packets-with-the-IP-header-aligned.patch | 42 +++++++++++++++++++
- 2 files changed, 43 insertions(+), 1 deletion(-)
+ ...e-packets-with-the-IP-header-aligned.patch | 47 +++++++++++++++++++
+ 2 files changed, 48 insertions(+), 1 deletion(-)
  create mode 100644 package/network/config/qosify/patches/101-dns-receive-packets-with-the-IP-header-aligned.patch
 
 diff --git a/package/network/config/qosify/Makefile b/package/network/config/qosify/Makefile
-index 0fd4095..8087bd3 100644
+index c53c30e..22fa36c 100644
 --- a/package/network/config/qosify/Makefile
 +++ b/package/network/config/qosify/Makefile
 @@ -14,7 +14,7 @@ PKG_SOURCE_PROTO:=git
- PKG_SOURCE_DATE:=2026-06-22
- PKG_SOURCE_VERSION:=beeb87ec1f16aaf5d99ff8060c2455971d9d400e
- PKG_MIRROR_HASH:=c9ef0ad68daedb7e18e4959884a40cc0c64849dbd17bf6fdadeed8bdd8d49358
+ PKG_SOURCE_DATE:=2026-10-14
+ PKG_SOURCE_VERSION:=b3ee50eff9d924a6c7a0c02b9ab1afc6056b7a00
+ PKG_MIRROR_HASH:=924dd93cfc3205da58127bbd0397322e0b48819be28db3538e6ab9fc6196c536
 -PKG_RELEASE:=3
 +PKG_RELEASE:=4
  
@@ -34,10 +34,10 @@ index 0fd4095..8087bd3 100644
  PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
 diff --git a/package/network/config/qosify/patches/101-dns-receive-packets-with-the-IP-header-aligned.patch b/package/network/config/qosify/patches/101-dns-receive-packets-with-the-IP-header-aligned.patch
 new file mode 100644
-index 0000000..e895537
+index 0000000..15c563b
 --- /dev/null
 +++ b/package/network/config/qosify/patches/101-dns-receive-packets-with-the-IP-header-aligned.patch
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,47 @@
 +From: kiritantakechi <kiritantakechi@gmail.com>
 +Subject: [PATCH] dns: receive packets with the IP header aligned
 +
@@ -55,9 +55,14 @@ index 0000000..e895537
 +
 +Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 +---
++ dns.c | 11 ++++++++---
++ 1 file changed, 8 insertions(+), 3 deletions(-)
++
++diff --git a/dns.c b/dns.c
++index e8b20e0..2a7167d 100644
 +--- a/dns.c
 ++++ b/dns.c
-+@@ -329,14 +329,19 @@
++@@ -335,14 +335,19 @@ qosify_dns_packet_cb(struct packet *pkt)
 + static void
 + qosify_dns_socket_cb(struct uloop_fd *fd, unsigned int events)
 + {

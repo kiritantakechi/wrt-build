@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kiritantakechi <kiritantakechi@gmail.com>
 Date: Tue, 6 Oct 2026 02:40:53 +0800
-Subject: [PATCH 3/5] tools: mold: claim LTO objects in the command line order
+Subject: [PATCH] tools: mold: claim LTO objects in the command line order
 
 mold called the LTO plugin's claim hook for each LTO object as its
 reader threads reached it, so GCC got the objects in an order that

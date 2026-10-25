@@ -1,8 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kiritantakechi <kiritantakechi@gmail.com>
 Date: Tue, 6 Oct 2026 09:25:16 +0800
-Subject: [PATCH 3/5] ubox: logd: copy the log into the new buffer when it
- grows
+Subject: [PATCH] ubox: logd: copy the log into the new buffer when it grows
 
 When the log buffer grows, logd moves the destination past each copied
 entry from the old entry's address, so from the second entry on it

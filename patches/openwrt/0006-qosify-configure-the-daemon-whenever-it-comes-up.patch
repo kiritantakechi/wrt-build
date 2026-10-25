@@ -23,23 +23,23 @@ Upstream-Status: Pending
  2 files changed, 11 insertions(+), 3 deletions(-)
 
 diff --git a/package/network/config/qosify/Makefile b/package/network/config/qosify/Makefile
-index 31a69b3..68e234a 100644
+index c6b4b94..cb07bc2 100644
 --- a/package/network/config/qosify/Makefile
 +++ b/package/network/config/qosify/Makefile
 @@ -14,7 +14,7 @@ PKG_SOURCE_PROTO:=git
- PKG_SOURCE_DATE:=2026-06-22
- PKG_SOURCE_VERSION:=beeb87ec1f16aaf5d99ff8060c2455971d9d400e
- PKG_MIRROR_HASH:=c9ef0ad68daedb7e18e4959884a40cc0c64849dbd17bf6fdadeed8bdd8d49358
+ PKG_SOURCE_DATE:=2026-10-14
+ PKG_SOURCE_VERSION:=b3ee50eff9d924a6c7a0c02b9ab1afc6056b7a00
+ PKG_MIRROR_HASH:=924dd93cfc3205da58127bbd0397322e0b48819be28db3538e6ab9fc6196c536
 -PKG_RELEASE:=1
 +PKG_RELEASE:=2
  
  PKG_LICENSE:=GPL-2.0
  PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
 diff --git a/package/network/config/qosify/files/qosify.init b/package/network/config/qosify/files/qosify.init
-index 8c1ca7d..170ee27 100644
+index 9bff6be..737a474 100644
 --- a/package/network/config/qosify/files/qosify.init
 +++ b/package/network/config/qosify/files/qosify.init
-@@ -166,6 +166,14 @@ start_service() {
+@@ -167,6 +167,14 @@ start_service() {
  }
  
  service_running() {

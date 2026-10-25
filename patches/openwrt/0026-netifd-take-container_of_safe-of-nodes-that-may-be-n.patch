@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kiritantakechi <kiritantakechi@gmail.com>
 Date: Tue, 6 Oct 2026 09:25:16 +0800
-Subject: [PATCH 5/5] netifd: take container_of_safe of nodes that may be null
+Subject: [PATCH] netifd: take container_of_safe of nodes that may be null
 
 netifd's vlist update callbacks compute container_of() of the old or the
 new node before they check it for NULL, which it is whenever an entry

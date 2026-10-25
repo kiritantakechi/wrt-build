@@ -31,6 +31,9 @@ UBOOT_SECTOR = 16384
 UBOOT_BANNER = r"U-Boot 20\d\d\.\d\d"
 # Variables U-Boot itself defines for the slot logic, besides those of wrt-ab.env.
 LOGIC = ("bootcmd", "altbootcmd", "bootlimit")
+# The variables a stored environment may set, as both bootloaders' flags list
+# names them: the slot logic's state alone.
+WRITABLE = '"boot_slot:sw,bootcount:dw,upgrade_available:dw"'
 UPGRADE_IMAGE = "/tmp/sysupgrade.tar.gz"  # noqa: S108 (a path on the router)
 BOOT_LIMIT = 3
 PANIC_REBOOT = 10.0
@@ -308,6 +311,9 @@ def test_same_logic_in_both_bootloaders(
         offsets = (config["CONFIG_ENV_OFFSET"], config["CONFIG_ENV_OFFSET_REDUND"])
         assert tuple(int(offset, 16) for offset in offsets) == ENV_COPIES, name
         assert int(config["CONFIG_ENV_SIZE"], 16) == ENV_SIZE, name
+        # The stored environment sets the slot logic's state and nothing else.
+        assert config.get("CONFIG_ENV_WRITEABLE_LIST") == "y", name
+        assert config.get("CONFIG_ENV_FLAGS_LIST_STATIC") == WRITABLE, name
     # ...which the board's device tree makes its boot disk's controller: an eMMC
     # is soldered on, an SD card is not.
     assert run("fdtget", str(dtb), "/", "compatible").split()[0] == board.board_name

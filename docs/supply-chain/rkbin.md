@@ -1,13 +1,13 @@
 # rkbin: the RK3588's DRAM initialization
 
-Reviewed: 2026-09-30 (board-model task 3.8). The NanoPi R6S's loader holds the one part of either board's boot chain that is built from no source: Rockchip's DRAM initialization for the RK3588, from rkbin. The NanoPi R4S's boot chain is built from source throughout.
+Reviewed: 2026-09-30 (board-model task 3.8); its versions rechecked 2026-10-26, on the pins of 2026-10-25. The NanoPi R6S's loader holds the one part of either board's boot chain that is built from no source: Rockchip's DRAM initialization for the RK3588, from rkbin. The NanoPi R4S's boot chain is built from source throughout.
 
 | Board | Loader part | Where it comes from |
 |---|---|---|
-| NanoPi R4S (RK3399) | DRAM initialization (TPL) and SPL | U-Boot 2026.07, from source |
+| NanoPi R4S (RK3399) | DRAM initialization (TPL) and SPL | U-Boot 2026.10, from source |
 | | TF-A (BL31) | arm-trusted-firmware-rockchip 2.15.0, from source |
 | NanoPi R6S (RK3588S) | DRAM initialization, in the TPL's place | rkbin, `rk35/rk3588_ddr_lp4_2112MHz_lp5_2400MHz_v1.19.bin`: a binary |
-| | SPL | U-Boot 2026.07, from source |
+| | SPL | U-Boot 2026.10, from source |
 | | TF-A (BL31) | arm-trusted-firmware-rockchip 2.15.0, from source |
 
 ## Pinned version

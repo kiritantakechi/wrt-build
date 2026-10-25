@@ -184,7 +184,7 @@ function = "read_comsub"
 reason = "bufn starts at 0, so the first iteration refills the buffer and sets bufp, which is used afterwards only while bufn > 0, inside the last successful read."
 reviewed = 2026-10-05
 
-# ppp 2.5.3
+# ppp 2.5.4
 [[warning]]
 package = "ppp"
 option = "-Waddress-of-packed-member"
@@ -250,32 +250,7 @@ function = "mdb_modify"
 reason = "n is req's first member, so &req.n is &req, and addattr_l bounds every write by maxlen == sizeof (req); bridge, the only program with mdb_*, is not in the image."
 reviewed = 2026-10-05
 
-# jansson 2.15.0
-[[warning]]
-package = "jansson"
-option = "-Wstringop-overflow"
-file = "src/load.c"
-function = "lex_get_save"
-reason = "count = utf8_check_first (c) is 2 to 4 for any lead byte that reaches the loop (0 leaves through goto out), so stores stop at buffer[3] and the terminator at buffer[4] of buffer[5]."
-reviewed = 2026-10-05
-
-[[warning]]
-package = "jansson"
-option = "-Wstringop-overflow"
-file = "src/load.c"
-function = "lex_scan"
-reason = "count = utf8_check_first (c) is 2 to 4 for any lead byte that reaches the loop (0 leaves through goto out), so stores stop at buffer[3] and the terminator at buffer[4] of buffer[5]."
-reviewed = 2026-10-05
-
-[[warning]]
-package = "jansson"
-option = "-Wstringop-overflow"
-file = "src/load.c"
-function = "stream_get"
-reason = "count = utf8_check_first (c) is 2 to 4 for any lead byte that reaches the loop (0 leaves through goto out), so stores stop at buffer[3] and the terminator at buffer[4] of buffer[5]."
-reviewed = 2026-10-05
-
-# libgcrypt 1.12.2
+# libgcrypt 1.12.4
 [[warning]]
 package = "libgcrypt"
 option = "-Wstringop-overflow"
@@ -293,7 +268,7 @@ function = "_gen_bpf_build_bpf"
 reason = "state->arch is scratch state: nothing reads it after _gen_bpf_build_bpf returns, and _state_release clears it, so the dangling value is never used (libseccomp 2.6.0 sets it to NULL)."
 reviewed = 2026-10-05
 
-# pcre2 10.47
+# pcre2 10.49
 [[warning]]
 package = "pcre2"
 option = "-Wstringop-overflow"
@@ -320,7 +295,7 @@ function = "_nc_wgetch"
 reason = "_nc_wgetch has returned ERR if win or its screen is NULL, so recur_wgetnstr reaches wgetnstr, which NUL-terminates buf on every return after its (!win || !str) guard, within MAXCOLUMNS-1 characters."
 reviewed = 2026-10-05
 
-# podman 5.8.4, its vendored SQLite 3.50.4
+# podman 6.1.2, its vendored SQLite 3.53.4
 [[warning]]
 package = "podman"
 option = "-Wstringop-overread"
@@ -329,14 +304,14 @@ function = "sqlite3ColumnSetColl"
 reason = "COLFLAG_HASTYPE is set only together with a non-NULL zCnName that holds \"name\\0type\\0\", so the second sqlite3Strlen30 never sees a NULL name; a NULL name arises only after an allocation failure, where the parser stops."
 reviewed = 2026-10-05
 
-# procd 2026.09.26
+# procd 2026.10.18
 [[warning]]
 package = "procd"
 option = "-Wmaybe-uninitialized"
 file = "uxc.c"
 function = "uxc_list"
-reason = "arr is assigned and used under the same if (json_output); json_output is a file-static set only by main's option parsing before uxc_list runs, and never address-taken."
-reviewed = 2026-10-05
+reason = "arr is assigned and used under the same if (json_output); json_output is a file-static that only cli_list's option parsing sets, before it calls uxc_list, and never address-taken."
+reviewed = 2026-10-26
 
 # util-linux 2.42.2
 [[warning]]

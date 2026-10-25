@@ -20,13 +20,13 @@ Upstream-Status: Pending
  create mode 100644 package/network/services/ppp/patches/210-pppd-hash-the-host-name-without-signed-overflow.patch
 
 diff --git a/package/network/services/ppp/Makefile b/package/network/services/ppp/Makefile
-index c0da96a..1ee741b 100644
+index 30da13f..251b7ca 100644
 --- a/package/network/services/ppp/Makefile
 +++ b/package/network/services/ppp/Makefile
 @@ -10,7 +10,7 @@ include $(INCLUDE_DIR)/kernel.mk
  
  PKG_NAME:=ppp
- PKG_VERSION:=2.5.3
+ PKG_VERSION:=2.5.4
 -PKG_RELEASE:=3
 +PKG_RELEASE:=4
  
@@ -34,7 +34,7 @@ index c0da96a..1ee741b 100644
  PKG_SOURCE_URL:=https://download.samba.org/pub/ppp
 diff --git a/package/network/services/ppp/patches/210-pppd-hash-the-host-name-without-signed-overflow.patch b/package/network/services/ppp/patches/210-pppd-hash-the-host-name-without-signed-overflow.patch
 new file mode 100644
-index 0000000..42e747b
+index 0000000..9e10781
 --- /dev/null
 +++ b/package/network/services/ppp/patches/210-pppd-hash-the-host-name-without-signed-overflow.patch
 @@ -0,0 +1,33 @@
@@ -54,7 +54,7 @@ index 0000000..42e747b
 +---
 +--- a/pppd/sys-linux.c
 ++++ b/pppd/sys-linux.c
-+@@ -3686,13 +3686,13 @@
++@@ -3703,13 +3703,13 @@
 + int
 + get_host_seed(void)
 + {

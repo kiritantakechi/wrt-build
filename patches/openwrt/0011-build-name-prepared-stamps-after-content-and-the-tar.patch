@@ -53,7 +53,7 @@ index b6ed06a..bdafdad 100644
  define rdep
    .PRECIOUS: $(2)
 diff --git a/include/kernel-build.mk b/include/kernel-build.mk
-index f9b321f..ea1d523 100644
+index b0f5b91..7f95de6 100644
 --- a/include/kernel-build.mk
 +++ b/include/kernel-build.mk
 @@ -10,7 +10,7 @@ ifneq ($(DUMP),1)
@@ -79,10 +79,10 @@ index 4e70baf..823a055 100644
  STAMP_CONFIGURED=$(PKG_BUILD_DIR)/.configured$(if $(DUMP),,_$(call confvar,$(PKG_CONFIG_DEPENDS)))
  STAMP_CONFIGURED_WILDCARD=$(PKG_BUILD_DIR)/.configured_*
 diff --git a/rules.mk b/rules.mk
-index 82b83dc..d2f56ad 100644
+index 18f2ca2..17c7e77 100644
 --- a/rules.mk
 +++ b/rules.mk
-@@ -254,6 +254,9 @@ TARGET_PATH:=$(subst $(space),:,$(filter-out .,$(filter-out ./,$(subst :,$(space
+@@ -258,6 +258,9 @@ TARGET_PATH:=$(subst $(space),:,$(filter-out .,$(filter-out ./,$(subst :,$(space
  TARGET_INIT_PATH:=$(call qstrip,$(CONFIG_TARGET_INIT_PATH))
  TARGET_INIT_PATH:=$(if $(TARGET_INIT_PATH),$(TARGET_INIT_PATH),/usr/sbin:/sbin:/usr/bin:/bin)
  TARGET_CFLAGS:=$(TARGET_OPTIMIZATION)$(if $(CONFIG_DEBUG), -g3) $(call qstrip,$(CONFIG_EXTRA_OPTIMIZATION))

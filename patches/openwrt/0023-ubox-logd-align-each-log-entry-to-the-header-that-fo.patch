@@ -1,8 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kiritantakechi <kiritantakechi@gmail.com>
 Date: Tue, 6 Oct 2026 09:25:16 +0800
-Subject: [PATCH 2/5] ubox: logd: align each log entry to the header that
- follows it
+Subject: [PATCH] ubox: logd: align each log entry to the header that follows
+ it
 
 logd pads its log entries to four bytes, but the header that starts the
 next entry holds a struct timespec and needs eight-byte alignment on

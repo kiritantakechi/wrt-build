@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kiritantakechi <kiritantakechi@gmail.com>
 Date: Tue, 6 Oct 2026 09:25:16 +0800
-Subject: [PATCH 1/5] busybox: printf: no arithmetic on a null pointer
+Subject: [PATCH] busybox: printf: no arithmetic on a null pointer
 
 printf's print_direc() subtracts one from the place of the conversion's
 '*', which strchr() gives as NULL when there is none: undefined

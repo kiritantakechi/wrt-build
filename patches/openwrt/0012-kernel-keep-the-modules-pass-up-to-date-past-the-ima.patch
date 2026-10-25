@@ -27,10 +27,10 @@ Upstream-Status: Pending
  1 file changed, 14 insertions(+), 7 deletions(-)
 
 diff --git a/include/kernel-defaults.mk b/include/kernel-defaults.mk
-index c0449ef..dfe269b 100644
+index 724bcba..80545fb 100644
 --- a/include/kernel-defaults.mk
 +++ b/include/kernel-defaults.mk
-@@ -141,20 +141,23 @@ endef
+@@ -140,20 +140,23 @@ endef
  # changes it without a change in the kernel tree.
  KERNEL_MAKE_DEPENDS_image := $(if $(CONFIG_STRIP_KERNEL_EXPORTS),$(KERNEL_BUILD_DIR)/symtab.h)
  
@@ -60,7 +60,7 @@ index c0449ef..dfe269b 100644
  			rm -f $$$$stamp; \
  			$(3) \
  			$(KERNEL_MAKE) $(2) && echo "$$$$key" > $$$$stamp; \
-@@ -194,7 +197,11 @@ endef
+@@ -193,7 +196,11 @@ endef
  
  define Kernel/CompileImage/Default
  	rm -f $(TARGET_DIR)/init

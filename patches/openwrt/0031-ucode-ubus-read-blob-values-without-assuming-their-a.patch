@@ -21,7 +21,7 @@ Upstream-Status: Pending
  create mode 100644 package/utils/ucode/patches/120-ubus-read-blob-values-without-assuming-their-alignment.patch
 
 diff --git a/package/utils/ucode/Makefile b/package/utils/ucode/Makefile
-index eb6abd6..d05aaa4 100644
+index bc266b3..949dd5b 100644
 --- a/package/utils/ucode/Makefile
 +++ b/package/utils/ucode/Makefile
 @@ -8,7 +8,7 @@
@@ -32,10 +32,10 @@ index eb6abd6..d05aaa4 100644
 +PKG_RELEASE:=2
  
  PKG_SOURCE_PROTO:=git
- PKG_SOURCE_URL=https://github.com/jow-/ucode.git
+ PKG_SOURCE_URL=https://github.com/ucode-lang/ucode.git
 diff --git a/package/utils/ucode/patches/120-ubus-read-blob-values-without-assuming-their-alignment.patch b/package/utils/ucode/patches/120-ubus-read-blob-values-without-assuming-their-alignment.patch
 new file mode 100644
-index 0000000..d424baa
+index 0000000..8cd5edb
 --- /dev/null
 +++ b/package/utils/ucode/patches/120-ubus-read-blob-values-without-assuming-their-alignment.patch
 @@ -0,0 +1,51 @@
@@ -56,7 +56,7 @@ index 0000000..d424baa
 +---
 +--- a/lib/ubus.c
 ++++ b/lib/ubus.c
-+@@ -774,28 +774,20 @@
++@@ -796,28 +796,20 @@
 + 
 + 	switch (blob_id(attr)) {
 + 	case BLOBMSG_TYPE_BOOL:

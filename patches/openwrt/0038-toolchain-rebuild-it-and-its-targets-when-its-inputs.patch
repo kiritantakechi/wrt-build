@@ -5,25 +5,27 @@ Subject: [PATCH] toolchain: rebuild it and its targets when its inputs change
 
 The toolchain components name their prepared stamps without their
 content, and are built again only once their build directory is gone.
-Only buildbot mode cleans up: it removes the toolchain when the last git
-commit of toolchain/ changes, and check-toolchain-clean.sh runs
+Only buildbot mode cleans up: it removes the toolchain when the hash of
+toolchain/'s files changes, and check-toolchain-clean.sh runs
 targetclean when the GCC version or toolchain/build_version does. A
-changed toolchain patch outside buildbot mode, an uncommitted one, or
-one in a tree without .git leaves the old toolchain in place, and no
-mode covers the generic kernel patches the kernel headers come from.
-The cleanup also reaches only the configuration at hand: other target
-directories built with the same toolchain keep objects of the old one.
+changed toolchain patch outside buildbot mode leaves the old toolchain
+in place, and no mode covers the generic kernel files the kernel headers
+come from. The cleanup also reaches only the configuration at hand:
+other target directories built with the same toolchain keep objects of
+the old one.
 
 Record content instead, in every mode. .ver_check holds the hash of
-toolchain/ and of the generic kernel files of the configured kernel
-version, and a toolchain of other content is removed, to be built anew
-as a whole. Each target build directory records the toolchain it was
-built with, by name and content, and is removed with its staging
-directory when that is not the toolchain at hand, so a change of the
-GCC version or the C library, which builds a toolchain in another
-directory, cleans it too. Both checks run where the buildbot check ran:
-in every make that reads the top-level Makefile, before it builds
-anything.
+toolchain/, the one in GCC's version string, and that of the generic
+kernel files of the configured kernel version, both taken by one
+function, and a toolchain built from other files is removed, to be built
+anew as a whole. Each target build directory records the toolchain it
+was built with, by name and content, and is removed with its staging
+directory when that is not the toolchain at hand, so a change of the GCC
+version or the C library, which builds a toolchain in another directory,
+cleans it too. Both checks run where the buildbot check ran: in every
+make that reads the top-level Makefile, before it builds anything. A
+hash that cannot be taken, as without mkhash, stops the build instead of
+removing the toolchain.
 
 toolchain/build_version is a file of toolchain/, so bumping it still
 rebuilds; check-toolchain-clean.sh and toolchain_rebuild_check go.
@@ -32,10 +34,10 @@ Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
  .gitignore                       |  1 -
- Makefile                         |  5 +----
- scripts/check-toolchain-clean.sh | 14 --------------
- toolchain/Makefile               | 31 ++++++++++++++++++++++++-------
- 4 files changed, 25 insertions(+), 26 deletions(-)
+ Makefile                         |  5 +---
+ scripts/check-toolchain-clean.sh | 14 ----------
+ toolchain/Makefile               | 45 +++++++++++++++++++++++++-------
+ 4 files changed, 36 insertions(+), 29 deletions(-)
  delete mode 100755 scripts/check-toolchain-clean.sh
 
 diff --git a/.gitignore b/.gitignore
@@ -94,27 +96,37 @@ index 455cfb0..0000000
 -echo "$CONFIG_TOOLCHAIN_BUILD_VER" > .toolchain_build_ver
 -exit 0
 diff --git a/toolchain/Makefile b/toolchain/Makefile
-index e9cc95f..17526bf 100644
+index 5f39b61..ecb111d 100644
 --- a/toolchain/Makefile
 +++ b/toolchain/Makefile
-@@ -26,6 +26,16 @@
- 
- curdir:=toolchain
- 
-+# What the toolchain is built from: its own files and, for its kernel headers,
-+# the generic kernel files of the kernel version the configuration selects
-+# (LINUX_<version>), as include/target.mk picks them.
-+toolchain_kernel_dir:=$(TOPDIR)/target/linux/generic
-+toolchain_kernel:=$(strip $(foreach ver,$(patsubst $(toolchain_kernel_dir)/kernel-%,%,$(wildcard $(toolchain_kernel_dir)/kernel-*)),$(if $(CONFIG_LINUX_$(subst .,_,$(ver))),$(ver))))
-+toolchain_inputs:=$(TOPDIR)/toolchain $(if $(CONFIG_EXTERNAL_TOOLCHAIN),, \
-+	$(toolchain_kernel_dir)/kernel-$(toolchain_kernel) \
-+	$(foreach dir,backport pending hack,$(firstword $(wildcard $(toolchain_kernel_dir)/$(dir)-$(toolchain_kernel)) $(toolchain_kernel_dir)/$(dir))) \
-+	$(toolchain_kernel_dir)/files $(toolchain_kernel_dir)/files-$(toolchain_kernel))
-+
- # subdirectories to descend into
+@@ -30,10 +30,23 @@ curdir:=toolchain
  $(curdir)/builddirs := $(if $(CONFIG_GDB),gdb) $(if $(CONFIG_EXTERNAL_TOOLCHAIN),wrapper,kernel-headers binutils gcc/initial gcc/final $(LIBC) fortify-headers) $(if $(CONFIG_NASM),nasm) $(if $(CONFIG_USE_MOLD),mold)
  
-@@ -59,20 +69,27 @@ ifneq ($(ARCH),)
+ # builddir dependencies
+-# GCC version string and buildbot rebuild check, computed on first use.
+-toolchain_hash=$(eval toolchain_hash:=$(shell find toolchain -type f ! -path '*/.*' \
++# A short hash of the names and contents of the files under the paths given.
++toolchain_files_hash=$(if $(1),$(shell find $(1) -type f ! -path '*/.*' \
+ 	! -name '*.orig' ! -name '*.rej' ! -name '*~' -exec $(MKHASH) -n md5 {} + | \
+-	LC_ALL=C sort | $(MKHASH) md5 | cut -c1-10))$(toolchain_hash)
++	LC_ALL=C sort | $(MKHASH) md5 | cut -c1-10))
++# GCC version string and rebuild check, computed on first use.
++toolchain_hash=$(eval toolchain_hash:=$(call toolchain_files_hash,toolchain))$(toolchain_hash)
++# The rebuild check also covers what the kernel headers are built from besides
++# toolchain/: the generic kernel files of the kernel version the configuration
++# selects (LINUX_<version>), as include/target.mk picks them.
++toolchain_kernel_dir:=target/linux/generic
++toolchain_kernel:=$(strip $(foreach ver,$(patsubst $(toolchain_kernel_dir)/kernel-%,%,$(wildcard $(toolchain_kernel_dir)/kernel-*)),$(if $(CONFIG_LINUX_$(subst .,_,$(ver))),$(ver))))
++toolchain_kernel_files=$(if $(CONFIG_EXTERNAL_TOOLCHAIN),,$(wildcard \
++	$(toolchain_kernel_dir)/kernel-$(toolchain_kernel) \
++	$(foreach dir,backport pending hack,$(firstword $(wildcard $(toolchain_kernel_dir)/$(dir)-$(toolchain_kernel)) $(toolchain_kernel_dir)/$(dir))) \
++	$(toolchain_kernel_dir)/files $(toolchain_kernel_dir)/files-$(toolchain_kernel)))
++toolchain_kernel_hash=$(eval toolchain_kernel_hash:=$(call toolchain_files_hash,$(toolchain_kernel_files)))$(toolchain_kernel_hash)
++toolchain_record=$(strip $(toolchain_hash) $(toolchain_kernel_hash))
+ 
+ ifeq ($(CONFIG_EXTERNAL_TOOLCHAIN),)
+   $(curdir)/gcc/%: export TOOLCHAIN_HASH=$(toolchain_hash)
+@@ -66,18 +79,30 @@ ifneq ($(ARCH),)
  	); done
  	@grep GCC_VERSION $@ >/dev/null 2>&1 || $(INSTALL_DATA) $(TOPDIR)/toolchain/info.mk $@
  	@touch $@
@@ -122,22 +134,24 @@ index e9cc95f..17526bf 100644
 -endif
  
 -ifdef CONFIG_BUILDBOT
--ifneq ($(wildcard $(TOPDIR)/.git),)
-+  # The toolchain records the content it is built from, and each target build
-+  # directory the toolchain it was built with. A toolchain of other content is
-+  # removed, to be built anew as a whole, and so is a target of another
-+  # toolchain, with its staging directory. Every make that reads this Makefile
-+  # checks both through the info.mk it includes, before it builds anything.
++  # The toolchain records what it is built from, and each target build
++  # directory the toolchain it was built with. A toolchain built from other
++  # files is removed, to be built anew as a whole, and so is a target of
++  # another toolchain, with its staging directory. Every make that reads this
++  # Makefile checks both through the info.mk it includes, before it builds
++  # anything; a hash that could not be taken stops it.
    $(TOOLCHAIN_DIR)/stamp/.ver_check: $(TMP_DIR)/.build
--	ver=$$(git -C "$(TOPDIR)" log --no-show-signature --format=%h -1 toolchain) || exit; \
-+	ver=$$($(call find_md5_reproducible,$(toolchain_inputs))) || exit; \
- 	[ "$$ver" = "$$(cat $@ 2>/dev/null)" ] || { \
+-	[ "$(toolchain_hash)" = "$$(cat $@ 2>/dev/null)" ] || { \
 -		rm -rf $(BUILD_DIR) $(STAGING_DIR) $(TOOLCHAIN_DIR) $(BUILD_DIR_TOOLCHAIN); \
++	[ -n "$(toolchain_hash)" ] || { echo "cannot hash toolchain/" >&2; exit 1; }; \
++	record="$(toolchain_record)"; \
++	[ "$$record" = "$$(cat $@ 2>/dev/null)" ] || { \
 +		rm -rf $(TOOLCHAIN_DIR) $(BUILD_DIR_TOOLCHAIN); \
  		mkdir -p $(TOOLCHAIN_DIR)/stamp; \
- 		echo "$$ver" > $@; \
+-		echo $(toolchain_hash) > $@; \
++		echo "$$record" > $@; \
 +	}; \
-+	toolchain="$(TOOLCHAIN_DIR_NAME) $$ver"; \
++	toolchain="$(TOOLCHAIN_DIR_NAME) $$record"; \
 +	[ "$$toolchain" = "$$(cat $(BUILD_DIR)/.toolchain 2>/dev/null)" ] || { \
 +		rm -rf $(BUILD_DIR) $(STAGING_DIR); \
 +		mkdir -p $(BUILD_DIR); \
@@ -146,6 +160,7 @@ index e9cc95f..17526bf 100644
  
 -$(TOOLCHAIN_DIR)/info.mk $(STAGING_DIR)/.prepared: $(TOOLCHAIN_DIR)/stamp/.ver_check
 +  $(TOOLCHAIN_DIR)/info.mk $(STAGING_DIR)/.prepared: $(TOOLCHAIN_DIR)/stamp/.ver_check
- endif
++endif
  endif
  
+ # prerequisites for the individual targets

@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 12 Oct 2026 06:32:54 +0800
+Subject: [PATCH] qosify: show each interface's ifb as the daemon reports it
+
+qosify-status derives the name of an interface's ifb in a way of its
+own: "ifb-" and the device's name, cut at sixteen characters. For a
+device name of 12 to 15 characters that is no interface name at all,
+and not the one the daemon gives the ifb, the name's first two
+characters and its last nine.
+
+Carry the qosify patch that reports each active interface's ifb in its
+status, and have qosify-status show that device. It is meant for qosify
+upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/network/config/qosify/Makefile        |  2 +-
+ .../network/config/qosify/files/qosify-status |  6 ++--
+ ...t-each-interface-s-ifb-in-its-status.patch | 28 +++++++++++++++++++
+ 3 files changed, 32 insertions(+), 4 deletions(-)
+ create mode 100644 package/network/config/qosify/patches/104-interface-report-each-interface-s-ifb-in-its-status.patch
+
+diff --git a/package/network/config/qosify/Makefile b/package/network/config/qosify/Makefile
+index 2127f0e..0d3b431 100644
+--- a/package/network/config/qosify/Makefile
++++ b/package/network/config/qosify/Makefile
+@@ -14,7 +14,7 @@ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_DATE:=2026-10-14
+ PKG_SOURCE_VERSION:=b3ee50eff9d924a6c7a0c02b9ab1afc6056b7a00
+ PKG_MIRROR_HASH:=924dd93cfc3205da58127bbd0397322e0b48819be28db3538e6ab9fc6196c536
+-PKG_RELEASE:=5
++PKG_RELEASE:=6
+ 
+ PKG_LICENSE:=GPL-2.0
+ PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
+diff --git a/package/network/config/qosify/files/qosify-status b/package/network/config/qosify/files/qosify-status
+index dc58232..0ff60d1 100644
+--- a/package/network/config/qosify/files/qosify-status
++++ b/package/network/config/qosify/files/qosify-status
+@@ -7,7 +7,7 @@ dev_status() {
+ }
+ 
+ common_status() {
+-	json_get_vars ifname ingress egress
++	json_get_vars ifname ingress egress ifb
+ 
+ 	[ -n "$ifname" ] || return
+ 
+@@ -15,9 +15,9 @@ common_status() {
+ 		echo "egress status:"
+ 		dev_status "$ifname"
+ 	}
+-	[ "$ingress" -gt 0 ] && {
++	[ -n "$ifb" ] && {
+ 		echo "ingress status:"
+-		dev_status "$(printf %.16s "ifb-$ifname")"
++		dev_status "$ifb"
+ 	}
+ }
+ 
+diff --git a/package/network/config/qosify/patches/104-interface-report-each-interface-s-ifb-in-its-status.patch b/package/network/config/qosify/patches/104-interface-report-each-interface-s-ifb-in-its-status.patch
+new file mode 100644
+index 0000000..d1565f9
+--- /dev/null
++++ b/package/network/config/qosify/patches/104-interface-report-each-interface-s-ifb-in-its-status.patch
+@@ -0,0 +1,28 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] interface: report each interface's ifb in its status
++
++Report the ifb that shapes an active interface's ingress in its status,
++as "ifb", so that a status tool can show the device the daemon created.
++qosify-status derives a name of its own, "ifb-" and the device's name
++cut at sixteen characters, which for a device name of 12 to 15
++characters is not the daemon's: that keeps the name's first two
++characters and its last nine.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++ interface.c | 2 ++
++ 1 file changed, 2 insertions(+)
++
++diff --git a/interface.c b/interface.c
++index 2a673ea..170d83f 100644
++--- a/interface.c
+++++ b/interface.c
++@@ -735,6 +735,8 @@ __qosify_iface_status(struct blob_buf *b, struct qosify_iface *iface)
++ 		blobmsg_add_string(b, "ifname", iface->ifname);
++ 	blobmsg_add_u8(b, "egress", iface->config.egress);
++ 	blobmsg_add_u8(b, "ingress", iface->config.ingress);
+++	if (iface->active && iface->config.ingress)
+++		blobmsg_add_string(b, "ifb", interface_ifb_name(iface));
++ 	blobmsg_close_table(b, c);
++ 
++ }

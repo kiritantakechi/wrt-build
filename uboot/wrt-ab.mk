@@ -9,11 +9,6 @@ WRT_AB_DIR := $(TOPDIR)/env/uboot
 # U-Boot tree> (scripts/lib/boards.sh writes them from boards/*.json).
 include $(TOPDIR)/env/wrt-boards.mk
 
-# The variables the stored environment may set (ENV_WRITEABLE_LIST). U-Boot takes
-# this list only from its C configuration; u-boot.mk passes KBUILD_CFLAGS on.
-WRT_AB_WRITEABLE := boot_slot:sw,bootcount:dw,upgrade_available:dw
-WRT_AB_KBUILD_CFLAGS := -DCFG_ENV_FLAGS_LIST_STATIC='\"$(WRT_AB_WRITEABLE)\"'
-
 # WrtAB/config <board>: the configuration fragments after the defconfig in
 # UBOOT_CONFIG.
 WrtAB/config = wrt-ab board-$(1)
@@ -24,7 +19,6 @@ WrtAB/config = wrt-ab board-$(1)
 # logic as the variant's default environment, wrt.env (ENV_SOURCE_FILE).
 define WrtAB/Build
 PKG_FILE_DEPENDS += $(WRT_AB_DIR)/
-KBUILD_CFLAGS += $(WRT_AB_KBUILD_CFLAGS)
 
 define Build/Prepare
 	$$(call Build/Prepare/Default)

@@ -20,7 +20,7 @@ Upstream-Status: Pending
  create mode 100644 package/system/fstools/patches/100-libblkid-tiny-format-a-UUID-without-assuming-its-alignment.patch
 
 diff --git a/package/system/fstools/Makefile b/package/system/fstools/Makefile
-index 8f9321f..2a6405b 100644
+index 18ff62f..24e5e8e 100644
 --- a/package/system/fstools/Makefile
 +++ b/package/system/fstools/Makefile
 @@ -8,7 +8,7 @@

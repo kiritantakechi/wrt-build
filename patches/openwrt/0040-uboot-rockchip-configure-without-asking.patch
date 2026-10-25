@@ -28,16 +28,16 @@ Upstream-Status: Pending
  create mode 100644 package/boot/uboot-rockchip/patches/121-kconfig-default-to-zero-if-int-hex-symbol-lacks-default.patch
 
 diff --git a/package/boot/uboot-rockchip/Makefile b/package/boot/uboot-rockchip/Makefile
-index 8b38de5..e07a746 100644
+index 683cb40..4061ead 100644
 --- a/package/boot/uboot-rockchip/Makefile
 +++ b/package/boot/uboot-rockchip/Makefile
 @@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
  include $(INCLUDE_DIR)/kernel.mk
  
- PKG_VERSION:=2026.07
+ PKG_VERSION:=2026.10
 -PKG_RELEASE:=1
 +PKG_RELEASE:=2
- PKG_HASH:=78e8bfc382fe388f9b55aa1daf8c563522a037779b5d4c349d1415e381f1243e
+ PKG_HASH:=3f856da3cbbc93af51ff95fde18588a348b4a26723b01d9841e999d988481015
  
  PKG_MAINTAINER:=Sarah Maedel <openwrt@tbspace.de>
 diff --git a/package/boot/uboot-rockchip/patches/120-kconfig-run-olddefconfig-after-merging-fragments.patch b/package/boot/uboot-rockchip/patches/120-kconfig-run-olddefconfig-after-merging-fragments.patch

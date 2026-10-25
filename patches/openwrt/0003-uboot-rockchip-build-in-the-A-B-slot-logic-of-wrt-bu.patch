@@ -19,7 +19,7 @@ Upstream-Status: Inappropriate [wrt-build's A/B slot layout]
  1 file changed, 4 insertions(+)
 
 diff --git a/package/boot/uboot-rockchip/Makefile b/package/boot/uboot-rockchip/Makefile
-index 7161e56..8b38de5 100644
+index c780545..683cb40 100644
 --- a/package/boot/uboot-rockchip/Makefile
 +++ b/package/boot/uboot-rockchip/Makefile
 @@ -514,4 +514,8 @@ endef

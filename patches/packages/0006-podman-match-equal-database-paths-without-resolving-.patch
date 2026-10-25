@@ -17,29 +17,29 @@ Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
  utils/podman/Makefile                         |  2 +-
- ...atabase-paths-without-resolving-them.patch | 60 +++++++++++++++++++
- 2 files changed, 61 insertions(+), 1 deletion(-)
+ ...atabase-paths-without-resolving-them.patch | 41 +++++++++++++++++++
+ 2 files changed, 42 insertions(+), 1 deletion(-)
  create mode 100644 utils/podman/patches/020-libpod-match-equal-database-paths-without-resolving-them.patch
 
 diff --git a/utils/podman/Makefile b/utils/podman/Makefile
-index 78e6024..803d59a 100644
+index cc75f88..0f5cc83 100644
 --- a/utils/podman/Makefile
 +++ b/utils/podman/Makefile
 @@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
  
  PKG_NAME:=podman
- PKG_VERSION:=5.8.4
--PKG_RELEASE:=3
-+PKG_RELEASE:=4
+ PKG_VERSION:=6.1.2
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
  
  PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
  PKG_SOURCE_URL:=https://github.com/podman-container-tools/podman/archive/v$(PKG_VERSION)
 diff --git a/utils/podman/patches/020-libpod-match-equal-database-paths-without-resolving-them.patch b/utils/podman/patches/020-libpod-match-equal-database-paths-without-resolving-them.patch
 new file mode 100644
-index 0000000..2e93eb4
+index 0000000..3ad94bd
 --- /dev/null
 +++ b/utils/podman/patches/020-libpod-match-equal-database-paths-without-resolving-them.patch
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,41 @@
 +From: kiritantakechi <kiritantakechi@gmail.com>
 +Subject: [PATCH] libpod: match equal database paths without resolving them
 +
@@ -59,37 +59,18 @@ index 0000000..2e93eb4
 +validation does not create.
 +
 +Resolve the paths only when they differ as strings: equal paths are the
-+same path, however they resolve. This holds for the SQLite and the
-+BoltDB state alike.
++same path, however they resolve.
 +
 +Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 +---
-+ libpod/boltdb_state_internal.go | 6 ++++--
-+ libpod/sqlite_state.go          | 4 +++-
-+ 2 files changed, 7 insertions(+), 3 deletions(-)
++ libpod/sqlite_state.go | 4 +++-
++ 1 file changed, 3 insertions(+), 1 deletion(-)
 +
-+diff --git a/libpod/boltdb_state_internal.go b/libpod/boltdb_state_internal.go
-+index ceaf8e3..1a118ff 100644
-+--- a/libpod/boltdb_state_internal.go
-++++ b/libpod/boltdb_state_internal.go
-+@@ -232,8 +232,10 @@ func readOnlyValidateConfig(bucket *bolt.Bucket, toCheck dbConfigValidation) (bo
-+ 
-+ 	// Tolerate symlinks when possible - most relevant for OStree systems
-+ 	// and rootless containers, where we want to put containers in /home,
-+-	// which is symlinked to /var/home.
-+-	if toCheck.isPath {
-++	// which is symlinked to /var/home. Equal paths need no resolving:
-++	// resolving the same path twice differs only when another process
-++	// creates it in between.
-++	if toCheck.isPath && dbValue != ourValue {
-+ 		if dbValue != "" {
-+ 			checkedVal, err := evalSymlinksIfExists(dbValue)
-+ 			if err != nil {
 +diff --git a/libpod/sqlite_state.go b/libpod/sqlite_state.go
-+index f45e5e2..f969c8a 100644
++index 24fb7aa..609a715 100644
 +--- a/libpod/sqlite_state.go
 ++++ b/libpod/sqlite_state.go
-+@@ -414,7 +414,9 @@ func (s *SQLiteState) ValidateDBConfig(_ *Runtime) (defErr error) {
++@@ -408,7 +408,9 @@ func (s *SQLiteState) ValidateDBConfig(_ *Runtime) (defErr error) {
 + 	}
 + 
 + 	checkField := func(fieldName, dbVal, ourVal string, isPath bool) error {

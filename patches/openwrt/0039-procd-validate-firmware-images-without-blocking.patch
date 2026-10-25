@@ -22,7 +22,7 @@ Upstream-Status: Pending
  create mode 100644 package/system/procd/patches/100-system-validate-images-without-blocking-the-main-loop.patch
 
 diff --git a/package/system/procd/Makefile b/package/system/procd/Makefile
-index 22e7f83..b18a4b6 100644
+index 7a29b50..136c692 100644
 --- a/package/system/procd/Makefile
 +++ b/package/system/procd/Makefile
 @@ -8,7 +8,7 @@
@@ -36,7 +36,7 @@ index 22e7f83..b18a4b6 100644
  PKG_SOURCE_URL=$(PROJECT_GIT)/project/procd.git
 diff --git a/package/system/procd/patches/100-system-validate-images-without-blocking-the-main-loop.patch b/package/system/procd/patches/100-system-validate-images-without-blocking-the-main-loop.patch
 new file mode 100644
-index 0000000..dc1ec3e
+index 0000000..a641225
 --- /dev/null
 +++ b/package/system/procd/patches/100-system-validate-images-without-blocking-the-main-loop.patch
 @@ -0,0 +1,443 @@
@@ -66,10 +66,10 @@ index 0000000..dc1ec3e
 + 1 file changed, 188 insertions(+), 79 deletions(-)
 +
 +diff --git a/system.c b/system.c
-+index f6fe444..5e6841e 100644
++index 8c7fc07..c448571 100644
 +--- a/system.c
 ++++ b/system.c
-+@@ -546,119 +546,182 @@ static int proc_signal(struct ubus_context *ctx, struct ubus_object *obj,
++@@ -583,119 +583,182 @@ static int proc_signal(struct ubus_context *ctx, struct ubus_object *obj,
 + 	return 0;
 + }
 + 
@@ -302,7 +302,7 @@ index 0000000..dc1ec3e
 + 	switch (fork()) {
 + 	case -1:
 + 		_errno = errno;
-+@@ -666,7 +729,7 @@ static enum vjson_state validate_firmware_image_call(const char *file, char **er
++@@ -703,7 +766,7 @@ static enum vjson_state validate_firmware_image_call(const char *file, char **er
 + 		close(fds[0]);
 + 		close(fds[1]);
 + 
@@ -311,7 +311,7 @@ index 0000000..dc1ec3e
 + 				   strerror(_errno), _errno);
 + 	case 0:
 + 		/* Set stdin & stderr to /dev/null */
-+@@ -689,10 +752,12 @@ static enum vjson_state validate_firmware_image_call(const char *file, char **er
++@@ -726,10 +789,12 @@ static enum vjson_state validate_firmware_image_call(const char *file, char **er
 + 	/* Parent process */
 + 	close(fds[1]);
 + 
@@ -327,7 +327,7 @@ index 0000000..dc1ec3e
 + }
 + 
 + enum {
-+@@ -704,14 +769,24 @@ static const struct blobmsg_policy validate_firmware_image_policy[__VALIDATE_FIR
++@@ -741,14 +806,24 @@ static const struct blobmsg_policy validate_firmware_image_policy[__VALIDATE_FIR
 + 	[VALIDATE_FIRMWARE_IMAGE_PATH] = { .name = "path", .type = BLOBMSG_TYPE_STRING },
 + };
 + 
@@ -354,7 +354,7 @@ index 0000000..dc1ec3e
 + 
 + 	if (!msg)
 + 		return UBUS_STATUS_INVALID_ARGUMENT;
-+@@ -720,11 +795,16 @@ static int validate_firmware_image(struct ubus_context *ctx,
++@@ -757,11 +832,16 @@ static int validate_firmware_image(struct ubus_context *ctx,
 + 	if (!tb[VALIDATE_FIRMWARE_IMAGE_PATH])
 + 		return UBUS_STATUS_INVALID_ARGUMENT;
 + 
@@ -374,7 +374,7 @@ index 0000000..dc1ec3e
 + 
 + 	return UBUS_STATUS_OK;
 + }
-+@@ -763,9 +843,11 @@ static void sysupgrade_error(struct ubus_context *ctx,
++@@ -800,9 +880,11 @@ static void sysupgrade_error(struct ubus_context *ctx,
 + 	ubus_send_reply(ctx, req, b.head);
 + }
 + 
@@ -389,7 +389,7 @@ index 0000000..dc1ec3e
 + {
 + 	enum {
 + 		VALIDATION_VALID,
-+@@ -781,27 +863,18 @@ static int sysupgrade(struct ubus_context *ctx, struct ubus_object *obj,
++@@ -818,27 +900,18 @@ static int sysupgrade(struct ubus_context *ctx, struct ubus_object *obj,
 + 	struct blob_attr *validation[__VALIDATION_MAX];
 + 	struct blob_attr *tb[__SYSUPGRADE_MAX];
 + 	bool valid, forceable, allow_backup;
@@ -422,7 +422,7 @@ index 0000000..dc1ec3e
 + 		return UBUS_STATUS_INVALID_ARGUMENT;
 + 	}
 + 
-+@@ -811,14 +884,14 @@ static int sysupgrade(struct ubus_context *ctx, struct ubus_object *obj,
++@@ -848,14 +921,14 @@ static int sysupgrade(struct ubus_context *ctx, struct ubus_object *obj,
 + 
 + 	if (!valid) {
 + 		if (!forceable) {
@@ -440,7 +440,7 @@ index 0000000..dc1ec3e
 + 		return UBUS_STATUS_NOT_SUPPORTED;
 + 	}
 + 
-+@@ -834,6 +907,42 @@ static int sysupgrade(struct ubus_context *ctx, struct ubus_object *obj,
++@@ -871,6 +944,42 @@ static int sysupgrade(struct ubus_context *ctx, struct ubus_object *obj,
 + 	return UBUS_STATUS_UNKNOWN_ERROR;
 + }
 + 

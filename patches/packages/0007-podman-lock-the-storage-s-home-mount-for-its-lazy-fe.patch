@@ -19,29 +19,29 @@ Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
  utils/podman/Makefile                         |   2 +-
- ...-s-mount-for-the-lazy-feature-probes.patch | 138 ++++++++++++++++++
- 2 files changed, 139 insertions(+), 1 deletion(-)
+ ...-s-mount-for-the-lazy-feature-probes.patch | 141 ++++++++++++++++++
+ 2 files changed, 142 insertions(+), 1 deletion(-)
  create mode 100644 utils/podman/patches/021-overlay-lock-home-s-mount-for-the-lazy-feature-probes.patch
 
 diff --git a/utils/podman/Makefile b/utils/podman/Makefile
-index 803d59a..497f1ce 100644
+index 0f5cc83..32525aa 100644
 --- a/utils/podman/Makefile
 +++ b/utils/podman/Makefile
 @@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
  
  PKG_NAME:=podman
- PKG_VERSION:=5.8.4
--PKG_RELEASE:=4
-+PKG_RELEASE:=5
+ PKG_VERSION:=6.1.2
+-PKG_RELEASE:=2
++PKG_RELEASE:=3
  
  PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
  PKG_SOURCE_URL:=https://github.com/podman-container-tools/podman/archive/v$(PKG_VERSION)
 diff --git a/utils/podman/patches/021-overlay-lock-home-s-mount-for-the-lazy-feature-probes.patch b/utils/podman/patches/021-overlay-lock-home-s-mount-for-the-lazy-feature-probes.patch
 new file mode 100644
-index 0000000..c3d6eb5
+index 0000000..9e37ad0
 --- /dev/null
 +++ b/utils/podman/patches/021-overlay-lock-home-s-mount-for-the-lazy-feature-probes.patch
-@@ -0,0 +1,138 @@
+@@ -0,0 +1,141 @@
 +From: kiritantakechi <kiritantakechi@gmail.com>
 +Subject: [PATCH] overlay: lock home's mount for the lazy feature probes
 +
@@ -72,30 +72,33 @@ index 0000000..c3d6eb5
 +
 +Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 +---
-+ .../storage/drivers/overlay/overlay.go        | 28 ++++++++++++++++++-
-+ 1 file changed, 27 insertions(+), 1 deletion(-)
++ .../storage/drivers/overlay/overlay.go        | 31 ++++++++++++++++++-
++ 1 file changed, 30 insertions(+), 1 deletion(-)
 +
 +diff --git a/vendor/go.podman.io/storage/drivers/overlay/overlay.go b/vendor/go.podman.io/storage/drivers/overlay/overlay.go
-+index 2eb720c..8bb1f03 100644
++index 229dbdf..467ac1b 100644
 +--- a/vendor/go.podman.io/storage/drivers/overlay/overlay.go
 ++++ b/vendor/go.podman.io/storage/drivers/overlay/overlay.go
-+@@ -37,6 +37,7 @@ import (
++@@ -38,6 +38,7 @@ import (
 + 	"go.podman.io/storage/pkg/fsutils"
 + 	"go.podman.io/storage/pkg/idmap"
 + 	"go.podman.io/storage/pkg/idtools"
 ++	"go.podman.io/storage/pkg/lockfile"
 + 	"go.podman.io/storage/pkg/mount"
-+ 	"go.podman.io/storage/pkg/parsers"
 + 	"go.podman.io/storage/pkg/system"
-+@@ -51,6 +52,7 @@ const (
-+ 	defaultPerms         = os.FileMode(0o555)
-+ 	selinuxLabelTest     = "system_u:object_r:container_file_t:s0"
-+ 	mountProgramFlagFile = ".has-mount-program"
-++	homeLockFile         = "home.lock"
++ 	"go.podman.io/storage/pkg/unshare"
++@@ -85,6 +86,10 @@ const ( // Paths within the driver’s home directory
++ 	tempDirName          = "tempdirs"
 + )
 + 
-+ // This backend uses the overlay union filesystem for containers
-+@@ -138,6 +140,14 @@ type Driver struct {
+++const ( // Paths within the driver’s run home directory
+++	homeLockFile = "home.lock"
+++)
+++
++ const ( // Paths within a per-layer directory
++ 	lowerFile = "lower"
++ 	// lowerLayersFile references lower layers directly by layer ID
++@@ -151,6 +156,14 @@ type Driver struct {
 + 	stagingDirsLocks map[string]*staging_lockfile.StagingLockFile
 + 
 + 	supportsIDMappedMounts *bool
@@ -110,7 +113,7 @@ index 0000000..c3d6eb5
 + }
 + 
 + type additionalLayerStore struct {
-+@@ -269,7 +279,9 @@ func (d *Driver) getSupportsVolatile() (bool, error) {
++@@ -282,7 +295,9 @@ func (d *Driver) getSupportsVolatile() (bool, error) {
 + 	if d.supportsVolatile != nil {
 + 		return *d.supportsVolatile, nil
 + 	}
@@ -120,7 +123,7 @@ index 0000000..c3d6eb5
 + 	if err != nil {
 + 		return false, err
 + 	}
-+@@ -281,7 +293,9 @@ func (d *Driver) getSupportsDataOnly() (bool, error) {
++@@ -294,7 +309,9 @@ func (d *Driver) getSupportsDataOnly() (bool, error) {
 + 	if d.supportsDataOnly != nil {
 + 		return *d.supportsDataOnly, nil
 + 	}
@@ -130,7 +133,7 @@ index 0000000..c3d6eb5
 + 	if err != nil {
 + 		return false, err
 + 	}
-+@@ -341,6 +355,10 @@ func Init(home string, options graphdriver.Options) (graphdriver.Driver, error)
++@@ -363,6 +380,10 @@ func Init(home string, options graphdriver.Options) (graphdriver.Driver, error)
 + 	if err := os.MkdirAll(runhome, 0o700); err != nil {
 + 		return nil, err
 + 	}
@@ -141,7 +144,7 @@ index 0000000..c3d6eb5
 + 
 + 	if opts.mountProgram == "" {
 + 		if supported, err := SupportsNativeOverlay(home, runhome); err != nil {
-+@@ -422,7 +440,10 @@ func Init(home string, options graphdriver.Options) (graphdriver.Driver, error)
++@@ -449,7 +470,10 @@ func Init(home string, options graphdriver.Options) (graphdriver.Driver, error)
 + 	}
 + 
 + 	if !opts.skipMountHome {
@@ -153,7 +156,7 @@ index 0000000..c3d6eb5
 + 			return nil, fmt.Errorf("overlay: failed to make mount private: %w", err)
 + 		}
 + 	}
-+@@ -445,6 +466,7 @@ func Init(home string, options graphdriver.Options) (graphdriver.Driver, error)
++@@ -472,6 +496,7 @@ func Init(home string, options graphdriver.Options) (graphdriver.Driver, error)
 + 		options:               *opts,
 + 		stagingDirsLocksMutex: sync.Mutex{},
 + 		stagingDirsLocks:      make(map[string]*staging_lockfile.StagingLockFile),
@@ -161,7 +164,7 @@ index 0000000..c3d6eb5
 + 	}
 + 
 + 	d.naiveDiff = graphdriver.NewNaiveDiffDriver(d, graphdriver.NewNaiveLayerIDMapUpdater(d))
-+@@ -863,6 +885,8 @@ func (d *Driver) Cleanup() error {
++@@ -909,6 +934,8 @@ func (d *Driver) Cleanup() error {
 + 	if anyPresent {
 + 		return nil
 + 	}
@@ -170,7 +173,7 @@ index 0000000..c3d6eb5
 + 	return mount.Unmount(d.home)
 + }
 + 
-+@@ -2672,7 +2696,9 @@ func (d *Driver) supportsIDmappedMounts() bool {
++@@ -2586,7 +2613,9 @@ func (d *Driver) supportsIDmappedMounts() bool {
 + 		return *d.supportsIDMappedMounts
 + 	}
 + 
