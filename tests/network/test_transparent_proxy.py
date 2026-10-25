@@ -7,6 +7,7 @@ everything else goes direct.
 
 import json
 import re
+import signal
 import subprocess
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, cast
@@ -136,9 +137,12 @@ def test_luci_save_hot_reloads(dae_restored: Online) -> None:
     online = dae_restored
     router = online.router
     session = _luci_session(router)
-    # A direct flow runs through the reload: pings every 0.1 s, none may be lost.
+    # A direct flow runs through the reload: pings every 0.1 s, none may be lost,
+    # from before the write until the saved configuration is in effect. nsenter
+    # runs ping in its own process: the interrupt reaches ping, which then prints
+    # its summary (test-fidelity D6).
     pings = subprocess.Popen(
-        online.client().argv("ping", "-c", "100", "-i", "0.1", "-W", "1", DIRECT_TARGET[0]),
+        online.client().argv("ping", "-i", "0.1", "-W", "1", DIRECT_TARGET[0]),
         stdout=subprocess.PIPE,
         text=True,
     )
@@ -152,12 +156,17 @@ def test_luci_save_hot_reloads(dae_restored: Online) -> None:
         {"path": "/etc/dae/config.dae", "data": config, "mode": 0o600},
     )
     _ubus(router, session, "file", "exec", {"command": "/etc/init.d/dae", "params": ["hot_reload"]})
-    until(
-        lambda: online.client().probe("tcp", PROXIED_TARGET[0])["address"] == online.wan_address,
-        timeout=DAE_TIMEOUT,
-        what="the saved configuration in effect",
-    )
-    output, _ = pings.communicate(timeout=60)
+    try:
+        until(
+            lambda: (
+                online.client().probe("tcp", PROXIED_TARGET[0])["address"] == online.wan_address
+            ),
+            timeout=DAE_TIMEOUT,
+            what="the saved configuration in effect",
+        )
+    finally:
+        pings.send_signal(signal.SIGINT)
+        output, _ = pings.communicate(timeout=60)
     assert " 0% packet loss" in output, output
     assert hooks(router, "br-lan") == DAE
 

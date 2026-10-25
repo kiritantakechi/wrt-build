@@ -55,7 +55,11 @@ class WireGuard:
 
     @classmethod
     def connect(cls, online: Online, routes: Sequence[str]) -> Self:
-        """Key both ends and bring the tunnel up; wg-peer routes ``routes`` through it."""
+        """Key both ends and bring the tunnel up; wg-peer routes ``routes`` through it.
+
+        A failure on the way takes wg-peer's tunnel down again, so that the
+        session's namespace holds none for the next one (test-fidelity D11).
+        """
         router_private, router_public = key_pair()
         peer_private, peer_public = key_pair()
         online.router.run(
@@ -74,17 +78,27 @@ class WireGuard:
         key.write_text(peer_private)
         key.chmod(0o600)
         peer.run("ip", "link", "add", "wg0", "type", "wireguard")
-        peer.run(
-            *("wg", "set", "wg0", "private-key", str(key), "peer", router_public),
-            *("endpoint", f"{online.wan_address}:{WG_PORT}", "allowed-ips", "0.0.0.0/0"),
-            *("persistent-keepalive", "5"),
-        )
-        peer.run("ip", "addr", "add", f"{WG_ADDRESSES[1]}/24", "dev", "wg0")
-        peer.run("ip", "link", "set", "wg0", "up")
-        for route in routes:
-            peer.run("ip", "route", "add", route, "dev", "wg0")
         tunnel = cls(peer)
-        until(tunnel.handshaken, timeout=HANDSHAKE_TIMEOUT, what="a WireGuard handshake")
+        try:
+            peer.run(
+                *("wg", "set", "wg0", "private-key", str(key), "peer", router_public),
+                *("endpoint", f"{online.wan_address}:{WG_PORT}", "allowed-ips", "0.0.0.0/0"),
+                *("persistent-keepalive", "5"),
+            )
+            peer.run("ip", "addr", "add", f"{WG_ADDRESSES[1]}/24", "dev", "wg0")
+            peer.run("ip", "link", "set", "wg0", "up")
+            for route in routes:
+                peer.run("ip", "route", "add", route, "dev", "wg0")
+            try:
+                until(tunnel.handshaken, timeout=HANDSHAKE_TIMEOUT, what="a WireGuard handshake")
+            except TimeoutError as error:
+                # Both ends as they stand, their private keys hidden by wg.
+                error.add_note(f"wg-peer:\n{peer.run('wg', 'show', 'wg0')}")
+                error.add_note(f"router:\n{online.router.run('wg show wg0; ifstatus wg0')}")
+                raise
+        except BaseException:
+            tunnel.disconnect()
+            raise
         return tunnel
 
     def handshaken(self) -> bool:

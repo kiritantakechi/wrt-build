@@ -3,8 +3,8 @@
 ``serve`` runs on the emulated internet and reports what it sees of a flow, on
 port PORT of every address, IPv4 and IPv6:
 
-- TCP: one JSON line with the peer's address and port and the connection's MSS
-  (TCP_MAXSEG), then it closes; on HTTP_PORT the same as the body of an HTTP
+- TCP: one JSON line with the peer's address and port and the MSS option of its
+  SYN as it arrived, then it closes; on HTTP_PORT the same as the body of an HTTP
   response, for clients that speak only HTTP (the router's uclient-fetch);
 - UDP: a JSON datagram with the peer's address and port; a datagram ``big`` gets
   the same answer padded to BIG bytes, which the way back has to fragment;
@@ -45,6 +45,20 @@ HTTP_PORT = 80
 BIG = 3000
 TIMEOUT = 5.0
 ESP_HEADER = struct.Struct("!II")
+# Linux's TCP_SAVE_SYN and TCP_SAVED_SYN (linux/tcp.h), which the socket module
+# does not name: a listening socket keeps each SYN's headers, which the accepted
+# socket returns, network header first. TCP_MAXSEG would give the MSS that the
+# server sends with instead, the SYN's less the options of every segment
+# (test-fidelity D1).
+TCP_SAVE_SYN = 27
+TCP_SAVED_SYN = 28
+SAVED_SYN_SIZE = 512
+IPV4 = 4
+IPV6_HEADER = 40
+TCP_HEADER = 20
+TCP_END, TCP_NOP, TCP_MSS = 0, 1, 2
+# A TCP option's kind and length, before its value.
+TCP_OPTION_HEAD = 2
 # Room for the packet information of a received datagram.
 ANCILLARY = socket.CMSG_SPACE(64)
 DNS_HEADER = struct.Struct("!HHHHHH")
@@ -84,10 +98,34 @@ def _esp_payload(sock: socket.socket, packet: bytes) -> bytes:
     return packet[(packet[0] & 0x0F) * 4 :] if sock.family == socket.AF_INET else packet
 
 
+def _syn_mss(headers: bytes) -> int:
+    """Return the MSS option of a SYN, from its network and TCP headers as received."""
+    if headers[0] >> 4 == IPV4:
+        tcp = headers[(headers[0] & 0x0F) * 4 :]
+    elif headers[6] == socket.IPPROTO_TCP:  # IPv6, TCP its next header
+        tcp = headers[IPV6_HEADER:]
+    else:
+        msg = "an IPv6 extension header before TCP"
+        raise ValueError(msg)
+    options = tcp[TCP_HEADER : (tcp[12] >> 4) * 4]
+    while options and options[0] != TCP_END:
+        if options[0] == TCP_NOP:
+            options = options[1:]
+            continue
+        if len(options) < TCP_OPTION_HEAD or options[1] < TCP_OPTION_HEAD:
+            break
+        if options[0] == TCP_MSS:
+            return int.from_bytes(options[2:4])
+        options = options[options[1] :]
+    msg = "a SYN without an MSS option"
+    raise ValueError(msg)
+
+
 def _peer(writer: asyncio.StreamWriter) -> bytes:
     host, port = writer.get_extra_info("peername")[:2]
     sock = cast("socket.socket", writer.get_extra_info("socket"))
-    return _seen(host, port, mss=sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_MAXSEG))
+    syn = sock.getsockopt(socket.IPPROTO_TCP, TCP_SAVED_SYN, SAVED_SYN_SIZE)
+    return _seen(host, port, mss=_syn_mss(syn))
 
 
 async def _tcp(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -131,6 +169,22 @@ def _from(family: socket.AddressFamily, local: str) -> list[tuple[int, int, byte
     return [(socket.IPPROTO_IPV6, socket.IPV6_PKTINFO, info)]
 
 
+def _listening(family: socket.AddressFamily, port: int) -> socket.socket:
+    """Return a TCP socket listening on every address of ``family`` that keeps each SYN.
+
+    It keeps them from before it listens, so that no connection comes without.
+    """
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if family == socket.AF_INET6:  # one socket per family, as start_server makes them
+        sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+    sock.setsockopt(socket.IPPROTO_TCP, TCP_SAVE_SYN, 1)
+    sock.bind(("", port))
+    sock.listen()
+    sock.setblocking(False)  # noqa: FBT003
+    return sock
+
+
 def _answering(family: socket.AddressFamily, kind: socket.SocketKind, port: int) -> socket.socket:
     """Return a socket that learns where each datagram was sent, to answer from there.
 
@@ -171,12 +225,13 @@ def _esp_reply(sock: socket.socket) -> None:
 async def serve(port: int) -> None:
     """Answer TCP, UDP and ESP on every address until cancelled."""
     loop = asyncio.get_running_loop()
-    hosts = ["0.0.0.0", "::"]  # noqa: S104
+    families = (socket.AF_INET, socket.AF_INET6)
     servers = [
-        await asyncio.start_server(_tcp, host=hosts, port=port),
-        await asyncio.start_server(_http, host=hosts, port=HTTP_PORT),
+        await asyncio.start_server(handler, sock=_listening(family, listen_port))
+        for handler, listen_port in ((_tcp, port), (_http, HTTP_PORT))
+        for family in families
     ]
-    for family in (socket.AF_INET, socket.AF_INET6):
+    for family in families:
         udp = _answering(family, socket.SOCK_DGRAM, port)
         loop.add_reader(udp, _udp_reply, udp)
         esp = _answering(family, socket.SOCK_RAW, 0)

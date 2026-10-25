@@ -96,13 +96,30 @@ def ubsan_traps(booted_router: Router, profile: str) -> Traps | None:
     return traps
 
 
+def claim(router: Router) -> None:
+    """Fail a test that would return the router to its snapshot while a module keeps it.
+
+    Its reset would take what the module's fixtures set up (a dial-in, a Pod)
+    from the module's later tests, which would then fail for that alone
+    (test-fidelity D16).
+    """
+    if router.holder is not None:
+        msg = (
+            f"{router.holder} keeps the router for its fixtures; a test that resets it"
+            " must come before the module's first test that uses them"
+        )
+        pytest.fail(msg)
+
+
 @pytest.fixture
 def router(booted_router: Router, ubsan_traps: Traps | None) -> Iterator[Router]:
     """Provide the router in its post-boot state; the emulator returns to it afterwards.
 
     In a ubsan build, a trap during the test fails it: the kernel log is read
-    before the snapshot erases it.
+    before the snapshot erases it. A module that keeps the router may not
+    use this after its first test that does (claim).
     """
+    claim(booted_router)
     yield booted_router
     try:
         if ubsan_traps is not None:
@@ -112,15 +129,20 @@ def router(booted_router: Router, ubsan_traps: Traps | None) -> Iterator[Router]
 
 
 @pytest.fixture(scope="module")
-def module_router(booted_router: Router, ubsan_traps: Traps | None) -> Iterator[Router]:
+def module_router(
+    request: pytest.FixtureRequest, booted_router: Router, ubsan_traps: Traps | None
+) -> Iterator[Router]:
     """Provide the router from its post-boot state for a whole module; return to it after.
 
     In a ubsan build, check_module_traps fails each test after which something
     trapped; a trap outside the tests, in a module fixture, fails the module's
-    last test, read before the snapshot erases it.
+    last test, read before the snapshot erases it. Meanwhile the module holds
+    the router (claim).
     """
     booted_router.reset()
+    booted_router.holder = request.module.__name__
     yield booted_router
+    booted_router.holder = None
     try:
         if ubsan_traps is not None:
             report(ubsan_traps.new(), "outside the module's tests")

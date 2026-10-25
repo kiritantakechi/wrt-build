@@ -15,7 +15,10 @@ CAPABILITY = "firmware/health-check"
 RESULT = "/var/run/wrt-healthcheck.json"
 CHECKS = "/etc/healthcheck.d"
 FAILING = "/tmp/demo-fails"  # noqa: S108 (a path on the router)
-# Limits short enough for a test and long enough for a check to fail twice.
+# Limits short enough for a test and long enough for a check to fail twice. A
+# test sets them without committing them: they hold for the health check it
+# runs, which reads the changes in /tmp/.uci, and the boot it reboots into
+# checks with the image's limits.
 LIMITS = {"total": 6, "interval": 3, "timeout": 3}
 QUICK = " && ".join(f"uci set wrt-ab.healthcheck.{name}={value}" for name, value in LIMITS.items())
 # Limits long enough for a check that fails after the clock was set, then passes.
@@ -38,7 +41,7 @@ def _check(router: Router, broken: str | None = None) -> dict[str, object]:
             f" && chmod +x {BROKEN}/{broken}"
         )
         path = f"PATH={BROKEN}:$PATH "
-    router.run(f"{QUICK} && uci commit wrt-ab && {path}wrt-healthcheck", timeout=120)
+    router.run(f"{QUICK} && {path}wrt-healthcheck", timeout=120)
     return cast("dict[str, object]", json.loads(router.run(f"cat {RESULT}")))
 
 
@@ -94,7 +97,7 @@ def test_trial_failure_reboots(router: Router) -> None:
     router.run(f"touch {FAILING}")
     _register(router, "demo", f"[ ! -e {FAILING} ]")
     previous_boot = router.boot_id()
-    router.detach(f"{QUICK} && uci commit wrt-ab && wrt-healthcheck")
+    router.detach(f"{QUICK} && wrt-healthcheck")
     router.wait_rebooted(previous_boot)
     confirmed = f"slot {running} passed its trial boot and is confirmed"
     router.run(
@@ -112,7 +115,7 @@ def test_a_clock_set_forward_does_not_end_a_trial(router: Router) -> None:
         f"uci set wrt-ab.healthcheck.{name}={value}" for name, value in SLOW.items()
     )
     previous_boot = router.boot_id()
-    router.detach(f"{limits} && uci commit wrt-ab && wrt-healthcheck")
+    router.detach(f"{limits} && wrt-healthcheck")
     until(
         lambda: router.returncode("pgrep -f /usr/sbin/wrt-healthcheck >/dev/null") == 0,
         timeout=30,

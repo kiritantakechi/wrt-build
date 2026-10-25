@@ -7,11 +7,11 @@ router; test_isp and the network tests cover them.
 import json
 import subprocess
 import sys
-import time
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
 
+from wrt_tests.model.poll import until
 from wrt_tests.sandbox.net import Netns, ip
 from wrt_tests.sandbox.netprobe import BIG, PORT
 
@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+# How long the servers of a test may take to listen.
+LISTEN_TIMEOUT = 10
 SERVER = ("192.0.2.200", "2001:db8:1::200")
 CLIENT = ("192.0.2.100", "2001:db8:1::100")
 # A second address of the server: answers must come from the address asked.
@@ -65,8 +67,12 @@ def pair(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pair]:
                 "--host-record=probe.example.net,{},{}".format(*SERVER),
             ),
         ]
-        while not server.run("ss", "-Hln", f"sport = :{PORT}"):
-            time.sleep(0.1)
+        until(
+            lambda: server.run("ss", "-Hln", f"sport = :{PORT}"),
+            timeout=LISTEN_TIMEOUT,
+            what="the servers listening",
+            every=0.1,
+        )
         try:
             yield Pair(client, server)
         finally:
@@ -84,8 +90,9 @@ def client(pair: Pair) -> Netns:
 def test_tcp_reports_the_peer_and_mss(client: Netns, family: int) -> None:
     seen = client.probe("tcp", SERVER[family])
     assert seen["address"] == CLIENT[family]
-    assert isinstance(seen["mss"], int)
-    assert 1200 < seen["mss"] <= 1460  # noqa: PLR2004
+    # The SYN's MSS on the pair's link of 1500 bytes: less IPv4's or IPv6's
+    # header and TCP's.
+    assert seen["mss"] == (1460, 1440)[family]
 
 
 @pytest.mark.parametrize("family", [0, 1], ids=["ipv4", "ipv6"])
@@ -128,8 +135,12 @@ def test_esp_is_answered_with_the_source(client: Netns, family: int) -> None:
 def test_listen_receives_what_send_sends(pair: Pair) -> None:
     command = (sys.executable, "-m", "wrt_tests.sandbox.netprobe", "listen", "--port", "40001")
     with subprocess.Popen(pair.client.argv(*command), stdout=subprocess.PIPE) as listener:
-        while not pair.client.run("ss", "-Hlun", "sport = :40001"):
-            time.sleep(0.1)
+        until(
+            lambda: pair.client.run("ss", "-Hlun", "sport = :40001"),
+            timeout=LISTEN_TIMEOUT,
+            what="the listener",
+            every=0.1,
+        )
         sent = pair.server.probe("send", CLIENT[0], "--port", "40001", "--payload", "ping")
         seen = json.loads(listener.communicate(timeout=10)[0])
     assert seen == {"address": SERVER[0], "port": sent["port"], "payload": "ping"}

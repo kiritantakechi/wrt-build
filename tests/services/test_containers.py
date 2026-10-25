@@ -181,10 +181,18 @@ def test_container_reaches_a_proxied_target(pod: Online) -> None:
 def test_unchanged_declaration_is_not_rebuilt(pod: Online) -> None:
     router = pod.router
     before = app.wait_running(router)
-    # What a mount of the data disk triggers; it stops the Pods first.
+    since = app.started(router)
+    # What a mount of the data disk triggers: it stops the Pods, then starts the
+    # startup flow, which procd runs after the script returned. A new start
+    # shows the flow ran; the same container, that it rebuilt nothing
+    # (test-fidelity D7).
     router.run("/etc/init.d/wrt-containers restart")
-    assert app.running(router) is None
-    assert app.wait_running(router) == before
+    until(
+        lambda: app.started(router) != since and app.running(router),
+        timeout=app.START_TIMEOUT,
+        what=f"{app.CONTAINER} started again",
+    )
+    assert app.running(router) == before
 
 
 @spec(CAPABILITY, "Declarative definition and autostart on boot", "A declaration that cannot start")

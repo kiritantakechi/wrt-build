@@ -7,6 +7,7 @@ is einat's work (or masquerade's) alone.
 import contextlib
 import json
 import re
+import shlex
 import subprocess
 import sys
 from typing import TYPE_CHECKING
@@ -20,8 +21,10 @@ from wrt_tests.sandbox.netprobe import HTTP_PORT
 from wrt_tests.services.datapath import EINAT, QOSIFY, WAN, hooks, tc_programs
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator, Iterator
 
+    from wrt_tests.device.router import Router
+    from wrt_tests.model.boards import Board
     from wrt_tests.sandbox.net import Netns
     from wrt_tests.services.datapath import Online
 
@@ -33,6 +36,9 @@ INBOUND_MARK = "0x20000000"
 NEVER_CONTACTED = "203.0.113.53"  # an address of the internet host no test sends to first
 RECOVERY = 60
 HEALTHCHECK = "/etc/healthcheck.d/50-einat"
+# A table of the test's own on the router, which counts the bare IPv4 frames the
+# WAN port's ingress sees: PPPoE's frames are of other types (test-fidelity D3).
+FRAMES_TABLE = "wrt_test_frames"
 
 
 class Listener:
@@ -124,12 +130,39 @@ def test_filtering_is_endpoint_independent(online: Online) -> None:
     assert Listener(online.client(), 41001).receives(_unasked(online, public))
 
 
+@contextlib.contextmanager
+def _frames_at(router: Router, device: str) -> Generator[Callable[[], int]]:
+    """Count the IPv4 frames that reach ``device`` while the context lasts; yield their count."""
+    hook = f"{{ type filter hook ingress device {device} priority -500; }}"
+    router.run(
+        f"nft add table netdev {FRAMES_TABLE}"
+        f" && nft add chain netdev {FRAMES_TABLE} ingress {shlex.quote(hook)}"
+        f" && nft add rule netdev {FRAMES_TABLE} ingress ether type ip counter"
+    )
+
+    def counted() -> int:
+        listed = json.loads(router.run(f"nft -j list table netdev {FRAMES_TABLE}"))
+        return int(
+            sum(
+                expression["counter"]["packets"]
+                for entry in listed["nftables"]
+                for expression in entry.get("rule", {}).get("expr", [])
+                if "counter" in expression
+            )
+        )
+
+    try:
+        yield counted
+    finally:
+        router.run(f"nft delete table netdev {FRAMES_TABLE}")
+
+
 @spec(
     CAPABILITY,
     "Accept only einat-translated inbound connections",
     "Inbound packet with spoofed destination",
 )
-def test_spoofed_inbound_is_dropped(online: Online) -> None:
+def test_spoofed_inbound_is_dropped(online: Online, board: Board) -> None:
     # Structurally: einat's mark is the only way from wan into lan for a new flow
     # (OpenWrt's default accepts of ESP and ISAKMP are gone).
     accepts = [
@@ -141,7 +174,8 @@ def test_spoofed_inbound_is_dropped(online: Online) -> None:
     assert all(f"meta mark & {INBOUND_MARK} == {INBOUND_MARK}" in line for line in accepts), accepts
     ipv4, _ = online.addresses()
     isp = online.network["isp"]
-    mac = online.router.run("cat /sys/class/net/eth0/address")
+    wan = board.wan.device
+    mac = online.router.run(f"cat /sys/class/net/{wan}/address")
     # Through the PPP session, routed by the ISP to an internal address...
     isp.run("ip", "route", "replace", "10.0.0.0/24", "dev", online.session.interface)
     try:
@@ -149,22 +183,25 @@ def test_spoofed_inbound_is_dropped(online: Online) -> None:
         assert not listener.receives(lambda: isp.probe("send", ipv4, "--port", "41002"))
     finally:
         isp.run("ip", "route", "del", "10.0.0.0/24")
-    # ...and as a bare frame on the Ethernet segment under PPPoE.
+    # ...and as a bare frame on the Ethernet segment under PPPoE, which the WAN
+    # port takes.
     listener = Listener(online.client(), 41003)
-    assert not listener.receives(
-        lambda: isp.probe(
-            "inject",
-            "eth0",
-            "--mac",
-            mac,
-            "--source",
-            NEVER_CONTACTED,
-            "--destination",
-            ipv4,
-            "--port",
-            "41003",
+    with _frames_at(online.router, wan) as frames:
+        assert not listener.receives(
+            lambda: isp.probe(
+                "inject",
+                "eth0",
+                "--mac",
+                mac,
+                "--source",
+                NEVER_CONTACTED,
+                "--destination",
+                ipv4,
+                "--port",
+                "41003",
+            )
         )
-    )
+        assert frames() > 0, f"no frame reached {wan}"
 
 
 @spec(

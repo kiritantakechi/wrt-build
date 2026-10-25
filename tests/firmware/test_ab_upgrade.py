@@ -69,12 +69,12 @@ def test_upgrade_writes_only_slot_b(router: Router, upgrade_image: Path) -> None
 def test_power_loss_keeps_slot_a(router: Router, upgrade_image: Path) -> None:
     emulator = router.emulator
     router.put(upgrade_image, UPGRADE_IMAGE)
-    emulator.throttle_writes(THROTTLED_WRITE)
-    since = emulator.console.mark()
-    router.detach(f"sleep 1; sysupgrade {UPGRADE_IMAGE}")
-    emulator.console.wait_for("Writing slot b", since=since, timeout=300)
-    router.disconnect()
-    emulator.power_cut()
+    with emulator.throttled_writes(THROTTLED_WRITE):
+        since = emulator.console.mark()
+        router.detach(f"sleep 1; sysupgrade {UPGRADE_IMAGE}")
+        emulator.console.wait_for("Writing slot b", since=since, timeout=300)
+        router.disconnect()
+        emulator.power_cut()
     emulator.power_on()
     router.wait_ready()
     assert slot(router) == "a"

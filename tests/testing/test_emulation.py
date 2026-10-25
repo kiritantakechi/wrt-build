@@ -3,14 +3,24 @@
 import ipaddress
 import lzma
 import re
+import socket
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pytest
+from labgrid.driver import QEMUDriver
 
 from wrt_tests import spec
-from wrt_tests.device.emu import boot_files, extract_fit_image, read_fit, sha256
+from wrt_tests.device.emu import (
+    Console,
+    ConsoleEndedError,
+    boot_files,
+    extract_fit_image,
+    read_fit,
+    sha256,
+)
 from wrt_tests.device.router import CLOCK_SKEW
 from wrt_tests.device.storage import PLUG_TIMEOUT, Disk, device
 from wrt_tests.model.poll import until
@@ -28,6 +38,8 @@ LAN = ipaddress.ip_network("10.0.0.0/24")
 # slows as CI's slow runners; a stale link-layer address for the router costs
 # half a minute more (snapshot-return D3).
 RETURN_SECONDS = 25.0
+# How soon a wait on a console that ended fails: at once, not at its time limit.
+CONSOLE_END_SECONDS = 5.0
 
 
 @spec(CAPABILITY, "Boot the shipped artifacts", "Verify artifact provenance")
@@ -195,3 +207,42 @@ def test_usb_disk_hot_plug(router: Router, tmp_path: Path) -> None:
         timeout=PLUG_TIMEOUT,
         what=f"{path} gone",
     )
+
+
+@spec(CAPABILITY, "USB storage", "Power cut with a disk plugged in")
+def test_a_power_cut_leaves_a_disk_plugged_in(router: Router, tmp_path: Path) -> None:
+    disk = Disk.blank(router.emulator, tmp_path, "powercut")
+    disk.plug(4)
+    try:
+        router.disconnect()
+        router.emulator.power_cut()
+        router.emulator.power_on()
+        router.wait_ready()
+        device(router, disk)
+    finally:
+        disk.unplug()
+
+
+@spec(CAPABILITY, "The console's end is known", "QEMU exits while a test waits for the console")
+def test_a_wait_on_an_ended_console_fails_at_once(tmp_path: Path) -> None:
+    # The console as the emulator reads it: labgrid's QEMU console read, on a
+    # socket whose other end is QEMU's, which closes as QEMU exits.
+    ours, qemus = socket.socketpair()
+    driver = cast("QEMUDriver", SimpleNamespace(_clientsocket=ours))
+    console = Console(
+        lambda size, timeout: QEMUDriver._read(driver, size=size, timeout=timeout),  # noqa: SLF001
+        tmp_path / "console.log",
+    )
+    console.start()
+    try:
+        qemus.sendall(b"U-Boot\n")
+        console.wait_for("U-Boot", since=0, timeout=10)
+        qemus.close()
+        started = time.monotonic()
+        with pytest.raises(ConsoleEndedError, match="the console ended"):
+            console.wait_for("login:", since=0, timeout=60)
+        assert time.monotonic() - started < CONSOLE_END_SECONDS
+    finally:
+        console.stop()
+        ours.close()
+        qemus.close()

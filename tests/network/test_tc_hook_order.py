@@ -5,7 +5,9 @@ einat and then qosify on tcx on pppoe-wan, dae alone on br-lan.
 """
 
 import json
+import re
 import subprocess
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,6 +33,11 @@ DAE_BIT = "0x00000100"
 # pppoe-wan when qosify falls back to clsact: einat on tcx, qosify's filters after.
 FALLBACK = {**EINAT, **QOSIFY_CLSACT}
 SETTLE = 60
+# The ICMP test's pings: so many in so short a time that their replies stand out
+# from the WAN's background traffic, a few packets a second, which a quiet
+# window as long shows (test-fidelity D4).
+PINGS = 200
+PING_INTERVAL = 0.01
 
 
 def _filters(router: Router) -> str:
@@ -101,8 +108,20 @@ def test_icmp_reply_reaches_qosify_and_the_host(dae: Online) -> None:
     router.run("sysctl -qw kernel.bpf_stats_enabled=1")
     try:
         before = _qosify_runs(router, "ingress")
-        dae.client().run("ping", "-c", "3", "-W", "2", DIRECT_TARGET[0])
-        assert _qosify_runs(router, "ingress") >= before + 3
+        time.sleep(PINGS * PING_INTERVAL)
+        quiet = _qosify_runs(router, "ingress") - before
+        assert quiet < PINGS // 4, f"{quiet} runs without pings: too busy a WAN to tell"
+        before += quiet
+        pinged = dae.client().run(
+            *("ping", "-q", "-c", str(PINGS), "-i", str(PING_INTERVAL), "-W", "2"),
+            DIRECT_TARGET[0],
+        )
+        received = re.search(r"(\d+) received", pinged)
+        assert received is not None, pinged
+        replies = int(received[1])
+        assert replies > PINGS // 2, pinged
+        # One run for each reply at least: the background alone makes far fewer.
+        assert _qosify_runs(router, "ingress") - before >= replies
     finally:
         router.run("sysctl -qw kernel.bpf_stats_enabled=0")
 

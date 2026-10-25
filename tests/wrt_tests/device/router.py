@@ -8,6 +8,7 @@ import re
 import shlex
 import socket
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -38,6 +39,14 @@ BOOT_ID = "cat /proc/sys/kernel/random/boot_id"
 # command, and ssh exits with this status.
 DEAD_CONNECTION = "Keepalive no longer running"
 SSH_FAILED = 255
+# Each command runs in a session of its own, whose shell records its PID here:
+# dropbear runs every command of a connection in the connection's one session,
+# and labgrid gives up on a command past its time limit without ending it, which
+# would go on holding what it holds, such as wrt-sync's lock (test-fidelity D9).
+COMMAND_PID = "/tmp/wrt-tests.pid"  # noqa: S108 (a path on the router)
+# How long a failure's report waits for a new connection to the router before it
+# says that the router does not answer (test-fidelity D10).
+REACHABLE_TIMEOUT = 5
 # How long a new connection is tried: the emulator stops answering while the
 # disk it runs from catches up with a burst of writes.
 RECONNECT_TIMEOUT = 60.0
@@ -120,6 +129,8 @@ class Router:
         self.ssh.keyfile = str(key)
         self.address = str(target.get_resource("NetworkService").address)
         self.detached: Detached | None = None
+        # The module whose fixtures keep the router from test to test, if one does.
+        self.holder: str | None = None
 
     def _connected(self) -> SSHDriver:
         self.target.activate(self.ssh)
@@ -133,15 +144,24 @@ class Router:
         """Run ``command`` over the SSH connection, a new one if the old one has died.
 
         labgrid refuses a command on a dead connection before running it, so
-        running it on a new one runs it once.
+        running it on a new one runs it once. Past ``timeout`` the command's
+        session goes, with every process in it, and the command fails as a
+        timeout.
         """
+        session = f"echo $$ >{COMMAND_PID}; exec setsid sh -c {shlex.quote(command)}"
         try:
-            result = self._connected().run(command, timeout=timeout)
-        except ExecutionError as error:
-            if DEAD_CONNECTION not in str(error):
-                raise
-            self.disconnect()
-            result = self._connected().run(command, timeout=timeout)
+            try:
+                result = self._connected().run(session, timeout=timeout)
+            except ExecutionError as error:
+                if DEAD_CONNECTION not in str(error):
+                    raise
+                self.disconnect()
+                result = self._connected().run(session, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # A router that does not take the kill has nothing running for us either.
+            self.poll(f'kill -KILL -- -"$(cat {COMMAND_PID})"')
+            msg = f"{command!r} did not finish within {timeout:g} s"
+            raise TimeoutError(msg) from None
         return cast("tuple[list[str], list[str], int]", result)
 
     def run(self, command: str, *, timeout: float = 60) -> str:
@@ -177,11 +197,29 @@ class Router:
     def _ssh(self, *options: str) -> list[str]:
         return ["ssh", *options, "-o", "BatchMode=yes", "-i", str(self.key), f"root@{self.address}"]
 
+    def reachable(self, timeout: int = REACHABLE_TIMEOUT) -> bool:
+        """Return whether the router takes a new SSH connection within ``timeout`` and runs on it.
+
+        A fresh connection, apart from labgrid's, which waits two minutes for one.
+        """
+        try:
+            subprocess.run(
+                [*self._ssh("-o", f"ConnectTimeout={timeout}"), "true"],
+                capture_output=True,
+                check=True,
+                timeout=2 * timeout,
+            )
+        except subprocess.CalledProcessError, subprocess.TimeoutExpired:
+            return False
+        return True
+
     def login(self, script: str, *, timeout: float = LOGIN_TIMEOUT) -> str:
         """Log in interactively (with a terminal) and type ``script``; return the session output.
 
         This is a real login shell, unlike run(), so /etc/profile and the zsh
-        hand-over apply. The script should end with ``exit``.
+        hand-over apply. The script should end with ``exit``. A session still
+        running at ``timeout`` is ended, and fails as a timeout with what it
+        showed (test-fidelity D9).
         """
         with subprocess.Popen(
             self._ssh("-tt"),
@@ -194,13 +232,27 @@ class Router:
             if stdin is None or stdout is None:
                 msg = "ssh has no pipes"
                 raise RuntimeError(msg)
+            # Read while the session runs: a long output would fill the pipe and
+            # stall ssh. The thread alone appends; the list is read after it ended.
+            output: list[str] = []
+            reader = threading.Thread(target=lambda: output.append(stdout.read()), name="login")
+            reader.start()
             stdin.write(script)
             stdin.flush()
             # Keep stdin open: at end of input ssh would end the session before the
             # shell has read the script. The script's own exit ends it.
-            session.wait(timeout=timeout)
-            output = stdout.read()
-        return _TERMINAL_CONTROL.sub("", output)
+            try:
+                session.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                # The router's shell goes with ssh: its pseudo-terminal hangs up.
+                session.kill()
+                session.wait()
+                reader.join()
+                shown = _TERMINAL_CONTROL.sub("", "".join(output))
+                msg = f"the login session did not end within {timeout:g} s; it showed:\n{shown}"
+                raise TimeoutError(msg) from None
+            reader.join()
+        return _TERMINAL_CONTROL.sub("", "".join(output))
 
     def console(self, script: str, *, timeout: float = LOGIN_TIMEOUT) -> str:
         """Run ``script`` in the serial console's shell; return what it printed.

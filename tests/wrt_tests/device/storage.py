@@ -65,16 +65,33 @@ class Disk:
         return self.image.stat().st_blocks == 0
 
 
+def _models(disk: Disk) -> str:
+    """Return the command that lists the model files of ``disk``'s block devices on the router."""
+    # The SCSI model is padded with spaces.
+    return f"grep -l {shlex.quote(f'^{disk.name} *$')} /sys/block/sd*/device/model || true"
+
+
 def device(router: Router, disk: Disk) -> str:
     """Wait for ``disk``'s block device on the router and return its path."""
-    # The SCSI model is padded with spaces.
-    command = f"grep -l {shlex.quote(f'^{disk.name} *$')} /sys/block/sd*/device/model || true"
     model = until(
-        lambda: router.run(command),
+        lambda: router.run(_models(disk)),
         timeout=PLUG_TIMEOUT,
         what=f"{disk.name}'s block device",
     )
     return f"/dev/{model.split('/')[3]}"
+
+
+def removed(router: Router, disk: Disk) -> None:
+    """Wait until ``disk``'s block device is gone from the router, after it was pulled out.
+
+    The kernel lets a USB disk go a little after QEMU has: until then, device()
+    could take the old block device for the one of the next plug (test-fidelity D8).
+    """
+    until(
+        lambda: router.run(_models(disk)) == "",
+        timeout=PLUG_TIMEOUT,
+        what=f"{disk.name}'s block device gone",
+    )
 
 
 def announce(router: Router, disk: Disk, action: str) -> None:

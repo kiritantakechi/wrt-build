@@ -1,10 +1,16 @@
-"""testing/harness: scenarios and tests, the toolchain, data schemas, waits, failure reports."""
+"""testing/harness: scenarios and tests, the toolchain, data schemas, waits, failure reports.
+
+And what bounds the harness's work on the router: commands and login sessions
+that end with their time limit, setups undone when they fail.
+"""
 
 import json
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +20,8 @@ from typing import TYPE_CHECKING, Literal, cast
 import pytest
 
 from wrt_tests import spec
+from wrt_tests.device.fixtures import claim
+from wrt_tests.device.router import SSH_PORT
 from wrt_tests.model.boards import BOARDS_DIR, Description
 from wrt_tests.model.coverage import VerifiedElsewhere
 from wrt_tests.model.data import DataError, read_json, read_toml
@@ -21,12 +29,14 @@ from wrt_tests.model.outputs import EmulationSource, Manifest, Release, Toolchai
 from wrt_tests.model.poll import until
 from wrt_tests.model.undefined_behavior import Diagnostic, Review
 from wrt_tests.services.fixtures import pytest_runtest_makereport
+from wrt_tests.services.vpn import LAN_PREFIX, WireGuard
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from pydantic import BaseModel
 
+    from wrt_tests.device.emu import Emulator
     from wrt_tests.device.router import Router
     from wrt_tests.services.datapath import Online
 
@@ -324,6 +334,66 @@ def test_a_reboot_that_does_not_come_names_its_command(router: Router) -> None:
     assert console_note.startswith("the console since:")
 
 
+# A lock that a process of a command holds, as wrt-sync holds its own.
+LOCK = "/tmp/wrt-test.lock"  # noqa: S108 (a path on the router)
+COMMAND_LIMIT = 3.0
+LOCK_FREED = 10.0
+
+
+@spec(
+    CAPABILITY,
+    "Commands on the router end with their time limit",
+    "A command that overruns its time limit",
+)
+def test_a_command_past_its_time_limit_ends_on_the_router(router: Router) -> None:
+    command = f"flock {LOCK} sleep 600 & wait"
+    message = f"{command!r} did not finish within {COMMAND_LIMIT:g} s"
+    with pytest.raises(TimeoutError, match=re.escape(message)):
+        router.run(command, timeout=COMMAND_LIMIT)
+    until(
+        lambda: router.returncode(f"flock -n {LOCK} true") == 0,
+        timeout=LOCK_FREED,
+        what="the lock free",
+    )
+
+
+# Longer than a login takes on a busy host, zsh's first start included.
+LOGIN_LIMIT = 90.0
+
+
+@spec(
+    CAPABILITY,
+    "Commands on the router end with their time limit",
+    "A login session that does not end",
+)
+def test_a_login_past_its_time_limit_shows_what_it_printed(router: Router) -> None:
+    message = f"the login session did not end within {LOGIN_LIMIT:g} s"
+    with pytest.raises(TimeoutError, match=re.escape(message)) as raised:
+        router.login("echo session-started; sleep 600\n", timeout=LOGIN_LIMIT)
+    assert "session-started" in str(raised.value)
+
+
+# A limit far below what the disk takes: the test fails while it holds.
+SLOWED_WRITES = 1 << 20
+
+
+def _fail_while_slowed(emulator: Emulator) -> None:
+    with emulator.throttled_writes(SLOWED_WRITES):
+        msg = f"failed with writes limited to {emulator.write_limit()} B/s"
+        raise RuntimeError(msg)
+
+
+@spec(CAPABILITY, "What a test sets up, it takes down", "A test that fails while writes are slowed")
+def test_writes_are_unlimited_after_a_failure(router: Router) -> None:
+    with pytest.raises(RuntimeError, match=f"limited to {SLOWED_WRITES} B/s"):
+        _fail_while_slowed(router.emulator)
+    assert router.emulator.write_limit() == 0
+
+
+# The tests above reset the router after them; the ones below use the module's
+# router online, which a reset would take away (claim, test-fidelity D16).
+
+
 def _call_report(item: object, outcome: Literal["passed", "failed"]) -> pytest.TestReport:
     """Return what the services layer's report hook makes of a call's report on ``item``."""
     report = pytest.TestReport("demo", ("demo", 0, "demo"), {}, outcome, None, "call")
@@ -348,3 +418,52 @@ def test_a_failing_online_test_names_the_datapath(online: Online) -> None:
     assert online.session.interface in parts["ISP sessions"]
     assert parts["ISP pppd log"].strip()
     assert _call_report(item, "passed").sections == []
+
+
+# A table of the test's own on the router, which drops new connections to SSH:
+# the router takes none, while the one open goes on (test-fidelity D14).
+NO_NEW_SSH = "wrt_test_no_new_ssh"
+REPORT_SECONDS = 20.0
+
+
+@spec(CAPABILITY, "Failures name the router's state", "A failing test with the router unreachable")
+def test_a_report_of_an_unreachable_router_is_quick(online: Online) -> None:
+    router = online.router
+    hook = "{ type filter hook input priority -10; }"
+    router.run(
+        f"nft add table inet {NO_NEW_SSH}"
+        f" && nft add chain inet {NO_NEW_SSH} input {shlex.quote(hook)}"
+        f" && nft add rule inet {NO_NEW_SSH} input tcp dport {SSH_PORT} ct state new drop"
+    )
+    try:
+        item = SimpleNamespace(funcargs={"online": online})
+        started = time.monotonic()
+        sections = dict(_call_report(item, "failed").sections)
+        took = time.monotonic() - started
+    finally:
+        router.run(f"nft delete table inet {NO_NEW_SSH}")
+    parts = dict(SECTION.findall(sections["datapath"]))
+    assert parts["router"].startswith("(no new connection within")
+    assert "default via " in parts["client-a$ ip -6 route"]
+    assert online.session.interface in parts["ISP sessions"]
+    assert took < REPORT_SECONDS
+
+
+@spec(CAPABILITY, "What a test sets up, it takes down", "A setup that fails halfway")
+def test_a_setup_that_fails_halfway_leaves_no_tunnel(online: Online) -> None:
+    peer = online.network["wg-peer"]
+    # A route the peer refuses, after its tunnel exists.
+    with pytest.raises(subprocess.CalledProcessError):
+        WireGuard.connect(online, ["no-such-route"])
+    assert peer.run("ip", "-o", "link", "show", "type", "wireguard") == ""
+    WireGuard.connect(online, [LAN_PREFIX]).disconnect()
+
+
+@spec(CAPABILITY, "Fixtures by layer", "A test that would reset a module's router")
+def test_a_reset_of_a_module_s_router_is_refused() -> None:
+    held = cast("Router", SimpleNamespace(holder="testing.test_demo"))
+    with pytest.raises(
+        pytest.fail.Exception, match=re.escape("testing.test_demo keeps the router")
+    ):
+        claim(held)
+    claim(cast("Router", SimpleNamespace(holder=None)))

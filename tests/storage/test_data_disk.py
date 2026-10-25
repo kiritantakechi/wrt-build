@@ -29,6 +29,7 @@ from wrt_tests.device.storage import (
     device,
     initialize,
     mount_options,
+    removed,
     subvolumes,
     wait_mounted,
 )
@@ -270,6 +271,7 @@ def test_other_disk_is_not_mounted(without_disk: Online, spare: Disk) -> None:
     spare.plug(3)
     router.run(f"mkfs.btrfs -q -f -L wrtdata {device(router, spare)}", timeout=120)
     spare.unplug()
+    removed(router, spare)
     spare.plug(3)
     path = device(router, spare)
     until(lambda: path in router.run("block info"), timeout=PLUG_TIMEOUT, what=f"{path} probed")

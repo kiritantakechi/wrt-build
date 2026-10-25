@@ -65,6 +65,14 @@ def running(router: Router) -> str | None:
     return state[1] if state[:1] == ["true"] else None
 
 
+def started(router: Router) -> str:
+    """Return when the app container last started, as podman records it; "" while it is gone."""
+    return router.run(
+        f"podman container inspect --format '{{{{.State.StartedAt}}}}' {CONTAINER}"
+        " 2>/dev/null || true"
+    )
+
+
 def wait_running(router: Router) -> str:
     """Wait until the app container runs; return its ID (or fail with wrt-containers' log)."""
     try:

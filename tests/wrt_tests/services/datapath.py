@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any, Self, cast
 
+from wrt_tests.device.router import REACHABLE_TIMEOUT
 from wrt_tests.model.poll import until
 from wrt_tests.sandbox.internet import RELEASES
 from wrt_tests.sandbox.isp import DELEGATED_PREFIX, LOGIN
@@ -330,17 +331,23 @@ class Online:
     def state(self) -> str:
         """Return the datapath's state as text, for a failure's report (failure-diagnostics D3).
 
-        Each part is read on its own, and one that cannot be read says why.
+        Each part is read on its own, and one that cannot be read says why. The
+        router is asked first whether it answers at all, so that a router that
+        does not costs seconds, not a connection's wait for each of its parts
+        (test-fidelity D10).
         """
         parts = [
             _part(f"{name}$ {' '.join(command)}", partial(self.client(name).run, *command))
             for name in LAN_CLIENTS
             for command in CLIENT_STATE
         ]
-        parts += [
-            _part(f"router$ {command}", partial(self.router.poll, command))
-            for command in ROUTER_STATE
-        ]
+        if self.router.reachable():
+            parts += [
+                _part(f"router$ {command}", partial(self.router.poll, command))
+                for command in ROUTER_STATE
+            ]
+        else:
+            parts.append(f"--- router\n(no new connection within {REACHABLE_TIMEOUT} s)")
         parts += [
             _part("ISP sessions", lambda: "\n".join(map(str, self.isp.sessions()))),
             _part("ISP pppd log", partial(self.isp.log, ISP_LOG_LINES)),

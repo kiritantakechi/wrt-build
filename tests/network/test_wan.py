@@ -5,8 +5,10 @@ one router online behind the emulated ISP.
 """
 
 import ipaddress
+import re
 import subprocess
 import sys
+from collections import Counter
 from typing import TYPE_CHECKING
 
 import pytest
@@ -15,6 +17,7 @@ from wrt_tests import spec
 from wrt_tests.model.poll import until
 from wrt_tests.sandbox.isp import DELEGATED_PREFIX, POOL_SIZE, POOL_START
 from wrt_tests.sandbox.net import DIRECT_TARGET, IPERF_PORTS
+from wrt_tests.sandbox.netprobe import PORT
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -22,6 +25,7 @@ if TYPE_CHECKING:
 
     from wrt_tests.device.router import Router
     from wrt_tests.model.boards import Board
+    from wrt_tests.sandbox.net import Netns
     from wrt_tests.services.datapath import Online
 
 CAPABILITY = "network/wan"
@@ -29,7 +33,11 @@ UPGRADE_IMAGE = "/tmp/sysupgrade.tar.gz"  # noqa: S108 (a path on the router)
 # PPPoE takes 8 of Ethernet's 1500 bytes; a TCP segment's headers take 40 more.
 PATH_MTU = 1492
 MSS_MAX = PATH_MTU - 40
-DOWNLOAD_SECONDS = 20
+# The download outlasts the wait for its offload, and the reading at the server
+# after it (test-fidelity D2).
+DOWNLOAD_SECONDS = 60
+OFFLOAD_TIMEOUT = 20
+RECEIVED_TIMEOUT = 10
 
 
 @spec(CAPABILITY, "PPPoE dial-up", "Image contains no credentials")
@@ -77,6 +85,9 @@ def test_dial_after_pushing_credentials(online: Online) -> None:
 @spec(CAPABILITY, "MSS clamping", "LAN host opens a TCP connection")
 def test_mss_fits_the_path(online: Online) -> None:
     client = online.client()
+    # The client offers the MSS of its own link, 1460: only the router's clamp
+    # brings it down to the path's.
+    assert client.run("cat", "/sys/class/net/eth0/mtu").strip() == "1500"
     seen = client.probe("tcp", DIRECT_TARGET[0])
     assert isinstance(seen["mss"], int)
     assert seen["mss"] <= MSS_MAX
@@ -125,18 +136,56 @@ def test_inbound_ipv6_is_rejected(online: Online) -> None:
     client = online.client()
     server = client.spawn(sys.executable, "-m", "wrt_tests.sandbox.netprobe", "serve")
     try:
-        until(lambda: client.run("ss", "-Hltn", "sport = :8007"), timeout=10, what="netprobe")
-        # The LAN reaches the server; the internet does not.
+        until(lambda: client.run("ss", "-Hltn", f"sport = :{PORT}"), timeout=10, what="netprobe")
+        # The LAN reaches the server; the internet's connection is refused (a
+        # reset, fw4's REJECT), not left unanswered.
         try:
             assert online.client("client-b").probe("tcp", ipv6)["address"]
         except subprocess.CalledProcessError as error:
             error.add_note(_lan_state(online, ipv6))
             raise
-        with pytest.raises(subprocess.CalledProcessError):
-            online.network["inet"].probe("tcp", ipv6)
+        refused = {"connection": "refused"}
+        assert online.network["inet"].probe("connect", ipv6, "--port", str(PORT)) == refused
     finally:
         server.terminate()
         server.wait()
+
+
+def _offloaded(router: Router) -> list[str]:
+    """Return the conntrack entries of the download while the flowtable carries it."""
+    return [
+        line
+        for line in router.run("cat /proc/net/nf_conntrack").splitlines()
+        if f"dport={IPERF_PORTS[0]}" in line and "[OFFLOAD]" in line
+    ]
+
+
+def _received(inet: Netns) -> Counter[str]:
+    """Return the segments the download's server has received, by the address they came from.
+
+    ss shows each connection on a line of its own, its peer last, and below it,
+    indented, its counters.
+    """
+    shown = inet.run("ss", "-Htin", "state", "established", f"( sport = :{IPERF_PORTS[0]} )")
+    received: Counter[str] = Counter()
+    peer = ""
+    for line in shown.splitlines():
+        if not line[:1].isspace():
+            peer = _address(line.split()[-1].rsplit(":", 1)[0].strip("[]"))
+        elif segments := re.search(r"\bsegs_in:(\d+)", line):
+            received[peer] += int(segments[1])
+    return received
+
+
+def _address(text: str) -> str:
+    """Return an address as the router's would read: IPv4 for one mapped into IPv6.
+
+    iperf3 listens on both families at once, so an IPv4 peer shows as ::ffff:<IPv4>.
+    """
+    address = ipaddress.ip_address(text)
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    return str(address)
 
 
 @spec(
@@ -147,8 +196,8 @@ def test_inbound_ipv6_is_rejected(online: Online) -> None:
 def test_offloaded_flows_keep_the_wan_address(
     online: Online, record_testsuite_property: Callable[[str, object], None]
 ) -> None:
-    client = online.client()
-    download = client.spawn(
+    inet = online.network["inet"]
+    download = online.client().spawn(
         "iperf3",
         "--client",
         DIRECT_TARGET[0],
@@ -160,17 +209,20 @@ def test_offloaded_flows_keep_the_wan_address(
     )
     try:
         flow = until(
-            lambda: [
-                line
-                for line in online.router.run("cat /proc/net/nf_conntrack").splitlines()
-                if f"dport={IPERF_PORTS[0]}" in line and "[OFFLOAD]" in line
-            ],
-            timeout=DOWNLOAD_SECONDS,
-            what="offloaded iperf3 flow",
+            lambda: _offloaded(online.router), timeout=OFFLOAD_TIMEOUT, what="offloaded download"
         )
         record_testsuite_property("offloaded flow", flow[0])
-        for _ in range(3):
-            assert client.probe("tcp", DIRECT_TARGET[0])["address"] == online.wan_address
+        # While the flowtable carries the flow, the server goes on receiving its
+        # segments, from the WAN address: untranslated, they would come from the
+        # LAN address, which no server socket takes (test-fidelity D2).
+        before = _received(inet)
+        until(
+            lambda: _received(inet)[online.wan_address] > before[online.wan_address],
+            timeout=RECEIVED_TIMEOUT,
+            what="segments of the offloaded flow at the server",
+        )
+        assert _offloaded(online.router), "the download left the flowtable meanwhile"
+        assert set(_received(inet)) == {online.wan_address}
     finally:
         download.terminate()
         download.wait()
