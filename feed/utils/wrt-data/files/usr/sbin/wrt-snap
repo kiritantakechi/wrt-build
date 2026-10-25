@@ -2,10 +2,12 @@
 # wrt-snap: read-only snapshots of the data disk's containers and shares
 # (r4s-services D5).
 # Usage: wrt-snap now | prune | list [subvolume]
-# now takes one of each, as .snapshots/<subvolume>/<UTC time>; prune keeps those
-# of the last seven days (UTC), today's included, whatever time of day each was
-# taken; cron runs both once a day. A file comes back by copying it out of a
-# snapshot (docs/services.md).
+# now takes one of each, as .snapshots/<subvolume>/<UTC time>; prune keeps, of
+# each subvolume, the snapshots of the seven most recent days (UTC) on which it
+# got one, whatever time of day each was taken and however long ago: a clock set
+# ahead or weeks without power cost one day's at most (device-integrity D6). cron
+# runs both once a day. A file comes back by copying it out of a snapshot
+# (docs/services.md).
 set -eu
 # shellcheck source=../../lib/functions/wrt-data.sh
 . /lib/functions/wrt-data.sh
@@ -40,13 +42,19 @@ now() {
 }
 
 prune() {
-	epoch=$(date +%s)
-	oldest=$(date -u -d "@$((epoch - (KEEP_DAYS - 1) * 86400))" +%Y%m%d)
-	for snapshot in "${SNAPSHOTS}"/*/*; do
-		[ -d "${snapshot}" ] || continue
-		day=${snapshot##*/}
-		[ "${day%%T*}" -lt "${oldest}" ] || continue
-		btrfs -q subvolume delete "${snapshot}"
+	for of in "${SNAPSHOTS}"/*; do
+		[ -d "${of}" ] || continue
+		# The names begin with their day: the newest days first, space-separated.
+		kept=$(for snapshot in "${of}"/*; do echo "${snapshot##*/}"; done |
+			cut -c1-8 | sort -ru | head -n "${KEEP_DAYS}" | tr '\n' ' ')
+		for snapshot in "${of}"/*; do
+			[ -d "${snapshot}" ] || continue
+			day=${snapshot##*/}
+			case " ${kept}" in
+				*" ${day%%T*} "*) ;;
+				*) btrfs -q subvolume delete "${snapshot}" ;;
+			esac
+		done
 	done
 }
 

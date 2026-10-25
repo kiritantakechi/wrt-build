@@ -10,7 +10,18 @@ until someone restarts it.
 
 Add _procd_add_action_unmount_trigger, with restart and reload wrappers,
 which register mount.remove as the mount helpers register mount.add,
-through one helper for both events. Along the way:
+through one helper for both events. mount.remove comes before the
+unmount: blockd announces it, runs the mount hotplug scripts and answers
+block, which only then unmounts. An action that checks /proc/mounts
+would still find the mount point mounted, so each mount point gets a
+trigger of its own, whose action is given "unmounting <mountpoint>".
+
+Add procd_mountpoints_mounted, which tells whether every fstab mount
+point that holds the paths is mounted: of mount points within one
+another, procd_get_mountpoints lists each, and a check of its output as
+one pattern took any of them for all.
+
+Along the way:
 
 - name the init script in _procd_add_mount_trigger itself, from
   $initscript, rather than from a $name the caller may have set to
@@ -20,14 +31,15 @@ through one helper for both events. Along the way:
   single "eq" against all of them joined by newlines, which never
   matched.
 
-The trigger of a single mount point stays as it was.
+The trigger of a single mount point stays as it was, and
+_procd_add_mount_trigger keeps its arguments.
 
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
  package/system/procd/Makefile       |  2 +-
- package/system/procd/files/procd.sh | 42 ++++++++++++++++++++++++-----
- 2 files changed, 36 insertions(+), 8 deletions(-)
+ package/system/procd/files/procd.sh | 93 +++++++++++++++++++++++++----
+ 2 files changed, 83 insertions(+), 12 deletions(-)
 
 diff --git a/package/system/procd/Makefile b/package/system/procd/Makefile
 index 21868ce..7a29b50 100644
@@ -43,36 +55,75 @@ index 21868ce..7a29b50 100644
  PKG_SOURCE_PROTO:=git
  PKG_SOURCE_URL=$(PROJECT_GIT)/project/procd.git
 diff --git a/package/system/procd/files/procd.sh b/package/system/procd/files/procd.sh
-index 855d968..8d55fb3 100644
+index 855d968..a6cca3a 100644
 --- a/package/system/procd/files/procd.sh
 +++ b/package/system/procd/files/procd.sh
-@@ -369,6 +369,7 @@ _procd_add_mount_trigger() {
+@@ -364,33 +364,46 @@ _procd_add_config_trigger() {
+ 	json_close_array
+ }
+ 
++# _procd_add_mount_trigger <event> <action> <mountpoint>...: on <event> of any
++# of the mount points, the init script's <action>.
+ _procd_add_mount_trigger() {
++	local event="$1"
++	local action="$2"
++	shift ; shift
++
++	__procd_add_mount_trigger "$event" "$@" -- "$action"
++}
++
++# __procd_add_mount_trigger <event> <mountpoint>... -- <action> [<argument>...]:
++# the same, with the arguments for the action.
++__procd_add_mount_trigger() {
+ 	json_add_array
  	_procd_add_array_data "$1"
- 	local action="$2"
+-	local action="$2"
  	local multi=0
+-	shift ; shift
 +	local script=$(readlink "$initscript")
- 	shift ; shift
++	shift
  
  	json_add_array
-@@ -390,7 +391,7 @@ _procd_add_mount_trigger() {
+ 	_procd_add_array_data "if"
+ 
+-	if [ "$2" ]; then
++	if [ "$2" != "--" ]; then
+ 		json_add_array
+ 		_procd_add_array_data "or"
+ 		multi=1
+ 	fi
+ 
+-	while [ "$1" ]; do
++	while [ "$1" != "--" ]; do
+ 		json_add_array
+ 		_procd_add_array_data "eq" "target" "$1"
+ 		shift
+ 		json_close_array
+ 	done
++	shift
+ 
  	[ $multi = 1 ] && json_close_array
  
  	json_add_array
 -	_procd_add_array_data "run_script" /etc/init.d/$name $action
-+	_procd_add_array_data "run_script" /etc/init.d/$(basename ${script:-$initscript}) $action
++	_procd_add_array_data "run_script" /etc/init.d/$(basename ${script:-$initscript}) "$@"
  	json_close_array
  
  	json_close_array
-@@ -398,19 +399,35 @@ _procd_add_mount_trigger() {
+@@ -398,19 +411,46 @@ _procd_add_mount_trigger() {
  	json_close_array
  }
  
 -_procd_add_action_mount_trigger() {
 -	local action="$1"
 -	shift
-+# Run the init script's <action> on <event> (mount.add once a mount point is
-+# mounted, mount.remove as it is unmounted) of the fstab mount points that hold
-+# any of the paths: one condition, met by any of them.
++# Run the init script's <action> on <event> of the fstab mount points that hold
++# any of the paths. mount.add comes once a mount point is mounted: one trigger,
++# met by any of them. mount.remove comes before a mount point is unmounted,
++# while it is still mounted (blockd announces the unmount, then runs the mount
++# hotplug scripts, and only then is it unmounted): one trigger per mount point,
++# whose action gets "unmounting <mountpoint>" as its arguments, so that it need
++# not find out which goes away.
 +_procd_add_mount_event_trigger() {
 +	local event="$1"
 +	local action="$2"
@@ -90,7 +141,14 @@ index 855d968..8d55fb3 100644
  
  	_procd_open_trigger
 -	_procd_add_mount_trigger mount.add $action "$mountpoints"
-+	_procd_add_mount_trigger "$event" "$action" "$@"
++	if [ "$event" = mount.remove ]; then
++		local mountpoint
++		for mountpoint in "$@"; do
++			__procd_add_mount_trigger "$event" "$mountpoint" -- "$action" unmounting "$mountpoint"
++		done
++	else
++		__procd_add_mount_trigger "$event" "$@" -- "$action"
++	fi
  	_procd_close_trigger
  }
  
@@ -105,7 +163,34 @@ index 855d968..8d55fb3 100644
  procd_get_mountpoints() {
  	(
  		__procd_check_mount() {
-@@ -437,6 +454,14 @@ _procd_add_reload_mount_trigger() {
+@@ -429,6 +469,26 @@ procd_get_mountpoints() {
+ 	) | sort -u
+ }
+ 
++# procd_mountpoints_mounted <path>...: true when every fstab mount point that
++# holds any of the paths is mounted (or none holds them): of mount points
++# within one another, each one counts.
++procd_mountpoints_mounted() {
++	procd_get_mountpoints "$@" | awk '
++		# /proc/mounts first: its mount points, unescaped as the kernel
++		# escapes them; then ours, one per line of standard input.
++		FILENAME != "-" {
++			target = $2
++			gsub(/\\040/, " ", target)
++			gsub(/\\011/, "\t", target)
++			gsub(/\\012/, "\n", target)
++			gsub(/\\134/, "\\\\", target)
++			mounted[target] = 1
++			next
++		}
++		!($0 in mounted) { exit 1 }
++	' /proc/mounts -
++}
++
+ _procd_add_restart_mount_trigger() {
+ 	_procd_add_action_mount_trigger restart "$@"
+ }
+@@ -437,6 +497,14 @@ _procd_add_reload_mount_trigger() {
  	_procd_add_action_mount_trigger reload "$@"
  }
  
@@ -120,7 +205,7 @@ index 855d968..8d55fb3 100644
  _procd_add_raw_trigger() {
  	json_add_array
  	_procd_add_array_data "$1"
-@@ -700,6 +725,9 @@ _procd_wrapper \
+@@ -700,6 +768,9 @@ _procd_wrapper \
  	procd_add_action_mount_trigger \
  	procd_add_reload_mount_trigger \
  	procd_add_restart_mount_trigger \

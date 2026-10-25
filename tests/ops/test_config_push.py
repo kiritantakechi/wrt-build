@@ -12,6 +12,7 @@ upgrade to the other slot comes last.
 import hashlib
 import json
 import subprocess
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -26,7 +27,7 @@ from wrt_tests.services.datapath import DAE, DAE_CONFIG, hooks
 from wrt_tests.services.vpn import HEADSCALE_URL, clear, key_pair, preauth_key
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator, Iterator
     from pathlib import Path
 
     from wrt_tests.device.router import Router
@@ -46,6 +47,26 @@ ROOT_PASSWORD = "not-for-config-push"  # noqa: S105 (the test router's, for a pa
 PLAIN_SECRET = "vZ8qK3wT9mX2pL7nR4cB"  # noqa: S105  # gitleaks:allow (only scanned for)
 UPGRADE_IMAGE = "/tmp/sysupgrade.tar.gz"  # noqa: S108 (a path on the router)
 TAILSCALE_TIMEOUT = 180
+# Where the router records, while a push runs, the modes of its upload and the
+# command lines of its processes.
+UPLOAD = "/tmp/wrt-push"  # noqa: S108 (a path on the router)
+MODES = "/tmp/push-modes"  # noqa: S108 (a path on the router)
+COMMANDS = "/tmp/push-commands"  # noqa: S108 (a path on the router)
+WATCH = (
+    f"while :; do ls -ldn {UPLOAD} 2>/dev/null; ls -lnR {UPLOAD}/new 2>/dev/null; sleep 0.2;"
+    f" done >{MODES} & while :; do for cmdline in /proc/[0-9]*/cmdline; do"
+    f" tr '\\0' ' ' <$cmdline; echo; done 2>/dev/null; sleep 0.2; done >{COMMANDS}"
+)
+# Modes of a file and of a directory that root alone can read.
+ROOT_ONLY = ("-rw-------", "drwx------")
+# The tailscale CLI: a link to tailscaled, which acts as the CLI by the name it
+# runs under. A wrapper in its place records the arguments of every run.
+TAILSCALE = "/usr/sbin/tailscale"
+TAILSCALE_ARGUMENTS = "/tmp/tailscale-arguments"  # noqa: S108 (a path on the router)
+# An auth key headscale refuses.
+REFUSED_KEY = "tskey-auth-refused-0000"
+# A docroot uhttpd refuses to start with.
+NO_DOCROOT = "/nonexistent"
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +95,36 @@ def _state(router: Router) -> dict[str, str]:
         "uci": router.run("uci export | sha256sum"),
         **{name: router.run(f"pidof {name} || true") for name in RESTARTED},
     }
+
+
+def _secrets(pushed: Pushed, auth_key: str) -> dict[str, object]:
+    """Return the module's secrets with another Tailscale auth key."""
+    user, password = LOGIN
+    return {
+        "pppoe": {"username": user, "password": password},
+        "wireguard": {"private_key": pushed.wireguard_key},
+        "tailscale": {"auth_key": auth_key, "login_server": HEADSCALE_URL},
+        "smb": {"users": [SHARE_USER]},
+    }
+
+
+@contextmanager
+def _recorded_tailscale(router: Router) -> Generator[None]:
+    """Have every run of the tailscale CLI record its arguments while the context lasts."""
+    real = "/tmp/wrt-test-tailscale"  # noqa: S108 (a path on the router)
+    router.run(
+        f"mkdir -p {real} && ln -sf /usr/sbin/tailscaled {real}/tailscale"
+        f" && cat >{real}/wrapper <<'EOF'\n"
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >>{TAILSCALE_ARGUMENTS}\n'
+        f'exec {real}/tailscale "$@"\n'
+        "EOF\n"
+        f"chmod 755 {real}/wrapper && ln -sf {real}/wrapper {TAILSCALE}"
+    )
+    try:
+        yield
+    finally:
+        router.run(f"ln -sf tailscaled {TAILSCALE}")
 
 
 def _dae_sha256(router: Router) -> str:
@@ -182,6 +233,74 @@ def test_a_service_that_fails_is_put_back(pushed: Pushed) -> None:
         router.run("cat /etc/wrt-config/network"),
     ) == before
     assert json.loads(router.run("ubus call network.interface.lan status"))["up"] is True
+
+
+@spec(CAPABILITY, "Secrets stored encrypted", "Secrets on the device")
+def test_secrets_on_the_device_are_root_s(pushed: Pushed) -> None:
+    router = pushed.router
+    auth_key = preauth_key(pushed.online.network)
+    pushed.repository.write_secrets(_secrets(pushed, auth_key))
+    router.detach(WATCH)
+    try:
+        with _recorded_tailscale(router):
+            result = pushed.push()
+    finally:
+        router.run(f"pkill -f '{MODES}' || true; pkill -f '{COMMANDS}' || true")
+        pushed.repository.commit("another tailnet key")
+    assert result.returncode == 0, result.stderr
+    # The entries of the listings: a file's line starts with "-", a directory's with "d".
+    modes = [
+        line.split()[0]
+        for line in router.run(f"cat {MODES}").splitlines()
+        if line[:1] in {"-", "d"}
+    ]
+    assert modes
+    assert set(modes) <= set(ROOT_ONLY), modes
+    assert router.returncode(f"[ -e {UPLOAD} ]") != 0
+    files = router.run("ls /etc/dae/* /etc/wrt-config/tailscale.key").split()
+    assert {router.run(f"ls -ln {file}").split()[0] for file in files} == {ROOT_ONLY[0]}
+    # The key reaches tailscale in its file, and no command line sampled holds it.
+    assert "--auth-key=file:" in router.run(f"cat {TAILSCALE_ARGUMENTS}")
+    assert auth_key not in router.run(f"cat {TAILSCALE_ARGUMENTS} {COMMANDS}")
+
+
+@spec(CAPABILITY, "Roll back on service failure", "Tailscale login fails")
+def test_a_refused_tailscale_login_is_put_back(pushed: Pushed) -> None:
+    router = pushed.router
+    until(lambda: _tailscale_running(router), timeout=TAILSCALE_TIMEOUT, what="tailscale up")
+    before = (router.run("tailscale ip -4"), router.run("cat /etc/wrt-config/tailscale"))
+    pushed.repository.write_secrets(_secrets(pushed, REFUSED_KEY))
+    try:
+        result = pushed.push()
+    finally:
+        pushed.repository.discard()
+    assert result.returncode != 0
+    assert "tailscale did not come back with the new configuration" in result.stderr
+    assert "the previous one is back" in result.stderr
+    until(lambda: _tailscale_running(router), timeout=TAILSCALE_TIMEOUT, what="tailscale back")
+    assert (router.run("tailscale ip -4"), router.run("cat /etc/wrt-config/tailscale")) == before
+
+
+@spec(CAPABILITY, "Roll back on service failure", "A service that stops with its new configuration")
+def test_a_service_that_stops_is_put_back(pushed: Pushed) -> None:
+    router = pushed.router
+    before = router.run("uci get uhttpd.main.home")
+    assert router.returncode("pidof uhttpd >/dev/null") == 0
+    template = pushed.repository.directory / "uci" / "uhttpd.uci.tmpl"
+    template.write_text(f"set uhttpd.main.home='{NO_DOCROOT}'\n")
+    try:
+        result = pushed.push()
+    finally:
+        pushed.repository.discard()
+    assert result.returncode != 0
+    assert "uhttpd did not come back with the new configuration" in result.stderr
+    assert "the previous one is back" in result.stderr
+    assert router.run("uci get uhttpd.main.home") == before
+    until(
+        lambda: router.returncode("pidof uhttpd >/dev/null") == 0,
+        timeout=TAILSCALE_TIMEOUT,
+        what="uhttpd running",
+    )
 
 
 @spec(CAPABILITY, "dae user config cannot set bind interfaces", "User config sets lan_interface")

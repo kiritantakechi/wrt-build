@@ -7,19 +7,22 @@ The log service leaves the log file out while its fstab mount point is
 not mounted only at boot. A start or reload later on, such as the reload
 any change to the system configuration brings, creates the directory on
 the root filesystem and logs there: onto the flash, underneath where the
-disk mounts.
+disk mounts. Its check also took any of the mount points that hold the
+file for the one it needs: of an fstab mount point within another, a
+mounted outer one passed for a missing inner one.
 
-Leave the file out whenever the mount point is not mounted; its mount
-trigger starts it once the mount point is mounted, as at boot.
+Leave the file out whenever a mount point that holds it is not mounted,
+as procd.sh's procd_mountpoints_mounted tells; its mount trigger starts
+it once the mount point is mounted, as at boot.
 
 boot() set _BOOT for that check only, and goes with it.
 
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
- package/system/ubox/Makefile       | 2 +-
- package/system/ubox/files/log.init | 9 +++------
- 2 files changed, 4 insertions(+), 7 deletions(-)
+ package/system/ubox/Makefile       |  2 +-
+ package/system/ubox/files/log.init | 13 +++----------
+ 2 files changed, 4 insertions(+), 11 deletions(-)
 
 diff --git a/package/system/ubox/Makefile b/package/system/ubox/Makefile
 index 0ba418c..cccbf33 100644
@@ -35,24 +38,26 @@ index 0ba418c..cccbf33 100644
  PKG_SOURCE_PROTO:=git
  PKG_SOURCE_URL=$(PROJECT_GIT)/project/ubox.git
 diff --git a/package/system/ubox/files/log.init b/package/system/ubox/files/log.init
-index e02cc27..71966c0 100644
+index e02cc27..8e66a48 100644
 --- a/package/system/ubox/files/log.init
 +++ b/package/system/ubox/files/log.init
-@@ -52,10 +52,11 @@ start_service_file()
+@@ -52,12 +52,9 @@ start_service_file()
  	}
  	[ -z "${log_file}" ] && return
  
-+	# A log file on a mount point that is not mounted would go to the
-+	# directory underneath; the mount trigger starts it once it is mounted.
- 	local mountpoint="$(procd_get_mountpoints "${log_file}")"
- 
+-	local mountpoint="$(procd_get_mountpoints "${log_file}")"
+-
 -	[ "$_BOOT" = "1" ] &&
 -		[ "$mountpoint" ] &&
-+	[ "$mountpoint" ] &&
- 		! grep -q ".* $mountpoint " /proc/mounts &&
- 		return 0
+-		! grep -q ".* $mountpoint " /proc/mounts &&
+-		return 0
++	# A log file on a mount point that is not mounted would go to the
++	# directory underneath; the mount trigger starts it once it is mounted.
++	procd_mountpoints_mounted "${log_file}" || return 0
  
-@@ -110,7 +111,3 @@ start_service()
+ 	mkdir -p "$(dirname "${log_file}")"
+ 
+@@ -110,7 +107,3 @@ start_service()
  	config_foreach validate_log_section system start_service_file
  	config_foreach validate_log_section system start_service_remote
  }

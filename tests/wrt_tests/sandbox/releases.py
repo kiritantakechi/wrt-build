@@ -61,6 +61,16 @@ def publish(
     return info.tag
 
 
+def rename(root: Path, repository: str, tag: str, name: str) -> None:
+    """Have the API name release ``tag`` ``name``; its directory, and its assets' URLs, stay.
+
+    ``name`` may be no file name at all, as a misbehaving service would answer.
+    """
+    target = root / repository / tag
+    info = read_json(target / RELEASE_FILE, Release)
+    write_json(target / RELEASE_FILE, info.model_copy(update={"tag": name}))
+
+
 def cut(root: Path, repository: str, tag: str, size: int | None) -> None:
     """Have downloads of ``tag`` stop after ``size`` bytes, or run whole again (None)."""
     marker = root / repository / tag / ".cut"
@@ -95,7 +105,7 @@ def _releases(directory: Path, base: str) -> list[dict[str, Any]]:
                     {
                         "name": asset,
                         "size": (release / asset).stat().st_size,
-                        "browser_download_url": f"{base}/download/{info.tag}/{asset}",
+                        "browser_download_url": f"{base}/download/{release.name}/{asset}",
                     }
                     for asset in info.assets
                     if asset != RELEASE_FILE

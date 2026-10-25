@@ -4,13 +4,17 @@
 // Checks until all pass or the total time is up, then records the result. During
 // a trial boot a pass confirms the slot, and a failure reboots so that U-Boot
 // counts the boot; on a confirmed slot a failure is only recorded. WAN state is
-// never a criterion: an ISP outage says nothing about the system.
+// never a criterion: an ISP outage says nothing about the system. A U-Boot
+// environment that cannot be read fails the check named environment and never
+// reboots, the trial state being unknown; a pass whose confirmation cannot be
+// written fails the check named confirm, and the slot stays on trial
+// (device-integrity D1).
 'use strict';
 
 import { access, lsdir, readfile, writefile } from 'fs';
 import { cursor } from 'uci';
 import * as ubus from 'ubus';
-import { getenv, setenv, slot } from 'wrt.ab';
+import { setenv, slot, variables } from 'wrt.ab';
 
 const RESULT = '/var/run/wrt-healthcheck.json';
 const CHECKS = '/etc/healthcheck.d';
@@ -56,12 +60,13 @@ function listening(port, address) {
 	return false;
 }
 
-// run_checks(timeout): the names of the checks that failed: the built-in ones
-// (ubus answers, the LAN is up with an address, SSH and the web server listen
-// on it), then every executable in /etc/healthcheck.d, which gets the per-check
-// time limit and passes by exiting 0.
-function run_checks(timeout) {
-	let failed = [];
+// run_checks(timeout, environment): the names of the checks that failed: the
+// built-in ones (the U-Boot environment could be read, ubus answers, the LAN is
+// up with an address, SSH and the web server listen on it), then every
+// executable in /etc/healthcheck.d, which gets the per-check time limit and
+// passes by exiting 0.
+function run_checks(timeout, environment) {
+	let failed = environment ? [] : ['environment'];
 	let connection = ubus.connect(null, 5);
 	let lan = connection?.call('network.interface.lan', 'status');
 	let address = lan?.['ipv4-address']?.[0]?.address;
@@ -99,12 +104,15 @@ let total = setting('total', 300);
 let interval = setting('interval', 10);
 let timeout = setting('timeout', 30);
 let running = slot();
-let trial = getenv('upgrade_available', '0') == '1';
+// Read once: whether this boot is a trial does not change while it runs. One
+// that cannot be read leaves the trial state unknown, so it never reboots.
+let environment = variables();
+let trial = environment?.upgrade_available == '1';
 let start = seconds();
 let failed;
 
 while (true) {
-	failed = run_checks(timeout);
+	failed = run_checks(timeout, environment);
 
 	if (!length(failed) || seconds() - start >= total)
 		break;
@@ -112,20 +120,24 @@ while (true) {
 	sleep(interval * 1000);
 }
 
-if (!length(failed)) {
-	record(running, 'pass', failed);
+if (length(failed)) {
+	record(running, 'fail', failed);
 
 	if (trial) {
-		setenv({ boot_slot: running, upgrade_available: 0, bootcount: 0 });
-		log('notice', `slot ${running} passed its trial boot and is confirmed`);
+		log('err', `slot ${running} failed its trial boot: ${join(' ', failed)}; rebooting`);
+		system(['reboot']);
 	}
+	else
+		log('err', `slot ${running} is unhealthy: ${join(' ', failed)}`);
 }
-else if (trial) {
-	record(running, 'fail', failed);
-	log('err', `slot ${running} failed its trial boot: ${join(' ', failed)}; rebooting`);
-	system(['reboot']);
+else if (!trial)
+	record(running, 'pass', failed);
+else if (setenv({ boot_slot: running, upgrade_available: 0, bootcount: 0 })) {
+	record(running, 'pass', failed);
+	log('notice', `slot ${running} passed its trial boot and is confirmed`);
 }
 else {
-	record(running, 'fail', failed);
-	log('err', `slot ${running} is unhealthy: ${join(' ', failed)}`);
+	// Healthy, but still on trial: U-Boot counts the next boots.
+	record(running, 'fail', ['confirm']);
+	log('err', `slot ${running} passed its trial boot, but writing the U-Boot environment failed: it stays on trial`);
 }

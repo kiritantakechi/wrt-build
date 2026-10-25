@@ -40,21 +40,45 @@ export function other(running) {
 	return running == 'a' ? 'b' : 'a';
 }
 
-// getenv(name, fallback): a U-Boot variable, or fallback when it is not set.
-export function getenv(name, fallback) {
-	let tool = popen(`fw_printenv -n ${name} 2>/dev/null`);
-	let value = trim(tool.read('all') ?? '');
+// variables(): the U-Boot environment, an object of its variables; null when it
+// cannot be read, as where no place for it is configured: a variable that is not
+// set and an environment that cannot be read are not the same.
+export function variables() {
+	let tool = popen('fw_printenv 2>/dev/null');
+	let text = tool.read('all') ?? '';
 
-	return tool.close() == 0 ? value : fallback;
+	if (tool.close() != 0)
+		return null;
+
+	let found = {};
+
+	for (let line in split(text, '\n')) {
+		let equals = index(line, '=');
+
+		if (equals > 0)
+			found[substr(line, 0, equals)] = substr(line, equals + 1);
+	}
+
+	return found;
 }
 
-// setenv(variables): write U-Boot variables at once, then flush them to the disk:
+// setenv(values): write U-Boot variables at once, then flush them to the disk:
 // a panic or watchdog reset does not wait for writeback. True when both worked.
-export function setenv(variables) {
+// A tool that ends before it reads them must fail the write, not end the caller
+// with SIGPIPE.
+export function setenv(values) {
+	let previous = signal('SIGPIPE');
+
+	signal('SIGPIPE', 'ignore');
+
 	let tool = popen('fw_setenv -s - && sync', 'w');
 
-	for (let name in variables)
-		tool.write(`${name} ${variables[name]}\n`);
+	for (let name in values)
+		tool.write(`${name} ${values[name]}\n`);
 
-	return tool.close() == 0;
+	let written = tool.close() == 0;
+
+	signal('SIGPIPE', previous);
+
+	return written;
 }

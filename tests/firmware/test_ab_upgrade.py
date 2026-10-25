@@ -4,7 +4,7 @@ import time
 from typing import TYPE_CHECKING
 
 from wrt_tests import spec
-from wrt_tests.device.ab import boot_area_sha256, setenv, slot, slot_sha256
+from wrt_tests.device.ab import boot_area_sha256, getenv, setenv, slot, slot_sha256
 from wrt_tests.model.boards import load_all
 
 if TYPE_CHECKING:
@@ -25,6 +25,15 @@ VALIDATION = "/tmp/validation"  # noqa: S108 (a path on the router)
 # how long it may then take to end, the call's own limit.
 SLOW_SECONDS = 45
 VALIDATION_LIMIT = 300
+# The upgrade hook, as sysupgrade's second stage loads it, in a shell of a test.
+HOOK = ". /lib/functions.sh && include /lib/upgrade"
+# An upgrade image cut short inside its root member, an uncompressed tar.
+BROKEN_IMAGE = "/tmp/broken-image.tar"  # noqa: S108 (a path on the router)
+BACKUP = "/tmp/backup.tgz"  # noqa: S108 (a path on the router)
+# What the A/B switch writes, as it was before an upgrade.
+SWITCH = ("boot_slot", "upgrade_available", "bootcount")
+# How long the upgrade hook may take to write a slot.
+WRITE_LIMIT = 600
 
 
 def _upgrade(router: Router, image: Path, *options: str) -> None:
@@ -33,6 +42,11 @@ def _upgrade(router: Router, image: Path, *options: str) -> None:
     previous_boot = router.boot_id()
     router.detach(f"sleep 1; sysupgrade {' '.join(options)} {UPGRADE_IMAGE}")
     router.wait_rebooted(previous_boot)
+
+
+def _switch(router: Router) -> tuple[str | None, ...]:
+    """Return what the A/B switch writes, as the U-Boot environment holds it now."""
+    return tuple(getenv(router, name) for name in SWITCH)
 
 
 def _confirmed(router: Router, which: str) -> None:
@@ -99,6 +113,57 @@ def test_upgrade_boots_the_new_slot_on_trial(router: Router, upgrade_image: Path
     _upgrade(router, upgrade_image)
     assert slot(router) == "b"
     _confirmed(router, "b")
+
+
+@spec(CAPABILITY, "Trial boot after writing", "Write that fails")
+def test_a_write_that_fails_keeps_the_running_slot(router: Router, upgrade_image: Path) -> None:
+    running = slot(router)
+    router.put(upgrade_image, UPGRADE_IMAGE)
+    # The image unpacked and cut a tenth short, as it streams (/tmp is memory):
+    # inside root, its last and largest member. BusyBox tar reads an archive to
+    # its end whichever member it extracts, so every member's read then fails,
+    # kernel's too, though its data came whole: the write stops at the kernel.
+    router.run(
+        f"size=$(gzip -dc {UPGRADE_IMAGE} | wc -c)"
+        f" && gzip -dc {UPGRADE_IMAGE} | head -c $((size * 9 / 10)) >{BROKEN_IMAGE}",
+        timeout=120,
+    )
+    # BusyBox tar reads no gzip on its own.
+    members = router.run(f"gzip -dc {UPGRADE_IMAGE} | tar -tf -").split()
+    (root,) = [member for member in members if member.endswith("/root")]
+    assert router.returncode(f"tar -xOf {BROKEN_IMAGE} {root} >/dev/null 2>&1") != 0
+    before = _switch(router)
+    output = router.run(
+        f"{HOOK} && platform_do_upgrade {BROKEN_IMAGE} 2>&1; echo exit=$?", timeout=WRITE_LIMIT
+    )
+    assert output.endswith("exit=1"), output
+    assert _switch(router) == before
+    previous_boot = router.boot_id()
+    router.reboot()
+    assert router.boot_id() != previous_boot
+    assert slot(router) == running
+
+
+@spec(CAPABILITY, "Trial boot after writing", "Configuration in place before the switch")
+def test_the_configuration_is_in_place_before_the_switch(
+    router: Router, upgrade_image: Path
+) -> None:
+    router.put(upgrade_image, UPGRADE_IMAGE)
+    router.run(f"sysupgrade -b {BACKUP}", timeout=120)
+    # The switch, recorded instead of written: whether the new slot's boot
+    # partition (the hook's wrt_boot_dev) holds the backup when it comes.
+    record = (
+        'wrt_ab_setenv() { mount -o ro "/dev/${wrt_boot_dev}" /mnt'
+        " && if [ -f /mnt/sysupgrade.tgz ]; then echo switch=backup-present;"
+        " else echo switch=backup-absent; fi; umount /mnt; }"
+    )
+    output = router.run(
+        f"{HOOK} && {record} && UPGRADE_BACKUP={BACKUP} BACKUP_FILE=sysupgrade.tgz"
+        f" platform_do_upgrade {UPGRADE_IMAGE} 2>&1; echo exit=$?",
+        timeout=WRITE_LIMIT,
+    )
+    assert "switch=backup-present" in output, output
+    assert output.endswith("exit=0"), output
 
 
 @spec(CAPABILITY, "Reject mismatched images", "Image for another device")

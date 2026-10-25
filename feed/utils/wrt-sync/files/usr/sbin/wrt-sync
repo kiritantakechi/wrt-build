@@ -10,11 +10,17 @@
 # becomes current only once its manifest's signature verifies with
 # /etc/usign/keys, the manifest is of a build for the router's device and lists
 # its upgrade image and its indexes, these match it, and every index verifies
-# with /etc/apk/keys. The newest releases (wrt-sync.main.keep) stay; apk
-# installs from current and wrt-update upgrades to its image.
+# with /etc/apk/keys. The release is made of what was verified alone: the
+# manifest, the image it names and the package repository, whose archive may
+# hold regular files and directories under packages/ and targets/packages/ and
+# nothing else; it is on the disk before it becomes current (device-integrity
+# D3). The newest releases (wrt-sync.main.keep) stay; apk installs from current
+# and wrt-update upgrades to its image.
 set -eu
 # shellcheck source=../../../../wrt-data/files/lib/functions/wrt-data.sh
 . /lib/functions/wrt-data.sh
+# shellcheck source=../../lib/functions/wrt-sync.sh
+. /lib/functions/wrt-sync.sh
 
 REPO="${WRT_DATA}/repo"
 FETCH=/usr/libexec/wrt-sync/fetch
@@ -34,7 +40,7 @@ api=$(uci -q get wrt-sync.main.api) || api=https://api.github.com
 repository=$(uci -q get wrt-sync.main.repository) || repository=kiritantakechi/wrt-build
 channel=$(uci -q get wrt-sync.main.channel) || channel=stable
 keep=$(uci -q get wrt-sync.main.keep) || keep=3
-device=$(tr ',' '_' </tmp/sysinfo/board_name)
+device=$(wrt_sync_device)
 case "${1:-}" in
 	--candidate) channel=candidate ;;
 	'') ;;
@@ -43,6 +49,9 @@ esac
 # One sync at a time: the mount trigger, cron and a hand may start one together.
 exec 9>"${LOCK}"
 flock 9
+# What a sync downloads and checks serves it alone (fetch downloads afresh every
+# time): none of it outlasts the sync, whether its release became current or not.
+trap 'rm -rf "${REPO:?}/.incoming"/* "${REPO:?}/.verified"' EXIT
 
 mkdir -p "${REPO}/.incoming" "${REPO}/releases" "${REPO}/.root/tmp" \
 	"${REPO}/.root/releases" "${REPO}/.root/incoming"
@@ -57,30 +66,60 @@ tag=$(podman run --rm --network podman "$@" \
 	--rootfs "${REPO}/.root" "${FETCH}" "${api}" "${repository}" "${channel}" "${device}" \
 	/releases /incoming) ||
 	die "fetching the ${channel} release failed; the current release stays"
+# The tag the container printed names a directory: a plain file name, never . or ..
+case "${tag}" in
+	'' | [!A-Za-z0-9]* | *[!A-Za-z0-9._-]*) die "the release name '${tag}' is no plain file name" ;;
+	*) ;;
+esac
 release="${REPO}/releases/${tag}"
 
 if [ ! -d "${release}" ]; then
 	incoming="${REPO}/.incoming/${tag}"
-	usign -V -q -m "${incoming}/manifest.json" -x "${incoming}/manifest.json.sig" \
+	# The release takes shape where the container cannot reach, from what is
+	# verified there: copies of the manifest and its signature, as what the
+	# container left may be a link it could point elsewhere later; then only what
+	# the manifest names.
+	verified="${REPO}/.verified"
+	rm -rf "${verified}"
+	mkdir -p "${verified}/targets"
+	cp "${incoming}/manifest.json" "${incoming}/manifest.json.sig" "${verified}/" ||
+		die "${tag}: the manifest is incomplete"
+	usign -V -q -m "${verified}/manifest.json" -x "${verified}/manifest.json.sig" \
 		-P /etc/usign/keys || die "${tag}: manifest.json is not signed by a trusted key"
-	mkdir -p "${incoming}/targets"
-	tar -xf "${incoming}/repo.tar" -C "${incoming}" ||
+	image=$("${MANIFEST}" image "${verified}/manifest.json" "${device}") ||
+		die "${tag}: manifest.json does not describe a release for ${device}"
+	if [ ! -f "${incoming}/${image}" ] || [ -L "${incoming}/${image}" ]; then
+		die "${tag}: there is no upgrade image ${image}"
+	fi
+	mv "${incoming}/${image}" "${verified}/targets/"
+	# The package repository: regular files and directories under packages/ and
+	# targets/packages/, with no .. among their names, and nothing else. The plain
+	# listing gives each member's name, which may hold spaces; the verbose one,
+	# line for line, its type, and a link's target after " -> ": a hard link lists
+	# as a regular file with a target.
+	tar -tf "${incoming}/repo.tar" >"${incoming}/repo.names" ||
 		die "${tag}: the package repository is incomplete"
-	rm "${incoming}/repo.tar"
-	for image in "${incoming}"/*-sysupgrade.tar.gz; do
-		[ -e "${image}" ] && mv "${image}" "${incoming}/targets/"
-	done
+	tar -tvf "${incoming}/repo.tar" >"${incoming}/repo.list" ||
+		die "${tag}: the package repository is incomplete"
+	stray=$(awk 'FILENAME == ARGV[1] { names[FNR] = $0; next }
+		{ type = substr($0, 1, 1); name = names[FNR] }
+		type != "-" && type != "d" || index($0, " -> ") ||
+		name !~ /^(targets\/)?packages(\/|$)/ || name ~ /(^|\/)\.\.(\/|$)/ { print name; exit }' \
+		"${incoming}/repo.names" "${incoming}/repo.list")
+	[ -z "${stray}" ] || die "${tag}: the package repository holds ${stray}, which is no package"
+	tar -xf "${incoming}/repo.tar" -C "${verified}" ||
+		die "${tag}: the package repository is incomplete"
 	# The upgrade image and every package index as the manifest lists them, and
 	# every index as signed. The loop reads a here-document, not a pipe, so that
 	# it runs in this shell: nothing it checks can fail unnoticed.
-	sums=$("${MANIFEST}" checksums "${incoming}/manifest.json" "${device}") ||
+	sums=$("${MANIFEST}" checksums "${verified}/manifest.json" "${device}") ||
 		die "${tag}: manifest.json does not describe a release for ${device}"
 	while read -r sum file; do
-		actual=$(sha256sum "${incoming}/${file}" 2>/dev/null) || actual=
+		actual=$(sha256sum "${verified}/${file}" 2>/dev/null) || actual=
 		[ "${actual%% *}" = "${sum}" ] || die "${tag}: ${file} does not match the manifest"
 		case "${file}" in
 			*/packages.adb)
-				apk verify "${incoming}/${file}" >/dev/null ||
+				apk verify "${verified}/${file}" >/dev/null ||
 					die "${tag}: ${file} is not signed by a trusted key"
 				;;
 			*) ;;
@@ -88,15 +127,23 @@ if [ ! -d "${release}" ]; then
 	done <<-EOF
 		${sums}
 	EOF
-	mv "${incoming}" "${release}"
+	# On the disk before it is a release: a power cut must not leave a release
+	# directory, which no later sync checks again, short of its files.
+	sync
+	mv "${verified}" "${release}"
 fi
 
-ln -sfn "releases/${tag}" "${REPO}/current"
+sync
+# The release becomes current in one step, a rename over the link (ln -sf
+# removes the old link first), and on the disk before wrt-sync says so: a power
+# cut leaves one release current or the other, never none.
+ln -sfn "releases/${tag}" "${REPO}/.current"
+mv -T "${REPO}/.current" "${REPO}/current"
+sync
 # The newest releases stay, by when they became current.
 touch "${release}"
 # shellcheck disable=SC2012 # tags hold no whitespace
 ls -1t "${REPO}/releases" | tail -n +$((keep + 1)) | while read -r old; do
 	rm -rf "${REPO:?}/releases/${old}"
 done
-rm -rf "${REPO:?}/.incoming"/*
 echo "wrt-sync: ${tag} is current"

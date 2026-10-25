@@ -95,6 +95,20 @@ def test_container_bridge_is_bound_when_it_appears(dae: Online) -> None:
     until(lambda: hooks(router, "br-lan") == DAE, timeout=BIND_TIMEOUT, what="dae on br-lan")
 
 
+@spec(CAPABILITY, "Bind LAN-side interfaces only", "Container bridge appears while dae starts")
+def test_container_bridge_is_bound_when_it_appears_as_dae_starts(dae_restored: Online) -> None:
+    router = dae_restored.router
+    # The bridge's hotplug event comes while dae is still loading, before it
+    # takes a reload.
+    router.run(
+        "/etc/init.d/dae restart && ip link add podman0 type bridge && ip link set podman0 up"
+    )
+    try:
+        until(lambda: hooks(router, "podman0") == DAE, timeout=BIND_TIMEOUT, what="dae on podman0")
+    finally:
+        router.run("ip link del podman0")
+
+
 @spec(CAPABILITY, "Rule-based traffic splitting", "Access a direct target")
 def test_direct_target_goes_direct(dae: Online) -> None:
     assert dae.client().probe("tcp", DIRECT_TARGET[0])["address"] == dae.wan_address
@@ -156,6 +170,29 @@ def test_image_carries_only_a_template(dae: Online) -> None:
     assert sections <= {"global", "routing"}, sections
     assert "://" not in template
     assert dae.router.run("cat /rom/etc/config/dae | grep enabled").split()[-1].strip("'") == "0"
+
+
+@spec(CAPABILITY, "Configuration management", "Turn dae off")
+def test_turning_dae_off_stops_it(dae_restored: Online) -> None:
+    router = dae_restored.router
+    session = _luci_session(router)
+    # LuCI's Save & Apply: the change in the session, then applied, which commits
+    # it and announces it to procd. reload_config would compare with what it saw
+    # last, before dae_start enabled dae by a commit of its own.
+    _ubus(
+        router,
+        session,
+        "uci",
+        "set",
+        {"config": "dae", "section": "config", "values": {"enabled": "0"}},
+    )
+    _ubus(router, session, "uci", "apply", {"rollback": False})
+    until(
+        lambda: router.returncode("pidof dae >/dev/null") != 0,
+        timeout=DAE_TIMEOUT,
+        what="dae stopped",
+    )
+    until(lambda: not hooks(router, "br-lan"), timeout=DAE_TIMEOUT, what="dae's programs gone")
 
 
 @spec(CAPABILITY, "Fall back to direct when stopped", "Stop dae")

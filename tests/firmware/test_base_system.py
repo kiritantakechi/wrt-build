@@ -29,6 +29,39 @@ EXCLUDED_PACKAGES = (
 EXECUTABLE_DIRS = ("bin", "sbin", "usr/bin", "usr/sbin", "lib", "usr/lib")
 UPX_MAGIC = b"UPX!"
 UPGRADE_IMAGE = "/tmp/sysupgrade.tar.gz"  # noqa: S108 (a path on the router)
+# Every ucode file of the root filesystem compiled by the image's ucode, as ucode
+# loads it: a template (*.ut, fw4's templates, a file that starts with a
+# template block or whose interpreter line asks for one) as a template, a module
+# (an export at its top level) as a module, any other *.uc file and every
+# executable whose interpreter line names ucode as a script. Only the first line
+# of an executable is read: reading them whole takes minutes under emulation.
+# A line per file: "ok <path>", or "failed <path>: <the error>".
+UCODE_CHECK = r"""
+{
+    find / -xdev -type f \( -name '*.uc' -o -name '*.ut' \)
+    find / -xdev -type f -perm -u+x \
+        -exec awk 'FNR == 1 { if (/^#!.*ucode/) print FILENAME; nextfile }' {} +
+} | sort -u | while read -r file; do
+    compile=-c mode=-R
+    case "$file" in */templates/*.uc | *.ut) mode=-T ;; esac
+    case "$(head -n 1 "$file")" in '{%'* | '#!'*ucode*-T*) mode=-T ;; esac
+    [ "$mode" = -R ] && grep -q '^export ' "$file" && compile=-cmodule
+    if error=$(ucode "$compile" "$mode" -o /dev/null "$file" 2>&1); then
+        echo "ok $file"
+    else
+        echo "failed $file: $(echo "$error" | head -n 1)"
+    fi
+done
+"""
+# One file of each kind, so that a check that finds no files fails: a template,
+# one that starts with a template block, a module and a script by its
+# interpreter line.
+UCODE_KINDS = {
+    "/usr/share/firewall4/templates/ruleset.uc",
+    "/usr/share/ucode/node-exporter/metrics.uc",
+    "/usr/share/ucode/wrt/ab.uc",
+    "/usr/libexec/wrt-sync/fetch",
+}
 
 
 def _report(output: str) -> str:
@@ -156,3 +189,11 @@ def test_excluded_components(router: Router, emulation_dir: Path, tmp_path: Path
     assert packed == []
     # Nothing keeps opkg's directory: the firmware keys are usign's (/etc/usign/keys).
     assert not (root / "etc" / "opkg").exists()
+
+
+@spec(CAPABILITY, "The image's ucode programs compile", "Compile the image's ucode files")
+def test_every_ucode_file_compiles(router: Router) -> None:
+    results = router.run(UCODE_CHECK, timeout=300).splitlines()
+    failed = [line for line in results if not line.startswith("ok ")]
+    assert not failed, "\n".join(failed)
+    assert {line.removeprefix("ok ") for line in results} >= UCODE_KINDS

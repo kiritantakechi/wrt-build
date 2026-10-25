@@ -9,22 +9,49 @@
 # The second stage runs from a RAM root; take the U-Boot environment tools along.
 RAMFS_COPY_BIN="${RAMFS_COPY_BIN:-} /usr/sbin/fw_printenv /usr/sbin/fw_setenv"
 
-# wrt_ab_members <image>: print the tar members of an upgrade image, without the
-# directory they sit in (sysupgrade-<board>/).
+# wrt_ab_members <image>: print the files of an upgrade image's tar, sorted, as
+# the archive names them: <dir>/<member>.
 wrt_ab_members() {
-	get_image "$1" | tar -tf - 2>/dev/null | grep -v '/$' | sed 's|^[^/]*/||'
+	get_image "$1" | tar -tf - 2>/dev/null | grep -v '/$' | sort
 }
 
-# wrt_ab_target: print the slot an upgrade writes, the one not running.
-wrt_ab_target() {
-	wrt_running=$(wrt_ab_slot)
-	wrt_ab_other "${wrt_running}"
+# wrt_ab_dir <image>: print the directory an upgrade image's members sit in
+# (sysupgrade-<board>), when they are exactly CONTROL, kernel and root of one
+# directory; the check and the write read the same names.
+wrt_ab_dir() {
+	wrt_listed=$(wrt_ab_members "$1")
+	wrt_dir=${wrt_listed%%/*}
+	[ -n "${wrt_dir}" ] &&
+		[ "${wrt_listed}" = "$(printf '%s/CONTROL\n%s/kernel\n%s/root' "${wrt_dir}" "${wrt_dir}" "${wrt_dir}")" ] &&
+		echo "${wrt_dir}"
 }
 
-# wrt_ab_member <image> <name>: write one member of an upgrade image to stdout.
+# wrt_ab_member <image> <dir> <name>: write one member of an upgrade image to
+# stdout; fails when the image cannot be read to the member's end.
 wrt_ab_member() {
-	wrt_path=$(get_image "$1" | tar -tf - | grep "/$2\$")
-	get_image "$1" | tar -xOf - "${wrt_path}"
+	get_image "$1" | tar -xOf - "$2/$3"
+}
+
+# wrt_ab_write <image> <dir> <name> <device>: write one member of an upgrade
+# image to a device. pipefail: a member that cannot be read fails the write as a
+# device that cannot be written does.
+wrt_ab_write() {
+	(
+		# shellcheck disable=SC3040 # POSIX.1-2024; busybox ash has it
+		set -o pipefail
+		wrt_ab_member "$1" "$2" "$3" | dd of="$4" bs=1M conv=fsync
+	)
+}
+
+# wrt_ab_copy_config <boot device>: put the configuration backup on the new
+# slot's boot partition, where its preinit (79_move_config) picks it up.
+wrt_ab_copy_config() {
+	mount -o rw,noatime "/dev/$1" /mnt || return 1
+	# shellcheck disable=SC2154 # set by sysupgrade
+	cp -af "${UPGRADE_BACKUP}" "/mnt/${BACKUP_FILE}" && sync
+	wrt_copied=$?
+	umount /mnt || return 1
+	return "${wrt_copied}"
 }
 
 # wrt_ab_erofs_size <device>: print the size of the EROFS image the device starts
@@ -41,9 +68,9 @@ wrt_ab_erofs_size() {
 # whose bootloader named no environment has none configured (31-wrt-ab), and
 # refuses before anything is written (trial-boot-resilience D3).
 platform_check_image() {
-	wrt_members=$(wrt_ab_members "$1" | sort | tr '\n' ' ')
-	if [ "${wrt_members}" != "CONTROL kernel root " ]; then
-		echo "Not a single-slot upgrade image (members: ${wrt_members:-none})"
+	if ! wrt_ab_dir "$1" >/dev/null; then
+		wrt_listed=$(wrt_ab_members "$1" | tr '\n' ' ') || wrt_listed=
+		echo "Not a single-slot upgrade image (members: ${wrt_listed:-none})"
 		return 1
 	fi
 	if ! wrt_ab_slot >/dev/null; then
@@ -56,10 +83,21 @@ platform_check_image() {
 	fi
 }
 
-# platform_do_upgrade <image>: write the inactive slot, give it a fresh overlay,
-# and make it the slot U-Boot tries next, as a trial.
+# platform_do_upgrade <image>: write the inactive slot, give it a fresh overlay
+# and the configuration backup (sysupgrade's UPGRADE_BACKUP), and only once all
+# of it is written, make it the slot U-Boot tries next, as a trial. Stage 2
+# reboots whatever this returns: after a failure, into the running slot
+# (device-integrity D2).
 platform_do_upgrade() {
-	wrt_target=$(wrt_ab_target)
+	wrt_dir=$(wrt_ab_dir "$1") || {
+		echo "Not a single-slot upgrade image"
+		return 1
+	}
+	wrt_running=$(wrt_ab_slot) || {
+		echo "Not running from an A/B slot"
+		return 1
+	}
+	wrt_target=$(wrt_ab_other "${wrt_running}")
 	wrt_partitions=$(wrt_ab_partitions "${wrt_target}")
 	# shellcheck disable=SC2086 # the boot and root partition numbers
 	set -- "$1" ${wrt_partitions}
@@ -72,29 +110,32 @@ platform_do_upgrade() {
 	fi
 
 	v "Writing slot ${wrt_target} to /dev/${wrt_boot_dev} and /dev/${wrt_root_dev}..."
-	wrt_ab_member "$1" kernel | dd of="/dev/${wrt_boot_dev}" bs=1M conv=fsync
-	wrt_ab_member "$1" root | dd of="/dev/${wrt_root_dev}" bs=1M conv=fsync
+	if ! wrt_ab_write "$1" "${wrt_dir}" kernel "/dev/${wrt_boot_dev}" ||
+		! wrt_ab_write "$1" "${wrt_dir}" root "/dev/${wrt_root_dev}"; then
+		echo "Writing slot ${wrt_target} failed; slot ${wrt_running} stays"
+		return 1
+	fi
 
 	# fstools keeps the overlay after EROFS, rounded up to 64 KiB. Clearing the
 	# start of the old one makes the new system format a fresh overlay.
 	wrt_overlay=$((($(wrt_ab_erofs_size "/dev/${wrt_root_dev}") + 65535) / 65536))
-	dd if=/dev/zero of="/dev/${wrt_root_dev}" bs=64k seek="${wrt_overlay}" count=16 conv=fsync
+	if ! dd if=/dev/zero of="/dev/${wrt_root_dev}" bs=64k seek="${wrt_overlay}" count=16 conv=fsync; then
+		echo "Clearing the overlay of slot ${wrt_target} failed; slot ${wrt_running} stays"
+		return 1
+	fi
+
+	# The configuration before the switch: a power cut in between must not boot
+	# the new slot without it.
+	if [ -n "${UPGRADE_BACKUP:-}" ] && ! wrt_ab_copy_config "${wrt_boot_dev}"; then
+		echo "Copying the configuration to slot ${wrt_target} failed; slot ${wrt_running} stays"
+		return 1
+	fi
 
 	wrt_ab_setenv boot_slot "${wrt_target}" upgrade_available 1 bootcount 0
 }
 
-# platform_copy_config: hand the configuration backup to the new slot through its
-# boot partition, where its preinit (79_move_config) picks it up.
+# platform_copy_config: platform_do_upgrade has put the configuration on the new
+# slot already, before the switch; this replaces the platform's whole-disk copy.
 platform_copy_config() {
-	wrt_target=$(wrt_ab_target)
-	wrt_partitions=$(wrt_ab_partitions "${wrt_target}")
-	# shellcheck disable=SC2086 # the boot and root partition numbers
-	set -- ${wrt_partitions}
-	wrt_boot_dev=''
-	if export_bootdevice && export_partdevice wrt_boot_dev "$1"; then
-		mount -o rw,noatime "/dev/${wrt_boot_dev}" /mnt
-		# shellcheck disable=SC2154 # set by sysupgrade
-		cp -af "${UPGRADE_BACKUP}" "/mnt/${BACKUP_FILE}"
-		umount /mnt
-	fi
+	:
 }

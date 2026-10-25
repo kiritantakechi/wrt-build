@@ -11,19 +11,22 @@ service restarted.
 
 Leave such a share out until its mount point is mounted, and reload the
 service when it is mounted or unmounted: a mount trigger and an unmount
-trigger per share, the latter from procd.sh's unmount helpers. A reload
-starts the service anew, as start_service resets the server hard; a
-restart would drop the service, and its triggers with it, until it has
-started again, so a disk that comes back while the service restarts
-would go unnoticed. With every share waiting for its mount, stop a
-running server and start nothing.
+trigger per share, the latter from procd.sh's unmount helpers. The
+unmount trigger comes while the mount point is still mounted, before
+the unmount, and names it: the shares on it are left out at once. A
+share counts as mounted only while every mount point that holds it is
+(procd_mountpoints_mounted). A reload starts the service anew, as
+start_service resets the server hard; a restart would drop the service,
+and its triggers with it, until it has started again, so a disk that
+comes back while the service restarts would go unnoticed. With every
+share waiting for its mount, stop a running server and start nothing.
 
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
  net/ksmbd-tools/Makefile         |  2 +-
- net/ksmbd-tools/files/ksmbd.init | 32 ++++++++++++++++++++++++++++++++
- 2 files changed, 33 insertions(+), 1 deletion(-)
+ net/ksmbd-tools/files/ksmbd.init | 37 ++++++++++++++++++++++++++++++++
+ 2 files changed, 38 insertions(+), 1 deletion(-)
 
 diff --git a/net/ksmbd-tools/Makefile b/net/ksmbd-tools/Makefile
 index df3a142..080ffc4 100644
@@ -39,18 +42,19 @@ index df3a142..080ffc4 100644
  PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
  PKG_SOURCE_URL:=https://github.com/cifsd-team/ksmbd-tools/releases/download/$(PKG_VERSION)
 diff --git a/net/ksmbd-tools/files/ksmbd.init b/net/ksmbd-tools/files/ksmbd.init
-index f87b392..e2faf58 100644
+index f87b392..b080fde 100644
 --- a/net/ksmbd-tools/files/ksmbd.init
 +++ b/net/ksmbd-tools/files/ksmbd.init
-@@ -109,6 +109,16 @@ smb_add_share()
+@@ -109,6 +109,17 @@ smb_add_share()
  
  	[ -z "$name" ] || [ -z "$path" ] && return
  
-+	# A share on a mount point that is not mounted would expose the directory
-+	# underneath (on the root filesystem): leave it out until it is mounted.
-+	local mountpoint="$(procd_get_mountpoints "$path")"
-+	if [ -n "$mountpoint" ] && ! grep -q " $mountpoint " /proc/mounts; then
-+		logger -p daemon.info -t 'ksmbd' "Share $name waits for $mountpoint to be mounted."
++	# A share on a mount point that is not mounted, or that is being unmounted,
++	# would expose the directory underneath (on the root filesystem): leave it
++	# out until it is mounted.
++	if ! procd_mountpoints_mounted "$path" ||
++		{ [ -n "$UNMOUNTING" ] && procd_get_mountpoints "$path" | grep -qxF "$UNMOUNTING"; }; then
++		logger -p daemon.info -t 'ksmbd' "Share $name waits for its mount point to be mounted."
 +		SHARES_WAITING=$((SHARES_WAITING + 1))
 +		return
 +	fi
@@ -59,7 +63,7 @@ index f87b392..e2faf58 100644
  	{
  		printf "\n[%s]\n\tpath = %s\n" "$name" "$path"
  		[ -n "$comment" ] && printf "\tcomment = %s\n" "$comment"
-@@ -142,6 +152,8 @@ smb_add_share()
+@@ -142,6 +153,8 @@ smb_add_share()
  
  init_config()
  {
@@ -68,7 +72,7 @@ index f87b392..e2faf58 100644
  	mkdir -p /var/etc/ksmbd
  
  	config_load ksmbd
-@@ -150,12 +162,26 @@ init_config()
+@@ -150,12 +163,26 @@ init_config()
  	config_foreach smb_add_share share
  }
  
@@ -95,7 +99,18 @@ index f87b392..e2faf58 100644
  	for i in $SMBD_IFACE; do
  		procd_add_reload_interface_trigger "$i"
  	done
-@@ -182,6 +208,12 @@ start_service()
+@@ -173,6 +200,10 @@ kill_server()
+ 
+ start_service()
+ {
++	# Reloaded by an unmount trigger: "unmounting <mountpoint>", which is still
++	# mounted while the unmount waits for this.
++	UNMOUNTING=
++	[ "$1" = unmounting ] && UNMOUNTING="$2"
+ 	init_config
+ 
+ 	if [ ! -e /etc/ksmbd/ksmbd.conf ]; then
+@@ -182,6 +213,12 @@ start_service()
  	
  	# NOTE: We don't do a soft-reload via signal, since [global] ksmbd.conf setting changes will be ignored, so always reset hard.
  	[ -e /sys/module/ksmbd ] && stop_service

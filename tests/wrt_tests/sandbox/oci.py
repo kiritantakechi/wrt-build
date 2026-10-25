@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 IMAGE = "wrt/app"
 TAG = "1"
 ROOT_PARTITION = 2  # slot A's root: EROFS, then the overlay area
-APPLETS = ("sh", "cat", "echo", "ls", "mkdir", "nc", "sleep", "true")
+APPLETS = ("sh", "cat", "echo", "ls", "mkdir", "nc", "nslookup", "sleep", "true")
 PROGRAMS = ("bin/busybox", "usr/sbin/uhttpd", "bin/uclient-fetch")
 LIBRARY_DIRECTORIES = ("lib", "usr/lib")
 # musl's dynamic loader is its libc.

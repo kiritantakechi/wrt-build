@@ -21,11 +21,24 @@ QUICK = " && ".join(f"uci set wrt-ab.healthcheck.{name}={value}" for name, value
 # Limits long enough for a check that fails after the clock was set, then passes.
 SLOW = {"total": 60, "interval": 3, "timeout": 3}
 DAY = 86400
+# A directory ahead of the system's on PATH, holding a U-Boot tool that fails.
+BROKEN = "/tmp/broken-tools"  # noqa: S108 (a path on the router)
 
 
-def _check(router: Router) -> dict[str, object]:
-    """Run the health check with short limits and return its recorded result."""
-    router.run(f"{QUICK} && uci commit wrt-ab && wrt-healthcheck", timeout=120)
+def _check(router: Router, broken: str | None = None) -> dict[str, object]:
+    """Run the health check with short limits and return its recorded result.
+
+    With ``broken``, that U-Boot tool fails for the health check at once, before
+    it reads anything it is given.
+    """
+    path = ""
+    if broken is not None:
+        router.run(
+            f"mkdir -p {BROKEN} && printf '#!/bin/sh\\nexit 1\\n' >{BROKEN}/{broken}"
+            f" && chmod +x {BROKEN}/{broken}"
+        )
+        path = f"PATH={BROKEN}:$PATH "
+    router.run(f"{QUICK} && uci commit wrt-ab && {path}wrt-healthcheck", timeout=120)
     return cast("dict[str, object]", json.loads(router.run(f"cat {RESULT}")))
 
 
@@ -125,6 +138,29 @@ def test_confirmed_failure_only_records(router: Router) -> None:
     assert _check(router)["result"] == "fail"
     assert router.boot_id() == previous_boot
     assert router.returncode("logread -e wrt-healthcheck | grep -q 'is unhealthy: demo'") == 0
+
+
+@spec(CAPABILITY, "Result handling by trial boot state", "Environment that cannot be read")
+def test_an_environment_that_cannot_be_read_is_a_failure(router: Router) -> None:
+    running = slot(router)
+    setenv(router, boot_slot=running, upgrade_available=1, bootcount=0)
+    previous_boot = router.boot_id()
+    result = _check(router, broken="fw_printenv")
+    assert (result["result"], result["failed"]) == ("fail", ["environment"])
+    assert router.boot_id() == previous_boot
+    assert (getenv(router, "upgrade_available"), getenv(router, "bootcount")) == ("1", "0")
+
+
+@spec(CAPABILITY, "Result handling by trial boot state", "Confirmation that cannot be written")
+def test_a_confirmation_that_cannot_be_written_is_a_failure(router: Router) -> None:
+    running = slot(router)
+    setenv(router, boot_slot=running, upgrade_available=1, bootcount=0)
+    previous_boot = router.boot_id()
+    result = _check(router, broken="fw_setenv")
+    assert (result["result"], result["failed"]) == ("fail", ["confirm"])
+    assert router.boot_id() == previous_boot
+    assert getenv(router, "upgrade_available") == "1"
+    assert router.returncode("logread -e wrt-healthcheck | grep -q 'is confirmed'") != 0
 
 
 @spec(CAPABILITY, "Slot status query", "Query status")

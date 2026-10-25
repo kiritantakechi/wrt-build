@@ -9,9 +9,11 @@ wrt-sync is pointed. The test without a data disk comes first: the data disk
 comes with the first test that asks for it and stays for the module.
 """
 
+import io
 import itertools
 import shutil
 import subprocess
+import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -20,7 +22,7 @@ import pytest
 
 from wrt_tests import spec
 from wrt_tests.device.ab import boot_area_sha256, slot, slot_sha256
-from wrt_tests.device.storage import MOUNT
+from wrt_tests.device.storage import MOUNT, wait_mounted
 from wrt_tests.model.boards import load_all
 from wrt_tests.model.data import read_json, write_json
 from wrt_tests.model.outputs import RELEASE_FILE, Manifest, Release
@@ -55,6 +57,18 @@ SYNC_TIMEOUT = 900
 # What the router logged around a failed sync: the container's fetch goes through
 # podman's network and dae, either of which can refuse it (EPERM).
 SYNC_LOG = "logread | grep -E 'wrt-sync|podman|netavark|dae' | tail -n 40"
+# Release names that are no plain file name, as a misbehaving service could give.
+NOT_FILE_NAMES = ("..", "r1/../..", "it's")
+# What a package archive must not carry beside the packages: a manifest, an
+# upgrade image, a link out of the repository, of either kind.
+NOT_PACKAGES = (
+    ("manifest.json", tarfile.REGTYPE),
+    ("targets/r1-sysupgrade.tar.gz", tarfile.REGTYPE),
+    ("packages/out", tarfile.SYMTYPE),
+    ("packages/shadow", tarfile.LNKTYPE),
+)
+# Where the links point.
+OUTSIDE = "/etc/shadow"
 
 
 @dataclass
@@ -219,6 +233,69 @@ def test_a_file_that_does_not_match_is_refused(
     assert tag not in stand_in.kept()
 
 
+def _with_member(archive: Path, name: str, kind: bytes) -> None:
+    """Add a member ``name`` of tar type ``kind`` to the package archive ``archive``."""
+    added = tarfile.TarInfo(name)
+    added.type = kind
+    content = b"not a package\n" if kind == tarfile.REGTYPE else b""
+    added.size = len(content)
+    if kind in {tarfile.SYMTYPE, tarfile.LNKTYPE}:
+        added.linkname = OUTSIDE
+    whole = io.BytesIO()
+    with tarfile.open(archive) as source, tarfile.open(fileobj=whole, mode="w") as target:
+        for member in source.getmembers():
+            target.addfile(member, source.extractfile(member) if member.isfile() else None)
+        target.addfile(added, io.BytesIO(content))
+    replace(archive, whole.getvalue())
+
+
+@spec(
+    CAPABILITY,
+    "Activate only when complete and verified",
+    "Package archive that carries more than packages",
+)
+@pytest.mark.parametrize(
+    ("name", "kind"), NOT_PACKAGES, ids=("manifest", "image", "symlink", "hard-link")
+)
+def test_a_package_archive_with_more_is_refused(
+    stand_in: Releases, data_disk: Disk, tmp_path: Path, name: str, kind: bytes
+) -> None:
+    del data_disk  # the local repository's place
+    previous = stand_in.synced()
+    release = linked_copy(stand_in.assembled, tmp_path / "release")
+    (archive,) = release.glob("*-repo.tar")
+    _with_member(archive, name, kind)
+    tag = stand_in.publish(release)
+    ok, said = stand_in.sync()
+    assert not ok
+    assert f"{tag}: the package repository holds {name}, which is no package" in said, said
+    assert stand_in.current() == previous
+    assert tag not in stand_in.kept()
+
+
+@spec(CAPABILITY, "Activate only when complete and verified", "Release name that is no file name")
+@pytest.mark.parametrize("name", NOT_FILE_NAMES, ids=("parent", "path", "quote"))
+def test_a_release_name_that_is_no_file_name_is_refused(
+    stand_in: Releases, data_disk: Disk, name: str
+) -> None:
+    del data_disk  # the local repository's place
+    router = stand_in.router
+    previous = stand_in.synced()
+    kept = stand_in.kept()
+    tag = stand_in.publish()
+    releases.rename(stand_in.root, REPOSITORY, tag, name)
+    try:
+        ok, said = stand_in.sync()
+    finally:
+        shutil.rmtree(stand_in.root / REPOSITORY / tag)
+    assert not ok
+    assert "is no plain file name" in said, said
+    assert stand_in.current() == previous
+    assert stand_in.kept() == kept
+    assert router.run(f"ls -A {LOCAL}/.incoming") == ""
+    assert releases.downloads(stand_in.root, REPOSITORY, tag) == []
+
+
 @spec(CAPABILITY, "apk uses the local repository", "Install a kmod with WAN down")
 def test_a_kmod_installs_with_the_wan_down(stand_in: Releases, data_disk: Disk) -> None:
     del data_disk  # the local repository's place
@@ -268,6 +345,23 @@ def test_a_tampered_image_is_refused(
         router.run(f"mv {image}.whole {image}")
     slots = {which: slot_sha256(router, which) for which in ("a", "b")}
     assert (slot(router), slots, boot_area_sha256(router)) == written
+
+
+@spec(CAPABILITY, "Upgrade from local files", "Another image beside the release's")
+def test_the_upgrade_takes_the_manifest_s_image(stand_in: Releases, data_disk: Disk) -> None:
+    del data_disk  # the local repository's place
+    router = stand_in.router
+    stand_in.synced()
+    (image,) = router.run(f"ls {LOCAL}/current/{UPGRADE}").split()
+    # A validly signed image, as another release's would be, under a name that
+    # sorts after the release's own.
+    beside = f"{LOCAL}/current/targets/zz-sysupgrade.tar.gz"
+    router.run(f"cp {image} {beside}")
+    try:
+        said = router.run("wrt-update -T 2>&1", timeout=300)
+    finally:
+        router.run(f"rm -f {beside}")
+    assert f"wrt-update: {image}" in said.splitlines(), said
 
 
 @spec(CAPABILITY, "Candidates require opt-in", "Default channel")
@@ -355,3 +449,29 @@ def test_another_board_s_build_is_refused(
     assert f"of a build for {other.device}, not for {board.device}" in said, said
     assert stand_in.current() == previous
     assert tag not in stand_in.kept()
+
+
+@spec(CAPABILITY, "Activate only when complete and verified", "Power cut right after a sync")
+def test_a_release_survives_a_power_cut(stand_in: Releases, data_disk: Disk, board: Board) -> None:
+    """The module's last test: the router comes back from a power cut."""
+    del data_disk  # the local repository's place
+    router = stand_in.router
+    stand_in.synced()
+    tag = stand_in.publish()
+    ok, said = stand_in.sync()
+    assert ok, said
+    router.disconnect()
+    router.emulator.power_cut()
+    router.emulator.power_on()
+    router.wait_ready()
+    stand_in.online.reconnected()
+    wait_mounted(router)
+    assert stand_in.current() == tag
+    # The sums in a file first: a helper that failed must not leave sha256sum
+    # nothing to check, and so nothing to fail.
+    checked = router.run(
+        f"/usr/libexec/wrt-sync/manifest checksums {LOCAL}/current/manifest.json {board.device}"
+        f" >/tmp/sums && cd {LOCAL}/current && sha256sum -c /tmp/sums 2>&1; echo exit=$?",
+        timeout=120,
+    )
+    assert checked.endswith("exit=0"), checked

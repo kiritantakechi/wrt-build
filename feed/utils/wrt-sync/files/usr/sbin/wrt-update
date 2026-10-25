@@ -4,17 +4,19 @@
 # Usage: wrt-update [sysupgrade option...]
 # sysupgrade writes the release's upgrade image to the inactive slot and boots it
 # on trial (r4s-ab-rollback); it refuses the image unless a trusted firmware key
-# signed it, and wrt-update never forces it.
+# signed it, and wrt-update never forces it. The image is the one the release's
+# signed manifest names, whatever else its directory holds (device-integrity D3).
 set -eu
 # shellcheck source=../../../../wrt-data/files/lib/functions/wrt-data.sh
 . /lib/functions/wrt-data.sh
+# shellcheck source=../../lib/functions/wrt-sync.sh
+. /lib/functions/wrt-sync.sh
 
-image=
-for found in "${WRT_DATA}"/repo/current/targets/*-sysupgrade.tar.gz; do
-	[ ! -f "${found}" ] || image=${found}
-done
-[ -n "${image}" ] || {
+current="${WRT_DATA}/repo/current"
+device=$(wrt_sync_device)
+image=$(/usr/libexec/wrt-sync/manifest image "${current}/manifest.json" "${device}" 2>/dev/null) || {
 	echo "wrt-update: no local release; run wrt-sync" >&2
 	exit 1
 }
-exec sysupgrade "$@" "${image}"
+echo "wrt-update: ${current}/targets/${image}"
+exec sysupgrade "$@" "${current}/targets/${image}"

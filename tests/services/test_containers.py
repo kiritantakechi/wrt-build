@@ -2,10 +2,11 @@
 
 The app Pod (wrt_tests.services.app) runs from the test image in the emulated internet's
 registry: uhttpd serving a page of the data disk, at a fixed address. Probes
-from inside it use busybox's nc against the probe servers.
+from inside it use busybox's nc against the probe servers, and its nslookup.
 """
 
 import json
+import shlex
 import subprocess
 import time
 from typing import TYPE_CHECKING, cast
@@ -21,6 +22,7 @@ from wrt_tests.services import app
 from wrt_tests.services.datapath import DAE, hooks
 
 if TYPE_CHECKING:
+    from wrt_tests.device.router import Router
     from wrt_tests.device.storage import Disk
     from wrt_tests.sandbox.net import Netns
     from wrt_tests.sandbox.netprobe import Seen
@@ -28,6 +30,8 @@ if TYPE_CHECKING:
 
 CAPABILITY = "services/containers"
 STORAGE = f"{MOUNT}/containers/storage"
+# How long wrt-sync may take to give up on a release service it cannot reach.
+SYNC_TIMEOUT = 300
 EINAT_PORTS = range(20000, 30000)
 EXPOSED_PORT = 8080
 FIREWALL_TIMEOUT = 30
@@ -181,6 +185,55 @@ def test_unchanged_declaration_is_not_rebuilt(pod: Online) -> None:
     router.run("/etc/init.d/wrt-containers restart")
     assert app.running(router) is None
     assert app.wait_running(router) == before
+
+
+@spec(CAPABILITY, "Declarative definition and autostart on boot", "A declaration that cannot start")
+def test_a_declaration_that_cannot_start_keeps_no_other_down(pod: Online) -> None:
+    router = pod.router
+    app.wait_running(router)
+    # Before the app's by name, a Pod of an image no registry has: nothing listens
+    # at its registry's port.
+    missing = "a-missing"
+    declared = f"{app.PODS}/{missing}.yaml"
+    router.run(
+        f"printf %s {shlex.quote(app.declaration('localhost:1/none:1', missing))} >{declared}"
+    )
+    try:
+        router.run(f"podman pod stop {app.POD} >/dev/null", timeout=120)
+        said = router.run("wrt-containers apply 2>&1; echo exit=$?", timeout=300)
+    finally:
+        router.run(f"rm -f {declared}")
+    assert said.endswith("exit=1"), said
+    assert f"wrt-containers: {missing} did not come up" in said, said
+    assert f"wrt-containers: {app.POD} is up" in said, said
+    assert app.running(router) is not None
+
+
+def _service_running(router: Router, name: str) -> bool:
+    """Return whether a procd instance of the service ``name`` runs."""
+    services = json.loads(router.run(f'ubus call service list \'{{"name": "{name}"}}\''))
+    instances = services.get(name, {}).get("instances", {})
+    return any(instance["running"] for instance in instances.values())
+
+
+@spec(CAPABILITY, "Declarative definition and autostart on boot", "A service's container ended")
+def test_the_network_s_dns_outlives_a_service_s_container(pod: Online) -> None:
+    router = pod.router
+    app.wait_running(router)
+    # wrt-sync runs a container on podman's network, and ends with it; procd then
+    # kills what is left in the service's cgroup. Nothing can be fetched here.
+    router.run("/etc/init.d/wrt-sync restart")
+    until(
+        lambda: not _service_running(router, "wrt-sync"),
+        timeout=SYNC_TIMEOUT,
+        what="wrt-sync ended",
+    )
+    router.run(f"podman pod stop {app.POD} >/dev/null", timeout=120)
+    router.run(f"podman pod start {app.POD} >/dev/null", timeout=120)
+    app.wait_running(router)
+    # The network's DNS answers the Pod: its own name resolves inside it.
+    answer = router.run(f"podman exec {app.CONTAINER} nslookup {app.POD} 10.88.0.1")
+    assert app.ADDRESS in answer, answer
 
 
 @spec(CAPABILITY, "Declarative definition and autostart on boot", "Start on boot")

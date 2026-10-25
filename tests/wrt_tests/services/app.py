@@ -23,13 +23,13 @@ WWW = f"{MOUNT}/containers/www"
 START_TIMEOUT = 180
 
 
-def declaration(image: str) -> str:
-    """Return the Pod's declaration, as podman kube play reads it."""
+def declaration(image: str, name: str = POD) -> str:
+    """Return the Pod's declaration, as podman kube play reads it (another Pod's: ``name``)."""
     return f"""\
 apiVersion: v1
 kind: Pod
 metadata:
-  name: {POD}
+  name: {name}
 spec:
   containers:
     - name: httpd

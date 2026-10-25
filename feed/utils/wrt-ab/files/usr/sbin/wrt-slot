@@ -6,7 +6,7 @@
 'use strict';
 
 import { readfile } from 'fs';
-import { getenv, other, setenv, slot } from 'wrt.ab';
+import { other, setenv, slot, variables } from 'wrt.ab';
 
 const RESULT = '/var/run/wrt-healthcheck.json';
 
@@ -39,11 +39,14 @@ function health() {
 }
 
 function status() {
+	let environment = variables();
 	let state = 'confirmed';
 
-	if (getenv('upgrade_available', '0') == '1')
+	if (!environment)
+		state = 'unknown: the U-Boot environment cannot be read';
+	else if (environment.upgrade_available == '1')
 		state = sprintf('trial, boot %s of %s',
-			getenv('bootcount', '0'), getenv('bootlimit', '3'));
+			environment.bootcount ?? '0', environment.bootlimit ?? '3');
 
 	printf('slot: %s\nstate: %s\nhealth: %s\n', running(), state, health());
 }

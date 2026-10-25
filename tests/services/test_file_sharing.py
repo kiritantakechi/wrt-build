@@ -27,6 +27,15 @@ SMB_TIMEOUT = 60
 # From the disk's removal to a stopped service: procd runs the unmount trigger a
 # second after blockd's event, then the reload.
 STOP_TIMEOUT = 30
+# A mount hotplug script that holds the unmount up: blockd waits for the scripts
+# before it answers block, which unmounts then, up to its 3 s limit.
+SLOW_SCRIPT = "/etc/hotplug.d/mount/00-slow"
+SLOW_SECONDS = 2
+# Mount points within one another, in fstab but mounted by the test alone (tmpfs).
+OUTER = "/tmp/outer"  # noqa: S108 (a path on the router)
+INNER = f"{OUTER}/inner"
+NESTED_SHARE = "nested"
+KSMBD_CONF = "/var/etc/ksmbd/ksmbd.conf"
 
 
 @pytest.fixture(scope="module")
@@ -180,3 +189,71 @@ def test_shares_go_with_the_data_disk(
     except TimeoutError as error:
         error.add_note(_sharing_state(router))
         raise
+
+
+@spec(CAPABILITY, "Shares on the data disk", "Data disk removed while an unmount script runs")
+def test_shares_go_with_the_data_disk_whatever_runs_on_its_unmount(
+    sharing: Online, smb_user: tuple[str, str], data_disk: Disk
+) -> None:
+    router = sharing.router
+    assert _list(sharing.client(), LAN_ADDRESS, smb_user)[0] == 0
+    router.run(
+        f"mkdir -p {SLOW_SCRIPT.rsplit('/', 1)[0]}"
+        f" && printf '%s\\n' '[ \"$ACTION\" = remove ] && sleep {SLOW_SECONDS}' >{SLOW_SCRIPT}"
+    )
+    try:
+        announce(router, data_disk, "remove")
+        until(
+            lambda: mount_options(router) is None, timeout=STOP_TIMEOUT, what="the disk unmounted"
+        )
+        # The reload came while the disk was still mounted; once it is gone, the
+        # service must be too, with nothing written where the disk was.
+        until(
+            lambda: router.returncode("pidof ksmbd.mountd || [ -e /sys/module/ksmbd ]") != 0,
+            timeout=STOP_TIMEOUT,
+            what="the SMB service stopped",
+        )
+        assert boot_disk_entries(router) == []
+    finally:
+        router.run(f"rm -f {SLOW_SCRIPT}")
+        announce(router, data_disk, "add")
+        wait_mounted(router)
+    until(
+        lambda: _list(sharing.client(), LAN_ADDRESS, smb_user)[0] == 0,
+        timeout=SMB_TIMEOUT,
+        what="the shares back",
+    )
+
+
+def _offered(router: Router, share: str) -> bool:
+    """Return whether ksmbd's configuration, once reloaded, offers ``share``."""
+    router.run("/etc/init.d/ksmbd reload")
+    return f"[{share}]" in router.run(f"cat {KSMBD_CONF}").splitlines()
+
+
+@spec(CAPABILITY, "Shares on the data disk", "Share within a disk within another")
+def test_a_share_within_nested_mount_points_waits_for_both(sharing: Online) -> None:
+    router = sharing.router
+    sections = []
+    for target in (OUTER, INNER):
+        section = router.run("uci add fstab mount")
+        router.run(f"uci set fstab.{section}.target={target} && uci set fstab.{section}.enabled=0")
+        sections.append(f"fstab.{section}")
+    share = router.run("uci add ksmbd share")
+    sections.append(f"ksmbd.{share}")
+    router.run(
+        f"uci set ksmbd.{share}.name={NESTED_SHARE} && uci set ksmbd.{share}.path={INNER}/share"
+        f" && uci commit fstab && uci commit ksmbd && mkdir -p {OUTER}"
+        f" && mount -t tmpfs outer {OUTER} && mkdir -p {INNER}"
+    )
+    try:
+        assert not _offered(router, NESTED_SHARE)
+        # Both mounted, it is offered.
+        router.run(f"mount -t tmpfs inner {INNER} && mkdir -p {INNER}/share")
+        assert _offered(router, NESTED_SHARE)
+    finally:
+        router.run(
+            f"umount {INNER} 2>/dev/null; umount {OUTER};"
+            + "".join(f" uci delete {section};" for section in sections)
+            + " uci commit fstab && uci commit ksmbd && /etc/init.d/ksmbd reload"
+        )

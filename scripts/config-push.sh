@@ -7,7 +7,8 @@
 #   network, ... (one per uci/<config>.uci.tmpl)   uci batches
 #   dae        dae/*.dae.enc, without lan_interface or wan_interface (the
 #              firmware sets them)
-#   tailscale  the login (secrets: tailscale.auth_key, tailscale.login_server)
+#   tailscale  the auth key and the login's options (secrets: tailscale.auth_key,
+#              tailscale.login_server)
 #   smb        the share users (secrets: smb.users)
 #   pods       pods/*.yaml and their .options
 # Everything is validated before the router changes: dae's configuration by dae
@@ -15,10 +16,13 @@
 # its configuration. Then each service whose files changed since its last push
 # (a hash on the router) is written, reloaded and checked, and put back as it
 # was if it does not come back, which fails the push. SSH authenticates with a
-# key only (--identity, or the agent's); a password is never tried.
+# key only (--identity, or the agent's); a password is never tried. The files are
+# root's alone here and on the router, and the router's copy goes however the
+# push ends (device-integrity D8).
 set -eu
 # shellcheck source=scripts/lib/core.sh
 . "$(dirname -- "$0")/lib/core.sh"
+umask 077
 
 usage() {
 	die "usage: config-push <host> [--identity <key>]"
@@ -37,13 +41,21 @@ config=${WRT_CONFIG_DIR:-}
 [ -n "${config}" ] && [ -d "${config}" ] || die "WRT_CONFIG_DIR does not name the configuration repository"
 device="$(dirname -- "$0")/config-push.d/device.uc"
 
-# From here on "$@" is ssh's way to the router: authenticated by a key alone.
-set -- -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
-	-o PreferredAuthentications=publickey "root@${host}"
-[ -z "${identity}" ] || set -- -o IdentitiesOnly=yes -i "${identity}" "$@"
+# router <command>...: run a command on the router, over ssh authenticated by a
+# key alone. A function rather than "$@": the exit trap runs where exit was
+# called, as in die, whose "$@" is its message.
+router() {
+	set -- -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
+		-o PreferredAuthentications=publickey -o ConnectTimeout=10 "root@${host}" "$@"
+	[ -z "${identity}" ] || set -- -o IdentitiesOnly=yes -i "${identity}" "$@"
+	ssh "$@"
+}
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/wrt-push.XXXXXX")
-trap 'rm -rf "${work}"' EXIT INT TERM
+# The router's copy once uploaded, then the local one, however the push ends.
+uploaded=0
+trap '[ "${uploaded}" = 0 ] || router "rm -rf /tmp/wrt-push" || true; rm -rf "${work}"' EXIT
+trap 'exit 1' INT TERM
 new="${work}/new"
 mkdir -p "${new}"
 
@@ -79,12 +91,15 @@ for template in "${config}"/uci/*.uci.tmpl; do
 		die "cannot fill in ${template##*/}"
 done
 
-login=$(jq -r '.tailscale // {} | select(.auth_key // "" | length > 0)
-	| "--auth-key=\(.auth_key)" + (if (.login_server // "") != "" then " --login-server=\(.login_server)" else "" end)
-	+ " --advertise-routes=10.0.0.0/24 --accept-dns=false"' "${work}/secrets.json")
-if [ -n "${login}" ]; then
+# The auth key in a file of its own, which tailscale reads (--auth-key=file:):
+# never on a command line.
+auth_key=$(jq -r '.tailscale.auth_key // ""' "${work}/secrets.json")
+if [ -n "${auth_key}" ]; then
 	mkdir -p "${new}/tailscale"
-	printf '%s\n' "${login}" >"${new}/tailscale/login"
+	printf '%s\n' "${auth_key}" >"${new}/tailscale/auth_key"
+	jq -r '(if (.tailscale.login_server // "") != "" then "--login-server=\(.tailscale.login_server) " else "" end)
+		+ "--advertise-routes=10.0.0.0/24 --accept-dns=false"' "${work}/secrets.json" \
+		>"${new}/tailscale/options"
 fi
 users=$(jq -r '.smb.users // [] | .[] | "\(.name) \(.password)"' "${work}/secrets.json")
 if [ -n "${users}" ]; then
@@ -98,22 +113,26 @@ for pod in "${config}"/pods/*.yaml "${config}"/pods/*.options; do
 done
 
 # A hash of each service's files: what the router compares with its last push.
+# The names in one order wherever the push runs, whatever they hold.
 for service in "${new}"/*/; do
 	service=${service%/}
-	(cd "${service}" && find . -type f | sort | xargs sha256sum | sha256sum | cut -d' ' -f1) \
-		>"${service}.sha256"
+	sums=$(cd "${service}" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) ||
+		die "cannot hash the files of ${service##*/}"
+	sum=$(printf '%s\n' "${sums}" | sha256sum)
+	printf '%s\n' "${sum%% *}" >"${service}.sha256"
 done
 
-tar -C "${new}" -cf - . | ssh "$@" 'rm -rf /tmp/wrt-push && mkdir -p /tmp/wrt-push/new &&
-	umask 077 && tar -xf - -C /tmp/wrt-push/new' ||
+uploaded=1
+# shellcheck disable=SC2310 # router's status is ssh's alone
+tar -C "${new}" -cf - . | router 'umask 077 && rm -rf /tmp/wrt-push && mkdir -p /tmp/wrt-push/new &&
+	tar -xf - -C /tmp/wrt-push/new' ||
 	die "cannot log in to ${host} with a key"
-if ! ssh "$@" ucode - validate <"${device}"; then
-	ssh "$@" 'rm -rf /tmp/wrt-push'
+# shellcheck disable=SC2310 # router's status is ssh's alone
+router ucode - validate <"${device}" ||
 	die "the configuration does not validate; ${host} is unchanged"
-fi
 info "the configuration validates"
 
-ssh "$@" ucode - hashes <"${device}" >"${work}/pushed"
+router ucode - hashes <"${device}" >"${work}/pushed"
 status=0
 for service in "${new}"/*/; do
 	service=${service%/}
@@ -123,12 +142,12 @@ for service in "${new}"/*/; do
 		info "${name}: unchanged"
 		continue
 	fi
-	if ssh "$@" ucode - apply "${name}" <"${device}"; then
+	# shellcheck disable=SC2310 # router's status is ssh's alone
+	if router ucode - apply "${name}" <"${device}"; then
 		info "${name}: pushed"
 	else
 		status=1
 	fi
 done
-ssh "$@" 'rm -rf /tmp/wrt-push'
 [ "${status}" -eq 0 ] || die "a service did not come back with its new configuration and was put back"
 info "pushed to ${host}"

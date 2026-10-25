@@ -6,7 +6,8 @@
 enabled=$(uci -q get einat.config.enabled)
 [ "${enabled}" = 1 ] || exit 0
 pidof einat >/dev/null || exit 1
-ifname=$(uci -q get einat.config.ifname)
+# The init script's default, which einat runs on when the option is not set.
+ifname=$(uci -q get einat.config.ifname) || ifname=pppoe-wan
 ip -4 addr show dev "${ifname}" 2>/dev/null | grep -q ' inet ' || exit 0
 programs=$(bpftool net show dev "${ifname}")
 for hook in "tcx/ingress ingress_rev_snat" "tcx/egress egress_snat"; do

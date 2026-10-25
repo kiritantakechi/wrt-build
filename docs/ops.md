@@ -36,9 +36,11 @@ just config-push 192.168.1.1 --identity ~/.ssh/wrt
 
 The push logs in as root with that key (or the agent's), never with a password. Put the key's public half in the router's `/etc/dropbear/authorized_keys` first (LuCI: System, Administration, SSH-Keys). Then:
 
-1. The secrets are decrypted into a temporary directory, which goes when the push ends, and the templates are filled in.
+1. The secrets are decrypted into a temporary directory, which goes when the push ends, and the templates are filled in. Its files are root's alone, here and in the router's copy, `/tmp/wrt-push`, which goes too, however the push ends.
 2. Everything is checked on the router before anything changes: dae's configuration with `dae validate`, set up as the dae service would run it, and each uci batch on a copy of the configuration. A push that fails here changes nothing.
-3. Each service whose files changed since its last push (dae, network and the other uci configurations, tailscale, smb, pods) is written and reloaded, and the push waits until it is back. One that does not come back gets its previous files again and is reloaded with them, and the push fails, naming it.
+3. Each service whose files changed since its last push (dae, network and the other uci configurations, tailscale, smb, pods) is written and reloaded, and the push waits until it is back: its own check passes (dae's health check, the LAN up, `tailscale status`, ksmbd serving the shares it offers, every Pod running), and every daemon that ran before runs on without a restart for as long as procd may take to act on the change: its longest trigger delay, then twice the longest stop timeout among those daemons, then one more check (13 s with the image's defaults). A reload still to come, a restart under way and a daemon procd keeps starting again all show within it. One that does not come back gets everything the push changed for it back (for Tailscale its key and tailscaled's state, so it is logged in as before without logging in again; for the SMB users `/etc/passwd`, `/etc/group` and ksmbd's user database), is reloaded with it, and the push fails, naming it.
+
+Tailscale logs in with `tailscale up --force-reauth --auth-key=file:/etc/wrt-config/tailscale.key`: the key is in a file only root reads, never on a command line. A node logged in already ignores a key without `--force-reauth`, so a new key would not take effect, nor a refused one be noticed; with it, the node logs in anew, which drops the tailnet's connections for a moment: push over the LAN, not over the tailnet.
 
 Pushing the same configuration again reloads nothing. What the push wrote is kept through upgrades: the uci configuration, `/etc/dae`, `/etc/tailscale`, `/etc/wrt-config` (what was last pushed), the SMB users.
 

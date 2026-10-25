@@ -50,6 +50,9 @@ SNAPSHOTS = f"{MOUNT}/.snapshots"
 SNAPSHOTTED = ("containers", "shares")
 KEEP_DAYS = 7
 DAYS_RUN = 9  # more than eight days
+# The days the system stays off, more than the snapshots' week.
+DAYS_OFF = 10
+CRONTAB = "/etc/crontabs/root"
 CRON_TIMEOUT = 90
 HEALTHCHECK = (
     "uci set wrt-ab.healthcheck.total=30 && uci set wrt-ab.healthcheck.interval=3"
@@ -289,3 +292,30 @@ def test_data_disk_mounts_late(without_disk: Online, data_disk: Disk) -> None:
         what="every service on the data disk",
     )
     assert boot_disk_entries(router) == []
+
+
+@spec(CAPABILITY, "Periodic read-only snapshots", "Snapshots after a long time off")
+def test_snapshots_outlast_a_long_time_off(pod: Online) -> None:
+    router = pod.router
+    # The daily job's command, as root's crontab runs it.
+    (job,) = [
+        line.split(maxsplit=5)[5]
+        for line in router.run(f"cat {CRONTAB}").splitlines()
+        if "wrt-snap" in line
+    ]
+    # The module's earlier tests left snapshots, of days still to come among them:
+    # the scenario starts without any.
+    router.run(
+        f'for s in {SNAPSHOTS}/*/*; do [ ! -d "$s" ] || btrfs -q subvolume delete "$s"; done'
+    )
+    today = datetime.fromtimestamp(int(router.run("date +%s")), UTC).date()
+    dates = [today + timedelta(days=day) for day in range(1, KEEP_DAYS + 1)]
+    back = dates[-1] + timedelta(days=DAYS_OFF + 1)
+    try:
+        for date in [*dates, back]:
+            # Off the job's own minute, so that cron does not run it meanwhile.
+            router.run(f"date -u -s '{date} 04:00:00' >/dev/null && {job}", timeout=120)
+    finally:
+        router.run(f"date -u -s @{int(time.time())} >/dev/null")
+    days = [f"{date:%Y%m%d}" for date in [*dates[-(KEEP_DAYS - 1) :], back]]
+    assert _kept(router) == dict.fromkeys(SNAPSHOTTED, days)

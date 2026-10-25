@@ -25,6 +25,11 @@ function fail(message) {
 	exit(1);
 }
 
+// quoted(word): word as one argument of a shell command line.
+function quoted(word) {
+	return `'${replace(word, "'", "'\\''")}'`;
+}
+
 // request(url, write): one GET of url, following redirects, its body handed to
 // write in pieces; true when it got the whole body of a 200 answer.
 function request(url, write) {
@@ -117,7 +122,7 @@ function asset(found, name, path) {
 
 // image(manifest, device): the upgrade image the manifest names (the manifest helper).
 function image(manifest, device) {
-	let helper = popen(`${MANIFEST} image '${manifest}' '${device}'`);
+	let helper = popen(`${MANIFEST} image ${quoted(manifest)} ${quoted(device)}`);
 	let name = trim(helper.read('all') ?? '');
 
 	if (helper.close() != 0 || !length(name))
@@ -150,6 +155,11 @@ let tag = found?.tag_name;
 
 if (!length(tag))
 	fail(`no ${channel} release`);
+
+// The tag names a directory: a plain file name, never . or .. (wrt-sync checks
+// the same of what this prints; device-integrity D3).
+if (!match(tag, /^[A-Za-z0-9][A-Za-z0-9._-]*$/))
+	fail(`${channel}'s release name ${tag} is no plain file name`);
 
 if (!stat(`${releases}/${tag}`)) {
 	let directory = `${incoming}/${tag}`;

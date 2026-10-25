@@ -7,7 +7,8 @@
 # it was last applied is played again (podman kube play --replace); an unchanged
 # one only has its Pod started. Every Pod joins podman's own network, podman
 # (bridge podman0: the fw4 zone podman, which dae serves), not the network kube
-# play would make for Pods.
+# play would make for Pods. A Pod that does not come up keeps no other from
+# coming up; apply fails at the end, naming each such Pod (device-integrity D4).
 set -eu
 # shellcheck source=../../../../wrt-data/files/lib/functions/wrt-data.sh
 . /lib/functions/wrt-data.sh
@@ -16,26 +17,46 @@ PODS="${WRT_DATA}/containers/pods"
 # The hash of each declaration as last applied, on the data disk with its Pods.
 APPLIED="${WRT_DATA}/containers/applied"
 
+# up <declaration>: bring the Pod of one declaration up, played again only if
+# the declaration changed since it was last applied, and recorded as applied
+# only once it played. Its status is its last command's: the caller tests it, so
+# set -e does not hold inside.
+up() {
+	name=${1##*/}
+	name=${name%.yaml}
+	options=
+	[ ! -e "${PODS}/${name}.options" ] || options=$(cat "${PODS}/${name}.options")
+	hash=$(printf '%s\n' "${options}" | cat - "$1" | sha256sum)
+	hash=${hash%% *}
+	applied=$(cat "${APPLIED}/${name}" 2>/dev/null || true)
+	if [ "${applied}" = "${hash}" ] && podman pod exists "${name}"; then
+		podman pod start "${name}" >/dev/null
+	else
+		# shellcheck disable=SC2086 # the options are separate words
+		podman kube play --replace --network=podman ${options} "$1" >/dev/null &&
+			echo "${hash}" >"${APPLIED}/${name}"
+	fi
+}
+
 apply() {
 	mkdir -p "${APPLIED}"
+	down=
 	for declaration in "${PODS}"/*.yaml; do
 		[ -e "${declaration}" ] || continue
 		name=${declaration##*/}
 		name=${name%.yaml}
-		options=
-		[ ! -e "${PODS}/${name}.options" ] || options=$(cat "${PODS}/${name}.options")
-		hash=$(printf '%s\n' "${options}" | cat - "${declaration}" | sha256sum)
-		hash=${hash%% *}
-		applied=$(cat "${APPLIED}/${name}" 2>/dev/null || true)
-		if [ "${applied}" = "${hash}" ] && podman pod exists "${name}"; then
-			podman pod start "${name}" >/dev/null
+		# shellcheck disable=SC2310 # up reports its own failure
+		if up "${declaration}"; then
+			echo "wrt-containers: ${name} is up"
 		else
-			# shellcheck disable=SC2086 # the options are separate words
-			podman kube play --replace --network=podman ${options} "${declaration}" >/dev/null
-			echo "${hash}" >"${APPLIED}/${name}"
+			echo "wrt-containers: ${name} did not come up" >&2
+			down="${down} ${name}"
 		fi
-		echo "wrt-containers: ${name} is up"
 	done
+	[ -z "${down}" ] || {
+		echo "wrt-containers: not up:${down}" >&2
+		return 1
+	}
 }
 
 grep -q "${WRT_DATA_MOUNT}" /proc/mounts || {
