@@ -649,3 +649,16 @@ Why it matters here: the firmware/base-system test compiles every ucode file of 
 What the patch does: the firewall4 patch deletes the template. `PKG_RELEASE` goes to 2.
 
 Verification log: GNU patch, as OpenWrt applies a package's patches (`patch -f -p1`), removes the file from firewall4's source of 2026-10-25; both the old and the new host ucode reject the template (`Template blocks may not be nested`); the firmware/base-system test on both boards.
+
+### build: a host build's stages named after its logs in the time log
+
+Patch: `patches/openwrt/0042-build-name-a-host-build-s-stages-after-its-logs-in-t.patch`, for openwrt/openwrt.
+
+Problem: the build time log (b95b0928ac, "build: add per stage build time profiling") names each stage by its package's directory, the host build's stages as the target build's: "compile" of `package/feeds/packages/rust` is either. A host build logs to `host-compile.txt`, a target build to `compile.txt`, and nothing in the time log says which of them ran. When both run at once, `build-time-report.pl` pairs the begin and end events by stage and name, so each takes the other's.
+
+Why it matters here: the build records a package's UB-indicative warnings from its compile log when its time log has a compile stage for it (release-integrity D8). A host build named alike would have the target log read: one that only packed the package again holds no compiler output, and its warnings would be forgotten.
+
+What the patch does: `include/host-build.mk` names its stages host-prepare, host-configure, host-compile and host-install, as its make targets and logs are named.
+
+Verification log: the unit tests of `toolchain_stages` and `warnings_harvest` on stand-in time logs; on the VM, a board build's time log names the host builds it runs host-* (2026-10-26).
+

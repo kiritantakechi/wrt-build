@@ -13,7 +13,7 @@
 set -eu
 # shellcheck source=scripts/lib/core.sh
 . "$(dirname -- "$0")/lib/core.sh"
-use boards cache seeds timing toolchain tree upstream warnings
+use boards cache manifest seeds timing toolchain tree upstream warnings
 
 board=${1:-}
 profile=${2:-dev}
@@ -66,14 +66,28 @@ start=$(compiler_cache_start "${tree}")
 build_dir=$(make -C "${tree}" -s val.BUILD_DIR)
 warnings="${build_dir}/wrt-warnings"
 mkdir -p "${warnings}"
-touch "${warnings}/.since"
+# The board's own output directory (BINARY_FOLDER) holds the packages of this
+# configuration alone. OpenWrt replaces a package's older apk when it packs it
+# again, and leaves those of packages it no longer builds, as a kernel update's
+# older kmods that the configuration no longer selects: they go before make,
+# whose package index then lists this build's packages.
+output_dir=$(make -C "${tree}" -s val.OUTPUT_DIR)
+stale=$(stale_packages "${output_dir}" "${tree}/.config" "${tree}/tmp/.packageinfo") ||
+	die "cannot tell the packages the configuration builds"
+if [ -n "${stale}" ]; then
+	info "removing the packages the configuration no longer builds:"
+	printf '%s\n' "${stale}" | while IFS= read -r apk; do
+		printf '  %s\n' "${apk##*/}"
+		rm -- "${apk}"
+	done
+fi
 info "make -j${jobs} (${board}, ${profile}) on ${cpu}"
 # The time log is named after the build directories, as each build keeps its own.
 log=$(time_log "${tree}" "${name}")
 status=0
 BUILD_TIME_LOG="${log}" make -C "${tree}" -j"${jobs}" || status=$?
-# Also after a failure: the next build may rewrite these logs without a compile.
-warnings_harvest "${tree}/logs" "${warnings}" "${warnings}/.since"
+# Also after a failure: the next build's time log names only what it compiles.
+warnings_harvest "${tree}/logs" "${warnings}" "${log}"
 compiler_cache_report "${tree}" "${start}"
 time_report "${tree}" "${log}"
 [ "${status}" -eq 0 ] ||
@@ -100,6 +114,8 @@ compiled=$(toolchain_stages "${log}" | paste -sd ',' -)
 # none: no file of the root filesystem may call into one (toolchain-o3 D5).
 if grep -q '^CONFIG_TARGET_OPTIMIZATION=".*-fsanitize-trap=' "${tree}/.config"; then
 	nm="${toolchain_dir}/bin/$(make -C "${tree}" -s val.TARGET_CROSS)nm"
+	# An nm that cannot run would find no call in any file.
+	"${nm}" --version >/dev/null 2>&1 || die "cannot run ${nm}"
 	root=$(make -C "${tree}" -s val.TARGET_DIR)
 	calls=$(find "${root}" -type f -exec sh -c '
 		nm=$1
@@ -126,10 +142,9 @@ if [ -n "${missing}" ]; then
 fi
 info "kernel configuration overlay applied"
 
-# The board's own output directory (BINARY_FOLDER) and build and staging
+# The images in the board's output directory, and its build and staging
 # directories (BUILD_SUFFIX).
 bin_dir=$(make -C "${tree}" -s val.BIN_DIR)
-output_dir=$(make -C "${tree}" -s val.OUTPUT_DIR)
 staging_dir=$(make -C "${tree}" -s val.STAGING_DIR)
 out="${WRT_WORKDIR}/out/${board}/${profile}"
 rm -rf "${out}"
@@ -164,9 +179,13 @@ cp "${staging_dir}/image/wrt-qemu-u-boot.bin" "${out}/u-boot-qemu.bin"
 
 # manifest.json: which board (and its OpenWrt device) was built, in which build
 # directories (the build's name), from what and with which flags, and the hash
-# of every image, index, configuration and firmware above.
+# of every file the build hands on: what signing checks and passes on
+# (release-integrity D2). What it was built from includes this repository's
+# commit, -dirty when tracked files differ from it (release-integrity D1).
 run="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}"
 lock=$(lock_sha256)
+commit=$(git -C "${REPO_DIR}" rev-parse HEAD)
+git -C "${REPO_DIR}" diff --quiet HEAD -- || commit="${commit}-dirty"
 patches_sha256=$(cat "${REPO_DIR}"/patches/*/*.patch | sha256sum)
 openwrt_head=$(git -C "${tree}" rev-parse HEAD)
 kernel_version=$(cat "${staging_dir}/kernel.version" 2>/dev/null || true)
@@ -178,8 +197,15 @@ target=$(make -C "${tree}" -s val.BOARD)
 kernel_cflags=$(make -C "${tree}/target/linux/${target}" -s TOPDIR="${tree}" val.KERNEL_MAKE_FLAGS |
 	sed -n 's/^KCFLAGS="\([^"]*\)".*/\1/p' | tr ' ' '\n' | grep -v -e '-prefix-map=' -e '^$' | paste -sd ' ' -)
 [ -n "${kernel_cflags}" ] || die "found no kernel flags in target/linux/${target}'s KERNEL_MAKE_FLAGS"
-files=$(cd "${out}" && find . -type f \( -name '*.gz' -o -name 'packages.adb' -o -name 'u-boot*' -o -name 'kernel.config' \) | sed 's|^\./||' | sort)
-hashes=$(cd "${out}" && printf '%s\n' "${files}" | xargs sha256sum)
+# sha256sum escapes a name with a backslash or a line break, and starts its
+# line with a backslash, which the capture below would misread: no such name is
+# listed, signed or published. Names that are no plain paths fail the check
+# after it.
+hashes=$(cd "${out}" && find . -type f -exec sha256sum -- {} + | sed 's|  \./|  |' | LC_ALL=C sort -k 2)
+case "${hashes}" in
+	*\\*) die "an output's name holds a backslash or a line break: ${hashes}" ;;
+	*) ;;
+esac
 printf '%s\n' "${hashes}" | jq -R -n \
 	--arg board "${board}" \
 	--arg device "${device}" \
@@ -191,6 +217,7 @@ printf '%s\n' "${hashes}" | jq -R -n \
 	--arg toolchain_cflags "${toolchain_cflags}" \
 	--arg lock "${lock}" \
 	--arg patches "${patches_sha256%% *}" \
+	--arg commit "${commit}" \
 	--arg head "${openwrt_head}" \
 	--arg kernel "${kernel_version}" \
 	--arg vermagic "${vermagic}" '
@@ -205,9 +232,11 @@ printf '%s\n' "${hashes}" | jq -R -n \
 		toolchain_cflags: $toolchain_cflags,
 		upstream_lock_sha256: $lock,
 		patches_sha256: $patches,
+		commit: $commit,
 		openwrt_head: $head,
 		kernel_version: $kernel,
 		vermagic: $vermagic,
 		files: [inputs | capture("^(?<sha>[0-9a-f]+)  (?<path>.+)$") | {(.path): .sha}] | add
 	}' >"${out}/manifest.json"
+manifest_files_check "${out}/manifest.json"
 info "outputs in ${out}"

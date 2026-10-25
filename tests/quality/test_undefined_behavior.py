@@ -6,6 +6,7 @@ import pytest
 
 from wrt_tests import spec
 from wrt_tests.device.ubsan import PROBE, PROFILE, Traps, report
+from wrt_tests.model.shell import library
 from wrt_tests.model.undefined_behavior import load_register, load_report, stale, unreviewed
 
 if TYPE_CHECKING:
@@ -48,6 +49,42 @@ def test_every_review_matches_a_warning(board: Board, build_output: Path, profil
         pytest.skip(NOT_SHIPPED)
     found = stale(load_register(), load_report(build_output), board.id)
     assert not found, "reviews that match no warning of the build:\n" + "\n".join(map(str, found))
+
+
+@spec(CAPABILITY, REVIEWED, "Package packed again without a compile")
+def test_a_package_packed_again_keeps_its_warnings(tmp_path: Path) -> None:
+    # OpenWrt rewrites a package's log whenever it runs its compile step: with
+    # nothing but the packing's lines when it packs the package again (its apk
+    # gone from the output directory, or its packaging rules changed), and with
+    # make's time line alone when it finds it up to date. The build's time log
+    # names neither as compiled; a host build of the package is a stage of its
+    # own (host-compile), whose log is another.
+    logs, records = tmp_path / "logs", tmp_path / "records"
+    for name, log in {
+        "packed": "rstrip.sh: ipkg-aarch64_generic/packed/usr/bin/packed: executable\n"
+        "time: package/packed/compile#6.54#0.74#95.63\n",
+        "idle": "time: package/idle/compile#0.07#0.02#0.16\n",
+        "hosted": "rstrip.sh: ipkg-aarch64_generic/hosted/usr/bin/hosted: executable\n",
+    }.items():
+        (logs / "package" / name).mkdir(parents=True)
+        (logs / "package" / name / "compile.txt").write_text(log)
+        record = records / "package" / name / "compile.tsv"
+        record.parent.mkdir(parents=True)
+        record.write_text(f"-Wuninitialized\t{name}.c\t\t3\n")
+    (tmp_path / "time.tsv").write_text(
+        "1700000000.0\tbegin\tcompile\ttarget/linux\n1700000001.0\tend\tcompile\ttarget/linux\n"
+        "1700000002.0\tbegin\thost-compile\tpackage/hosted\n"
+        "1700000003.0\tend\thost-compile\tpackage/hosted\n"
+    )
+
+    result = library(
+        "warnings", 'warnings_harvest "$@"', str(logs), str(records), "time.tsv", cwd=tmp_path
+    )
+
+    assert result.returncode == 0, result.stderr
+    for name in ("packed", "idle", "hosted"):
+        record = records / "package" / name / "compile.tsv"
+        assert record.read_text() == f"-Wuninitialized\t{name}.c\t\t3\n"
 
 
 @spec(CAPABILITY, "No global masking of undefined behavior", "Check the shared flags")

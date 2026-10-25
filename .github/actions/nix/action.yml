@@ -1,0 +1,11 @@
+# Nix for every job (release-integrity D3): the Determinate installer of one
+# known release, so that what runs with the release keys, and every build, gets
+# the Nix of a known version. A newer installer is a change of source-tag here.
+name: Nix
+description: Install Nix with the pinned Determinate installer.
+runs:
+  using: composite
+  steps:
+    - uses: DeterminateSystems/nix-installer-action@v23
+      with:
+        source-tag: v3.23.3

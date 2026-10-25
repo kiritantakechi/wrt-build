@@ -22,10 +22,16 @@ if [ "${3:-}" = --jq ]; then jq -r "$4" "${file}"; else cat "${file}"; fi
 """
 
 
-def _settings(*, reviewers: int = 1, branches: tuple[str, ...] = ("main", "bump/*")) -> Any:  # noqa: ANN401 (JSON)
+def _settings(
+    *, reviewers: int = 1, branches: tuple[str, ...] = ("main", "bump/*"), creates: bool = True
+) -> Any:  # noqa: ANN401 (JSON)
     """Return the API's answers for a repository set up as the release pipeline needs."""
     base = f"repos/{REPOSITORY}"
     return {
+        f"{base}/actions/permissions/workflow": {
+            "default_workflow_permissions": "read",
+            "can_approve_pull_request_reviews": creates,
+        },
         f"{base}/environments/release-signing": {
             "protection_rules": [
                 {"type": "required_reviewers", "reviewers": [{"type": "User"}] * reviewers}
@@ -95,3 +101,17 @@ def test_a_main_that_does_not_wait_for_the_drill_fails(tmp_path: Path) -> None:
     result = _audit(tmp_path, answers)
     assert result.returncode != 0
     assert "FAIL  main does not require upgrade-drill" in result.stdout
+
+
+def test_workflows_that_may_not_create_pull_requests_fail(tmp_path: Path) -> None:
+    result = _audit(tmp_path, _settings(creates=False))
+    assert result.returncode != 0
+    assert "FAIL  workflows may not create pull requests" in result.stdout
+
+
+def test_a_permission_that_cannot_be_read_is_noted(tmp_path: Path) -> None:
+    answers = _settings()
+    del answers[f"repos/{REPOSITORY}/actions/permissions/workflow"]
+    result = _audit(tmp_path, answers)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "note  whether workflows may create pull requests" in result.stdout

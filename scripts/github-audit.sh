@@ -5,7 +5,10 @@
 #  - the release-signing environment waits for a reviewer's approval before any
 #    job that uses it runs, and only main and bump/* may deploy to it;
 #  - main's rules require the checks check and upgrade-drill, so no bump is
-#    merged unless its candidate passed the drill.
+#    merged unless its candidate passed the drill;
+#  - workflows may create pull requests, as the weekly bump does. Reading it
+#    needs administration access, which a workflow's token cannot have: then the
+#    audit says it could not read it (release-integrity D5).
 # Reports every finding, then fails if there was one.
 set -eu
 # shellcheck source=scripts/lib/core.sh
@@ -56,6 +59,15 @@ for check in ${CHECKS}; do
 		*) fail "main does not require ${check}" ;;
 	esac
 done
+
+# can_approve_pull_request_reviews lets workflows create pull requests as well.
+creates=$(gh api "repos/${repository}/actions/permissions/workflow" \
+	--jq .can_approve_pull_request_reviews 2>/dev/null) || creates=unreadable
+case "${creates}" in
+	true) pass "workflows may create pull requests (the weekly bump)" ;;
+	unreadable) printf 'note  whether workflows may create pull requests needs administration access to read\n' ;;
+	*) fail "workflows may not create pull requests: the weekly bump cannot open its own (Settings, Actions, General)" ;;
+esac
 
 [ "${status}" -eq 0 ] || die "the repository's settings do not hold what the release pipeline needs"
 info "the repository's settings hold"

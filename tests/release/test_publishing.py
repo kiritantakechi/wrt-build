@@ -35,19 +35,35 @@ LOCK = REPO / "upstream.lock"
 FACTORY = "-factory.img.gz"
 UPGRADE = "-sysupgrade.tar.gz"
 KMODS = "targets/packages/packages.adb"
+# The commit the builds an upload publishes name, clean, and another one their
+# branch moved to; the branch and repository a run publishes from.
+BUILT = "c" * 40
+NEWER = "d" * 40
+BRANCH = "refs/heads/main"
+REPOSITORY = "owner/repository"
 
 
 def _publish(
-    signed: Path, release: Path, *options: str, gh: Path | None = None, every_board: bool = False
+    signed: Path,
+    release: Path,
+    *options: str,
+    gh: Path | None = None,
+    every_board: bool = False,
+    head: str = BUILT,
 ) -> subprocess.CompletedProcess[str]:
     """Run release-publish.sh on the boards ``signed`` holds, or on every board.
 
     ``every_board`` leaves ``--boards`` out, for the script's default of every
-    board; with ``gh``, the stand-in's directory goes first on PATH.
+    board; with ``gh``, the stand-in's directory goes first on PATH, and it
+    answers that ``head`` is the head of the branch the run publishes from, as
+    the run's environment names it, not CI's own.
     """
-    environment = dict(os.environ)
+    environment = {
+        name: value for name, value in os.environ.items() if not name.startswith("GITHUB_")
+    }
     if gh is not None:
         environment["PATH"] = f"{gh}{os.pathsep}{environment['PATH']}"
+        environment |= {"GITHUB_REF": BRANCH, "GITHUB_REPOSITORY": REPOSITORY, "GH_HEAD": head}
     held = ",".join(sorted(path.name for path in signed.iterdir()))
     boards = () if every_board else ("--boards", held)
     return subprocess.run(
@@ -61,13 +77,31 @@ def _publish(
 
 @pytest.fixture
 def gh(tmp_path: Path) -> Path:
-    """Return a directory with a gh that records its arguments in gh.args."""
+    """Return a directory with a gh that records its arguments in gh.args.
+
+    Asked for a branch's head (gh api), it answers $GH_HEAD.
+    """
     directory = tmp_path / "bin"
     directory.mkdir()
     script = directory / "gh"
-    script.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" >"{directory}/gh.args"\n')
+    script.write_text(
+        '#!/bin/sh\n[ "$1" != api ] || { echo "$GH_HEAD"; exit 0; }\n'
+        f'printf "%s\\n" "$@" >"{directory}/gh.args"\n'
+    )
     script.chmod(0o755)
     return directory
+
+
+def _built(signed: Path, target: Path, **fields: str) -> Path:
+    """Copy the boards' signed builds in ``signed`` to ``target``, their manifests changed.
+
+    Each manifest names the commit BUILT, clean, and ``fields`` as given.
+    """
+    linked_copy(signed, target)
+    for manifest in target.glob(f"*/{MANIFEST_FILE}"):
+        content = read_json(manifest, Manifest)
+        write_json(manifest, content.model_copy(update={"commit": BUILT, **fields}))
+    return target
 
 
 def _gh_args(gh: Path) -> Sequence[str]:
@@ -133,10 +167,10 @@ def test_nothing_is_published_without_the_drill(
     assert check["if"] == "always()"
     (step,) = check["steps"]
     names = ("SYSTEM_TEST", "SIGN", "DRILL")
-    assert list(step["env"]) == list(names)
+    assert set(names) <= set(step["env"])
     result = subprocess.run(
         ["bash", "-eo", "pipefail", "-c", step["run"]],
-        env={**os.environ, **dict(zip(names, results, strict=True))},
+        env={**os.environ, **dict(zip(names, results, strict=True)), "BUMP_PULL_REQUEST": "false"},
         capture_output=True,
         check=False,
     )
@@ -146,7 +180,8 @@ def test_nothing_is_published_without_the_drill(
 @spec(CAPABILITY, "Candidates and stable releases", "PR build")
 def test_a_bump_is_a_candidate(signed_boards: Path, tmp_path: Path, gh: Path) -> None:
     release = tmp_path / "release"
-    result = _publish(signed_boards, release, "--prerelease", "--upload", gh=gh)
+    signed = _built(signed_boards, tmp_path / "signed")
+    result = _publish(signed, release, "--prerelease", "--upload", gh=gh)
     assert result.returncode == 0, result.stderr
     assert read_json(release / RELEASE_FILE, Release).prerelease
     args = _gh_args(gh)
@@ -164,7 +199,8 @@ def test_main_is_a_stable_release(
     board: Board, signed_boards: Path, tmp_path: Path, gh: Path
 ) -> None:
     release = tmp_path / "release"
-    result = _publish(signed_boards, release, "--upload", gh=gh)
+    signed = _built(signed_boards, tmp_path / "signed")
+    result = _publish(signed, release, "--upload", gh=gh)
     assert result.returncode == 0, result.stderr
     assert not read_json(release / RELEASE_FILE, Release).prerelease
     args = _gh_args(gh)
@@ -242,3 +278,61 @@ def test_boards_from_different_sources_are_not_mixed(
     assert f"were built from different sources: their {field} differs" in result.stderr
     assert not (tmp_path / "release").exists()
     assert not (gh / "gh.args").exists()
+
+
+@spec(
+    CAPABILITY,
+    "Artifacts come from one build",
+    "Boards built from different commits of this repository",
+)
+def test_boards_from_different_commits_are_not_mixed(
+    board: Board, signed_repo: Path, tmp_path: Path, gh: Path
+) -> None:
+    other = next(other for other in load_all() if other.id != board.id)
+    signed = tmp_path / "signed"
+    signed.mkdir()
+    (signed / board.id).symlink_to(signed_repo)
+    linked_copy(signed_repo, signed / other.id)
+    manifest = signed / other.id / MANIFEST_FILE
+    content = read_json(manifest, Manifest)
+    built = {"board": other.id, "device": other.device, "commit": NEWER}
+    write_json(manifest, content.model_copy(update=built))
+    result = _publish(signed, tmp_path / "release", "--upload", gh=gh)
+    assert result.returncode != 0
+    assert "were built from different sources: their commit differs" in result.stderr
+    assert not (tmp_path / "release").exists()
+    assert not (gh / "gh.args").exists()
+
+
+@spec(CAPABILITY, "Traceable release notes", "A lock that is not the builds'")
+def test_a_lock_that_is_not_the_builds_is_refused(
+    signed_boards: Path, tmp_path: Path, gh: Path
+) -> None:
+    signed = _built(signed_boards, tmp_path / "signed", upstream_lock_sha256="0" * 64)
+    result = _publish(signed, tmp_path / "release", "--upload", gh=gh)
+    assert result.returncode != 0
+    assert "the checkout's upstream.lock is not the one the builds were made from" in result.stderr
+    assert not (tmp_path / "release").exists()
+    assert not (gh / "gh.args").exists()
+
+
+@spec(CAPABILITY, "Candidates and stable releases", "A run its branch has moved past")
+def test_a_run_its_branch_moved_past_does_not_publish(
+    signed_boards: Path, tmp_path: Path, gh: Path
+) -> None:
+    signed = _built(signed_boards, tmp_path / "signed")
+    result = _publish(signed, tmp_path / "release", "--upload", gh=gh, head=NEWER)
+    assert result.returncode != 0
+    assert f"main has moved from {BUILT} to {NEWER}" in result.stderr
+    assert not (gh / "gh.args").exists()
+
+
+@spec(CAPABILITY, "Candidates and stable releases", "Tag of a Release")
+def test_a_release_is_tagged_on_the_commit_built(
+    signed_boards: Path, tmp_path: Path, gh: Path
+) -> None:
+    signed = _built(signed_boards, tmp_path / "signed")
+    result = _publish(signed, tmp_path / "release", "--upload", gh=gh)
+    assert result.returncode == 0, result.stderr
+    args = _gh_args(gh)
+    assert args[args.index("--target") + 1] == BUILT

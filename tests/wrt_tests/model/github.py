@@ -1,8 +1,9 @@
 """Run a CI script against a stand-in gh that answers for a repository described as data.
 
 The stand-in answers the gh calls of scripts/cache-room.sh and scripts/cache-prune.sh
-(build-integrity D5, D6) as GitHub's API would for the repository, and deletes the
-caches they delete from it, so that a test reads which caches are left.
+(build-integrity D5, D6; release-integrity D6) as GitHub's API would for the
+repository, and deletes the caches they delete from it, so that a test reads which
+caches are left.
 """
 
 import json
@@ -66,6 +67,8 @@ match args[:2]:
             answer([{{"name": name}} for name in github["branches"]])
         elif path.startswith(f"{{base}}/compare/main..."):
             answer({{"status": github["compare"][path.split("...", 1)[1]]}})
+        elif path.startswith(f"{{base}}/pulls/"):
+            answer({{"state": github["pulls"][path.rsplit("/", 1)[1]]}})
         else:
             sys.exit(f"no answer for {{path}}")
     case _:
@@ -76,11 +79,13 @@ described.write_text(json.dumps(github))
 
 @dataclass(frozen=True, slots=True)
 class Repository:
-    """A repository whose default branch is main: its branches and its caches."""
+    """A repository whose default branch is main: its branches, pull requests and caches."""
 
     branches: list[str] = field(default_factory=lambda: ["main"])
     # How each branch compares with main, as the compare API's status names it.
     compare: dict[str, str] = field(default_factory=dict)
+    # Each pull request's state by its number: open or closed.
+    pulls: dict[str, str] = field(default_factory=dict)
     caches: list[dict[str, object]] = field(default_factory=list)
 
     def cache(self, ref: str, key: str, size: int = 0) -> None:

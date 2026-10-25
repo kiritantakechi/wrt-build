@@ -20,13 +20,25 @@ by = "build.yml host-toolchain restores the toolchain cache; firmware builds on 
 capability = "build/ci"
 requirement = "Cache keyed on actual inputs"
 scenario = "Only the packages feed updated"
-by = "scripts/toolchain-key.sh hashes tools/, toolchain/, target/linux/generic, the build files that name the host stamps (include/depends.mk, include/host-build.mk, rules.mk), lang/golang, lang/rust, the board-neutral configuration composed from the profile's seeds, WRT_BUILD_INPUTS, and the two scripts that build and pack the archive with the library modules they load (module-boundaries D8), and nothing else of the packages feed"
+by = "scripts/toolchain-key.sh hashes tools/, toolchain/, target/linux/generic, the build files that name the host stamps (include/depends.mk, include/host-build.mk, rules.mk), lang/golang, lang/rust, the board-neutral configuration composed from the profile's seeds, the makefiles of the selected target and subtarget, WRT_BUILD_INPUTS, and the two scripts that build and pack the archive with the library modules they load (module-boundaries D8), and nothing else of the packages feed"
 
 [[scenario]]
 capability = "build/ci"
 requirement = "Cache keyed on actual inputs"
 scenario = "Toolchain inputs change"
 by = "scripts/toolchain-key.sh; build.yml host-toolchain rebuilds on a key miss: cold in run 37143040755, from its own compiler cache in run 37166467868, whose toolchain-build.sh had changed (docs/ci.md). 2026-10-12 on the VM, a scratch commit adding a file under target/linux/generic changed the key, and one outside lang/golang and lang/rust in the packages feed did not (build-integrity D4)"
+
+[[scenario]]
+capability = "build/ci"
+requirement = "Cache keyed on actual inputs"
+scenario = "Kernel version of the target changes"
+by = "scripts/toolchain-key.sh hashes the makefiles of the target and subtarget the board-neutral configuration selects (release-integrity D6). 2026-10-26 on the VM, a commit of the build tree with KERNEL_PATCHVER:=6.12 in target/linux/rockchip/Makefile, and nothing else changed, moved the key from toolchain-a6aa8826 to toolchain-f9e2682d"
+
+[[scenario]]
+capability = "build/ci"
+requirement = "Cache keyed on actual inputs"
+scenario = "A device added to the target"
+by = "scripts/toolchain-key.sh reads no file of the target's image/ directory, which defines its devices (release-integrity D6). 2026-10-26 on the VM, a commit of the build tree that added a device to target/linux/rockchip/image/armv8.mk kept the key toolchain-a6aa8826"
 
 [[scenario]]
 capability = "build/ci"

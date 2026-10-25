@@ -1,5 +1,9 @@
-"""build/environment: entry points refuse macOS, stop at a failed step, patch what changed."""
+"""build/environment: entry points refuse macOS, stop at a failed step, patch what changed.
 
+And they pass their arguments on as given.
+"""
+
+import json
 import os
 import shutil
 import subprocess
@@ -9,19 +13,11 @@ import pytest
 
 from wrt_tests import spec
 from wrt_tests.model.boards import load_all
-from wrt_tests.model.shell import library
+from wrt_tests.model.series import Series
 
 CAPABILITY = "build/environment"
 REPO = Path(__file__).resolve().parents[2]
-SOURCE_ENTRY_POINTS = ("fetch", "patch", "config", "build", "toolchain-build")
-GIT_IDENTITY = {
-    "GIT_AUTHOR_NAME": "test",
-    "GIT_AUTHOR_EMAIL": "test@localhost",
-    "GIT_COMMITTER_NAME": "test",
-    "GIT_COMMITTER_EMAIL": "test@localhost",
-}
-# A time no file of a fresh checkout has: a file git writes again gets a new one.
-OLD = 1_000_000_000 * 1_000_000_000
+SOURCE_ENTRY_POINTS = ("fetch", "patch", "config", "download", "build", "toolchain-build")
 
 
 @pytest.fixture
@@ -70,75 +66,38 @@ def test_failed_step_stops_the_build(tmp_path: Path) -> None:
     assert "scripts/build.sh" not in result.stderr
 
 
-class Series:
-    """A scratch repository and a series of two patches, applied as patch.sh does."""
-
-    def __init__(self, root: Path) -> None:
-        """Create the repository under ``root``, its base commit and the two patches.
-
-        The first patch changes a.txt; the second changes b.txt and adds d.txt.
-        """
-        self.repo = root / "repo"
-        self.patches = root / "patches"
-        self.repo.mkdir()
-        self._git("init", "-q")
-        (self.repo / ".gitignore").write_text("*.o\n")
-        for name in ("a", "b", "c"):
-            (self.repo / f"{name}.txt").write_text(f"{name}\none\ntwo\n")
-        self._git("add", ".")
-        self._git("commit", "-q", "-m", "base")
-        self.base = self._git("rev-parse", "HEAD")
-        (self.repo / "a.txt").write_text("a\none\ntwo, patched\n")
-        self._git("commit", "-q", "-a", "-m", "patch a")
-        (self.repo / "b.txt").write_text("b\none\ntwo, patched\n")
-        (self.repo / "d.txt").write_text("d\n")
-        self._git("add", "d.txt")
-        self._git("commit", "-q", "-a", "-m", "patch b")
-        self._git("format-patch", "-q", "-2", "-o", str(self.patches))
-        self._git("checkout", "-q", "--detach", self.base)
-
-    def _git(self, *args: str) -> str:
-        return subprocess.run(
-            ["git", "-C", str(self.repo), *args],
-            env={**os.environ, **GIT_IDENTITY},
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-
-    @property
-    def head(self) -> str:
-        """Return the commit the work tree is on."""
-        return self._git("rev-parse", "HEAD")
-
-    def patch(self, number: int) -> Path:
-        """Return the series' patch with ``number``."""
-        (found,) = self.patches.glob(f"{number:04}-*.patch")
-        return found
-
-    def apply(self) -> subprocess.CompletedProcess[str]:
-        """Build the series' commit on the base and move the work tree to it."""
-        return library(
-            "tree upstream",
-            'commit=$(series_commit "$1" "$2" "$3") && move_tree "$2" "${commit}"',
-            str(self.patches),
-            str(self.repo),
-            self.base,
-        )
-
-    def files(self) -> list[Path]:
-        """Return the files of the work tree, untracked ones included."""
-        return [path for path in self.repo.iterdir() if path.is_file()]
-
-    def age(self) -> dict[str, int]:
-        """Give every file of the work tree an old time; return the times."""
-        for path in self.files():
-            os.utime(path, ns=(OLD, OLD))
-        return self.times()
-
-    def times(self) -> dict[str, int]:
-        """Return each file's modification time."""
-        return {path.name: path.stat().st_mtime_ns for path in self.files()}
+@spec(CAPABILITY, "Common build entry points", "An argument with a blank or a quote")
+@pytest.mark.parametrize("shape", ["a command after a blank", "a quote"])
+def test_an_argument_reaches_its_script_whole(tmp_path: Path, shape: str) -> None:
+    justfile = REPO / "justfile"
+    # No recipe pastes an argument into its command line: just passes them on.
+    dump = subprocess.run(
+        ["just", "--justfile", justfile, "--dump", "--dump-format", "json"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    recipes = json.loads(dump)["recipes"]
+    pasted = [
+        name
+        for name, recipe in recipes.items()
+        for line in recipe["body"]
+        if any(not isinstance(fragment, str) for fragment in line)
+    ]
+    assert pasted == []
+    # A board's name with more after it reaches boards.sh as one argument.
+    ran = tmp_path / "ran"
+    board = load_all()[0].id
+    argument = f"{board}; touch {ran}" if shape == "a command after a blank" else f"{board}'s"
+    result = subprocess.run(
+        ["just", "--justfile", justfile, "boards", argument],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert f"no board '{argument}'" in result.stderr
+    assert not ran.exists()
 
 
 @pytest.fixture

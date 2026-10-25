@@ -3,8 +3,10 @@
 # Usage: scripts/release-sign.sh <build> <signed> --apk-key <file> --fw-key <file> [--keyring <dir>]
 # Runs with the pinned signing tools only (nix run .#sign-tools -- ...), never in
 # a job that builds. <build> is the unsigned output of one build: manifest.json
-# and the files it lists. <signed> receives it signed:
-#  - every listed file must match its sha256 in manifest.json, or nothing is signed;
+# and the files it lists. <signed> receives it signed, the listed files and
+# nothing else (release-integrity D2):
+#  - every listed file must be a plain path inside <build> and match its sha256
+#    in manifest.json, or nothing is signed;
 #  - every package index is signed with the apk key, its build key's signature
 #    dropped;
 #  - every image with fwtool metadata gets a ucert chain in its trailer, a usign
@@ -18,6 +20,7 @@
 set -eu
 # shellcheck source=scripts/lib/core.sh
 . "$(dirname -- "$0")/lib/core.sh"
+use manifest
 
 usage() {
 	die "usage: release-sign <build> <signed> --apk-key <file> --fw-key <file> [--keyring <dir>]"
@@ -40,8 +43,10 @@ while [ "$#" -ge 2 ]; do
 	shift 2
 done
 [ "$#" -eq 0 ] && [ -n "${apk_key}" ] && [ -n "${fw_key}" ] || usage
-[ -f "${build}/manifest.json" ] || die "no manifest.json in ${build}"
+manifest="${build}/manifest.json"
+[ -f "${manifest}" ] || die "no manifest.json in ${build}"
 [ ! -e "${signed}" ] || die "${signed} exists already"
+manifest_files_check "${manifest}"
 # apk reads its keys directory relative to its root, /.
 keyring=$(realpath "${keyring}")
 apk_keys="${keyring}/etc/apk/keys"
@@ -50,8 +55,8 @@ fw_keys="${keyring}/etc/usign/keys"
 work=$(mktemp -d "${TMPDIR:-/tmp}/wrt-sign.XXXXXX")
 trap 'rm -rf "${work}"' EXIT INT TERM
 
-jq -r '.files | to_entries[] | "\(.value)  \(.key)"' "${build}/manifest.json" >"${work}/expected"
-(cd "${build}" && sha256sum --check --quiet "${work}/expected") ||
+manifest_checksums "${manifest}" >"${work}/expected"
+(cd "${build}" && sha256sum --check --quiet --strict "${work}/expected") ||
 	die "artifacts do not match manifest.json; nothing signed"
 info "every artifact matches manifest.json"
 
@@ -60,9 +65,11 @@ fw_id=$(usign -F -s "${fw_key}")
 ucert -I -c "${work}/fw.ucert" -p "${fw_keys}/${fw_id}" -s "${fw_key}" ||
 	die "cannot issue a certificate for firmware key ${fw_id}"
 
-mkdir -p "${signed}"
-cp -a "${build}/." "${signed}/"
-jq -r '.files | keys[]' "${build}/manifest.json" >"${work}/files"
+jq -r '.files | keys[]' "${manifest}" >"${work}/files"
+while IFS= read -r file; do
+	mkdir -p "$(dirname -- "${signed}/${file}")"
+	cp -- "${build}/${file}" "${signed}/${file}"
+done <"${work}/files"
 
 # sign_image <file>: a usign signature under the key's certificate, in the
 # fwtool trailer. ucert -A reports failure after appending (it returns the
@@ -105,8 +112,7 @@ while IFS= read -r file; do
 	printf '%s\t%s\n' "${file}" "${sum%% *}"
 done <"${work}/files" |
 	jq -R -n '[inputs | split("\t") | {(.[0]): .[1]}] | add' >"${work}/hashes"
-jq --slurpfile hashes "${work}/hashes" '.files = $hashes[0]' "${build}/manifest.json" \
-	>"${signed}/manifest.json"
+jq --slurpfile hashes "${work}/hashes" '.files = $hashes[0]' "${manifest}" >"${signed}/manifest.json"
 usign -S -m "${signed}/manifest.json" -s "${fw_key}" -x "${signed}/manifest.json.sig"
 usign -V -q -m "${signed}/manifest.json" -P "${fw_keys}" ||
 	die "manifest.json does not verify with ${fw_keys}"

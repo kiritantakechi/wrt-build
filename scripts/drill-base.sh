@@ -14,7 +14,7 @@
 set -eu
 # shellcheck source=scripts/lib/core.sh
 . "$(dirname -- "$0")/lib/core.sh"
-use boards
+use boards manifest
 
 board=${1:-}
 
@@ -45,14 +45,14 @@ if [ -n "${tag}" ] &&
 	jq -e --arg name "${manifest}" 'any(.assets[]; .name == $name)' "${work}/release.json" >/dev/null; then
 	gh release download "${tag}" --repo "${repository}" --pattern "${manifest}" --dir "${work}" ||
 		die "cannot download ${manifest} of ${tag}"
-	jq -r '.files | to_entries[] | select(.key | test("^targets/[^/]+-factory\\.img\\.gz$"))
-		| "\(.value)  \(.key)"' "${work}/${manifest}" >"${work}/factory.sha256"
+	manifest_files_check "${work}/${manifest}"
+	manifest_checksums "${work}/${manifest}" '^targets/[^/]+-factory\.img\.gz$' >"${work}/factory.sha256"
 	images=$(wc -l <"${work}/factory.sha256")
 	[ "${images}" -eq 1 ] || die "${manifest} of ${tag} does not name one factory image"
 	read -r _ image <"${work}/factory.sha256"
 	gh release download "${tag}" --repo "${repository}" --pattern "${image#targets/}" \
 		--dir "${base}/targets" || die "cannot download ${image#targets/} of ${tag}"
-	(cd "${base}" && sha256sum --check --quiet "${work}/factory.sha256") ||
+	(cd "${base}" && sha256sum --check --quiet --strict "${work}/factory.sha256") ||
 		die "${image#targets/} of ${tag} does not match ${manifest}"
 	built="${work}/${manifest}"
 	info "drill base: ${tag}, the latest stable release"

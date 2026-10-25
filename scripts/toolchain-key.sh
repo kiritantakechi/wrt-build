@@ -34,6 +34,15 @@ configuration=$(mktemp)
 trap 'rm -f "${configuration}"' EXIT INT TERM
 compose_seeds "${tree}" "${profile}" "" "${configuration}"
 seed=$(sha256sum <"${configuration}")
+# The target and subtarget the configuration selects, by their makefiles, which
+# name what the toolchain is built for: the architecture, the CPU type, the
+# features and the kernel version, whose headers the toolchain carries
+# (release-integrity D6). The devices are defined elsewhere (image/).
+target=$(sed -n 's/^CONFIG_TARGET_\([a-z0-9]*\)=y$/\1/p' "${configuration}")
+subtarget=$(sed -n "s/^CONFIG_TARGET_${target}_\\([a-z0-9]*\\)=y\$/\\1/p" "${configuration}")
+definition=$(git -C "${tree}" rev-parse \
+	"HEAD:target/linux/${target}/Makefile" "HEAD:target/linux/${target}/${subtarget}/target.mk") ||
+	die "the configuration selects no target and subtarget of ${tree}: '${target}' '${subtarget}'"
 # Build environment fingerprint (flake.nix: buildInputsId): the store paths of the
 # host packages plus the build profile. Test and quality tooling are not part of
 # it, so adding them keeps the cached toolchain.
@@ -45,5 +54,5 @@ modules=$(loaded_modules "$@")
 # shellcheck disable=SC2086 # modules is a newline-separated list of plain paths
 recipe=$(cat "$@" ${modules} | sha256sum)
 
-digest=$(printf '%s\n' "${arch}" "${trees}" "${langs}" "${stamps}" "${seed}" "${environment}" "${recipe}" | sha256sum)
+digest=$(printf '%s\n' "${arch}" "${trees}" "${langs}" "${stamps}" "${seed}" "${definition}" "${environment}" "${recipe}" | sha256sum)
 printf 'key=toolchain-%s\n' "${digest%% *}"

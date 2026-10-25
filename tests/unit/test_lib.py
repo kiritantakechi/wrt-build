@@ -4,11 +4,15 @@ import hashlib
 import os
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from wrt_tests.model.boards import load_all
 from wrt_tests.model.shell import awk_program, library
+
+if TYPE_CHECKING:
+    import subprocess
 
 REPO = Path(__file__).resolve().parents[2]
 PROFILES = [
@@ -48,6 +52,88 @@ CONFIG_PACKAGE_wrt-keyring=y
         "CONFIG_PACKAGE_kmod-nf-conntrack6=m",
         "CONFIG_PACKAGE_libstdcpp6.x+=y",
     ]
+
+
+# An output directory's apks, and whether each is stale: of packages the
+# configuration builds, with and without an ABI version and a release, the
+# kernel's, which is in neither file; and two left by earlier builds, a kmod no
+# longer selected and a library under its earlier ABI version.
+APKS = {
+    "targets/packages/kernel-6.18.55~6fcccb57-r1.apk": False,
+    "targets/packages/kmod-dummy-6.18.55-r1.apk": False,
+    "targets/packages/kmod-gone-6.18.52-r1.apk": True,
+    "packages/base/libjson-c5-0.19-r3.apk": False,
+    "packages/base/libjson-c4-0.18-r1.apk": True,
+    "packages/base/resolveip-2.apk": False,
+    "packages/luci/luci-i18n-base-zh-cn-26.297.60563~4bfd110.apk": False,
+}
+SELECTED = """\
+CONFIG_PACKAGE_kmod-dummy=m
+# CONFIG_PACKAGE_kmod-gone is not set
+CONFIG_PACKAGE_libjson-c=y
+CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+CONFIG_PACKAGE_resolveip=y
+"""
+PACKAGEINFO = """\
+Source-Makefile: package/kernel/linux/Makefile
+
+Package: kmod-dummy
+Version: <LINUX_VERSION>-r
+@@
+
+Package: kmod-gone
+Version: <LINUX_VERSION>-r
+@@
+
+Source-Makefile: package/libs/libjson-c/Makefile
+
+Package: libjson-c
+Version: 0.19-r3
+ABI-Version: 5
+@@
+
+Source-Makefile: package/network/utils/resolveip/Makefile
+
+Package: resolveip
+Version: 2
+@@
+
+Source-Makefile: feeds/luci/modules/luci-base/Makefile
+
+Package: luci-i18n-base-zh-cn
+Version: 26.297.60563~4bfd110
+@@
+"""
+
+
+def _stale(tmp_path: Path, apks: list[str]) -> subprocess.CompletedProcess[str]:
+    """Return what stale_packages finds among ``apks`` in an output directory under ``tmp_path``."""
+    (tmp_path / "config").write_text(SELECTED)
+    (tmp_path / "packageinfo").write_text(PACKAGEINFO)
+    for apk in apks:
+        (tmp_path / "bin" / apk).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "bin" / apk).touch()
+    return library("tree", 'stale_packages "$@"', "bin", "config", "packageinfo", cwd=tmp_path)
+
+
+def test_the_packages_the_configuration_no_longer_builds_are_stale(tmp_path: Path) -> None:
+    result = _stale(tmp_path, list(APKS))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == sorted(
+        f"bin/{apk}" for apk, stale in APKS.items() if stale
+    )
+
+
+def test_an_apk_without_a_version_fails(tmp_path: Path) -> None:
+    result = _stale(tmp_path, ["packages/base/odd.apk"])
+    assert result.returncode != 0
+    assert "cannot tell the package of bin/packages/base/odd.apk" in result.stderr
+
+
+def test_an_output_directory_not_made_yet_holds_no_stale_package(tmp_path: Path) -> None:
+    result = library("tree", 'stale_packages "$@"', "bin", "config", "packageinfo", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
 
 
 def test_trim_keeps_what_the_build_used(tmp_path: Path) -> None:
@@ -96,17 +182,18 @@ def test_an_uninstalled_rust_has_no_standard_library(tmp_path: Path) -> None:
 def test_toolchain_stages_name_what_only_toolchain_build_builds(tmp_path: Path) -> None:
     # A board's time log: what tools/, toolchain/ or the Go and Rust host
     # toolchains ran is named once per stage; the board's own packages are not.
+    # Host builds name their stages host-* (patch 0042).
     log = tmp_path / "build-time-r4s.tsv"
     log.write_text(
         "".join(
             f"{time}\t{event}\t{stage}\t{name}\n"
             for time, event, stage, name in (
-                (1, "begin", "prepare", "tools/flock"),
-                (2, "end", "prepare", "tools/flock"),
-                (3, "begin", "compile", "toolchain/gcc/final"),
-                (4, "begin", "compile", "package/feeds/packages/golang1.27"),
-                (5, "begin", "compile", "package/feeds/packages/rust"),
-                (6, "begin", "compile", "package/feeds/packages/rust"),
+                (1, "begin", "host-prepare", "tools/flock"),
+                (2, "end", "host-prepare", "tools/flock"),
+                (3, "begin", "host-compile", "toolchain/gcc/final"),
+                (4, "begin", "host-compile", "package/feeds/packages/golang1.27"),
+                (5, "begin", "host-compile", "package/feeds/packages/rust"),
+                (6, "begin", "host-compile", "package/feeds/packages/rust"),
                 (7, "begin", "compile", "package/feeds/packages/dae"),
                 (8, "begin", "compile", "package/feeds/packages/golang-protobuf"),
                 (9, "begin", "compile", "package/feeds/wrt/einat"),
@@ -117,10 +204,10 @@ def test_toolchain_stages_name_what_only_toolchain_build_builds(tmp_path: Path) 
     result = library("toolchain", 'toolchain_stages "$1"', str(log))
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        "package/feeds/packages/golang1.27 [compile]",
-        "package/feeds/packages/rust [compile]",
-        "toolchain/gcc/final [compile]",
-        "tools/flock [prepare]",
+        "package/feeds/packages/golang1.27 [host-compile]",
+        "package/feeds/packages/rust [host-compile]",
+        "toolchain/gcc/final [host-compile]",
+        "tools/flock [host-prepare]",
     ]
 
 

@@ -2,9 +2,11 @@
 # packages or luci moved, a pull request from bump/<date> with the new lock, the
 # old and new SHAs and the commits in between. A pull request opened with the
 # workflow's token starts no workflows, so this one starts check and build on the
-# bump branch itself: build signs the candidate, drills the upgrade to it and
-# publishes it as a pre-release, and main's rules merge nothing before the drill
-# passed.
+# bump branch itself, before it opens the pull request: build signs the
+# candidate, drills the upgrade to it and publishes it as a pre-release, and
+# main's rules merge nothing before the drill passed. A branch of the day that
+# exists stays as it is, as it may carry the maintainer's commits; a run then
+# only opens the pull request it lacks (release-integrity D5).
 name: bump
 
 on:
@@ -35,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: DeterminateSystems/nix-installer-action@v23
+      - uses: ./.github/actions/nix
 
       - name: Bump upstream.lock
         run: nix develop .#quality -c just upstream-bump "$RUNNER_TEMP/pull-request.md"
@@ -52,11 +54,20 @@ jobs:
           branch="bump/$(date -u +%Y-%m-%d)"
           title=$(head -n 1 "$description")
           tail -n +3 "$description" >"$RUNNER_TEMP/body.md"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$branch"
-          git commit -q -m "$title" upstream.lock
-          git push -q origin "$branch"
-          gh pr create --base main --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/body.md"
-          gh workflow run check.yml --ref "$branch"
-          gh workflow run build.yml --ref "$branch"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "$branch exists already: it stays as it is"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git switch -c "$branch"
+            git commit -q -m "$title" upstream.lock
+            git push -q origin "$branch"
+            gh workflow run check.yml --ref "$branch"
+            gh workflow run build.yml --ref "$branch"
+          fi
+          if [ -n "$(gh pr list --head "$branch" --state all --json number --jq '.[].number')" ]; then
+            echo "$branch has its pull request"
+          elif ! gh pr create --base main --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/body.md"; then
+            echo "::error::cannot open the pull request of $branch: workflows may not create pull requests here (Settings, Actions, General); its check and build run, open it by hand"
+            exit 1
+          fi

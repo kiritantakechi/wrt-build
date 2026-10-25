@@ -14,13 +14,17 @@
 # r<date>-<openwrt>-<run>, the run being $GITHUB_RUN_NUMBER
 # unless --run names it. Nothing is assembled unless every image and index of a
 # board matches its manifest, and every board was built from the same sources
-# (upstream.lock, patches and upstream commit), so a release never mixes builds.
-# --upload then creates the release on GitHub (gh release create); a candidate
-# never becomes the latest release.
+# (upstream.lock, patches, upstream commit and this repository's commit), so a
+# release never mixes builds; the notes name the lock the builds were made from,
+# which the checkout's must be. --upload then creates the release on GitHub (gh
+# release create), tagged on the commit that was built, which must be clean and,
+# in CI, still the head of the branch it publishes from (GITHUB_REF): a run its
+# branch has moved past never publishes (release-integrity D1). A candidate never
+# becomes the latest release.
 set -eu
 # shellcheck source=scripts/lib/core.sh
 . "$(dirname -- "$0")/lib/core.sh"
-use boards upstream
+use boards manifest upstream
 
 usage() {
 	die "usage: release-publish <signed> <release> [--boards <id>,...] [--prerelease] [--run <number>] [--upload]"
@@ -76,9 +80,9 @@ for build in "${signed}"/*/; do
 	built=$(jq -r '"\(.board) \(.device)"' "${manifest}")
 	[ "${built}" = "${board} ${device}" ] ||
 		die "${build} holds the build of ${built}, not of ${board} ${device}"
-	jq -r '.files | to_entries[] | select(.key | test("^targets/.*\\.gz$|/packages\\.adb$"))
-		| "\(.value)  \(.key)"' "${manifest}" >"${work}/expected"
-	(cd "${build}" && sha256sum --check --quiet "${work}/expected") ||
+	manifest_files_check "${manifest}"
+	manifest_checksums "${manifest}" '^targets/.*\.gz$|/packages\.adb$' >"${work}/expected"
+	(cd "${build}" && sha256sum --check --quiet --strict "${work}/expected") ||
 		die "the images and the package repository of ${board} are not all from the build of its manifest.json"
 	boards="${boards:+${boards} }${board}"
 done
@@ -94,7 +98,7 @@ asked=$(printf '%s\n' "${wanted}" | sort | tr '\n' ' ')
 # The boards' builds come from the same sources.
 first=${boards%% *}
 for board in ${boards}; do
-	for field in upstream_lock_sha256 patches_sha256 openwrt_head; do
+	for field in upstream_lock_sha256 patches_sha256 openwrt_head commit; do
 		ours=$(jq -r ".${field}" "${signed}/${first}/manifest.json")
 		theirs=$(jq -r ".${field}" "${signed}/${board}/manifest.json")
 		[ "${theirs}" = "${ours}" ] ||
@@ -102,6 +106,11 @@ for board in ${boards}; do
 	done
 done
 
+# The notes name the checkout's lock: the one the builds were made from.
+checkout_lock=$(lock_sha256)
+built_lock=$(jq -r .upstream_lock_sha256 "${signed}/${first}/manifest.json")
+[ "${checkout_lock}" = "${built_lock}" ] ||
+	die "the checkout's upstream.lock is not the one the builds were made from"
 openwrt=$(lock_field openwrt sha)
 packages=$(lock_field packages sha)
 luci=$(lock_field luci sha)
@@ -146,7 +155,19 @@ mv "${work}/release.json" "${release}/release.json"
 info "release ${tag} assembled in ${release}"
 
 [ "${upload}" -eq 1 ] || exit 0
-set -- "${tag}" --title "${tag}" --notes-file "${notes}"
+commit=$(jq -r .commit "${signed}/${first}/manifest.json")
+case "${commit}" in
+	*-dirty) die "the builds are of a commit with changes (${commit}): publish a clean one" ;;
+	*) ;;
+esac
+if [ -n "${GITHUB_REF:-}" ]; then
+	branch=${GITHUB_REF#refs/heads/}
+	head=$(gh api "repos/${GITHUB_REPOSITORY:?}/git/ref/heads/${branch}" --jq .object.sha) ||
+		die "cannot read the head of ${branch}"
+	[ "${head}" = "${commit}" ] ||
+		die "${branch} has moved from ${commit} to ${head}: the newer run publishes"
+fi
+set -- "${tag}" --target "${commit}" --title "${tag}" --notes-file "${notes}"
 if [ "${prerelease}" = true ]; then
 	set -- "$@" --prerelease --latest=false
 else

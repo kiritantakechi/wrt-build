@@ -38,8 +38,11 @@ rows=$(awk -F'\t' '
 	{ printf "config/marks.tsv:%d: want mask, owner, purpose and source, the mask as 0x%%08x\n", NR > "/dev/stderr"; bad = 1 }
 	END { exit bad }
 ' "${REPO_DIR}/config/marks.tsv") || status=1
-marks=$(grep -rHoiE 'mark[^0-9]*0x[0-9a-f]+' "$@" |
-	sed -E 's/^([^:]+):.*(0x[0-9a-fA-F]+)$/\1 \2/') || true
+# grep finds no mark in a tree without one (status 1); a path it cannot read
+# (status 2) fails the check rather than pass unread (release-integrity D8).
+found=$(grep -rHoiE 'mark[^0-9]*0x[0-9a-f]+' "$@") || [ "$?" -eq 1 ] ||
+	die "cannot read every template under $*"
+marks=$(printf '%s\n' "${found}" | sed -E 's/^([^:]+):.*(0x[0-9a-fA-F]+)$/\1 \2/')
 
 set -f
 IFS='

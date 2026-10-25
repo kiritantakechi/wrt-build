@@ -84,6 +84,7 @@ just fetch
 just patch
 just toolchain-build dev     # the cross toolchain every board shares
 just config r6s dev
+just download                # every source the configured board's build needs
 just env-report
 ```
 

@@ -5,7 +5,6 @@ them against the register (wrt_tests.model.undefined_behavior).
 """
 
 import json
-import os
 from datetime import date
 from typing import TYPE_CHECKING
 
@@ -257,51 +256,44 @@ def test_a_package_without_metadata_fails(tmp_path: Path) -> None:
     assert "no package metadata for libbpf" in result.stderr
 
 
-def test_a_step_that_did_nothing_keeps_the_record(tmp_path: Path) -> None:
-    # OpenWrt rewrites the log of every package whose compile step it runs, also of
-    # one it finds up to date, with nothing but make's time line.
-    logs, records = tmp_path / "logs", tmp_path / "records"
-    built, idle, old = (
-        logs / "package" / name / "compile.txt" for name in ("built", "idle", "old")
-    )
-    for log in (built, idle, old):
-        log.parent.mkdir(parents=True)
-    old.write_text("old.c:1:1: warning: 'o' is used uninitialized [-Wuninitialized]\n")
-    os.utime(old, (1_700_000_000, 1_700_000_000))
-    record = records / "package" / "idle" / "compile.tsv"
-    record.parent.mkdir(parents=True)
-    record.write_text("-Wuninitialized\tidle.c\t\t3\n")
-    since = tmp_path / "since"
-    since.touch()
-    os.utime(since, (1_700_000_100, 1_700_000_100))
-    built.write_text("built.c:2:1: warning: 'b' is used uninitialized [-Wuninitialized]\n")
-    idle.write_text("time: package/idle/compile#0.07#0.02#0.16\n")
+def _time_log(path: Path, *compiled: str) -> None:
+    """Write a build's time log in which each package of ``compiled`` was compiled."""
+    lines = [
+        f"1700000{i:03d}.0\t{event}\t{stage}\t{package}"
+        for i, package in enumerate(compiled)
+        for stage in ("prepare", "compile", "install")
+        for event in ("begin", "end")
+    ]
+    path.write_text("".join(f"{line}\n" for line in lines))
 
-    result = _lib("warnings_harvest", str(logs), str(records), str(since), cwd=tmp_path)
+
+def test_a_compiled_package_gets_a_new_record(tmp_path: Path) -> None:
+    # base-files compiles without a word: its log holds only the packing's and
+    # make's lines, and the image's report needs a record of every package it ships.
+    logs, records = tmp_path / "logs", tmp_path / "records"
+    for name, log in {
+        "built": "built.c:2:1: warning: 'b' is used uninitialized [-Wuninitialized]\n",
+        "base-files": "time: package/base-files/compile#0.61#0.39#1.19\n",
+    }.items():
+        (logs / "package" / name).mkdir(parents=True)
+        (logs / "package" / name / "compile.txt").write_text(log)
+    old = records / "package" / "built" / "compile.tsv"
+    old.parent.mkdir(parents=True)
+    old.write_text("-Wuninitialized\tbuilt.c\t\t9\n")
+    _time_log(tmp_path / "time.tsv", "package/built", "package/base-files")
+
+    result = _lib("warnings_harvest", str(logs), str(records), "time.tsv", cwd=tmp_path)
 
     assert result.returncode == 0, result.stderr
-    assert (records / "package" / "built" / "compile.tsv").read_text() == (
-        "-Wuninitialized\tbuilt.c\t\t2\n"
-    )
-    assert record.read_text() == "-Wuninitialized\tidle.c\t\t3\n"
-    assert not (records / "package" / "old").exists()
-
-
-def test_a_package_that_compiles_without_a_word_gets_an_empty_record(tmp_path: Path) -> None:
-    # base-files compiles silently: its first log holds only make's time line too,
-    # and the image's report needs a record of every package it ships.
-    logs, records = tmp_path / "logs", tmp_path / "records"
-    since = tmp_path / "since"
-    since.touch()
-    os.utime(since, (1_700_000_000, 1_700_000_000))
-    log = logs / "package" / "base-files" / "compile.txt"
-    log.parent.mkdir(parents=True)
-    log.write_text("time: package/base-files/compile#0.61#0.39#1.19\n")
-
-    result = _lib("warnings_harvest", str(logs), str(records), str(since), cwd=tmp_path)
-
-    assert result.returncode == 0, result.stderr
+    assert old.read_text() == "-Wuninitialized\tbuilt.c\t\t2\n"
     assert (records / "package" / "base-files" / "compile.tsv").read_text() == ""
+
+
+def test_a_compiled_package_without_a_log_fails(tmp_path: Path) -> None:
+    _time_log(tmp_path / "time.tsv", "package/lost")
+    result = _lib("warnings_harvest", "logs", "records", "time.tsv", cwd=tmp_path)
+    assert result.returncode != 0
+    assert "no log of package/lost" in result.stderr
 
 
 PACKED = {

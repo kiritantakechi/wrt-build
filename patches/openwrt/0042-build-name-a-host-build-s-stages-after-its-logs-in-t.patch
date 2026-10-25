@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 26 Oct 2026 19:30:00 +0800
+Subject: [PATCH] build: name a host build's stages after its logs in the time
+ log
+
+The build time log names a stage by its package's directory, and a host
+build's stages by the same name as the target build's: "compile" of
+package/feeds/packages/rust is either. When both run at once, their
+begin and end events pair with each other's, and a report or a reader
+of the log cannot tell which of them ran, or which log holds its output:
+a host build logs to host-compile.txt, a target build to compile.txt.
+
+Name the stages of a host build host-prepare, host-configure,
+host-compile and host-install, as its make targets and its logs are
+named.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ include/host-build.mk | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/include/host-build.mk b/include/host-build.mk
+index a0419d8..eccebb7 100644
+--- a/include/host-build.mk
++++ b/include/host-build.mk
+@@ -186,43 +186,43 @@ ifndef DUMP
+   $(if $(DUMP),,$(call HostHost/Autoclean))
+ 
+   $(HOST_STAMP_PREPARED):
+-	$(call BuildTimeLog,begin,prepare)
++	$(call BuildTimeLog,begin,host-prepare)
+ 	@-rm -rf $(HOST_BUILD_DIR)
+ 	@mkdir -p $(HOST_BUILD_DIR)
+ 	$(foreach hook,$(Hooks/HostPrepare/Pre),$(call $(hook))$(sep))
+ 	$(call Host/Prepare)
+ 	$(foreach hook,$(Hooks/HostPrepare/Post),$(call $(hook))$(sep))
+ 	touch $$@
+-	$(call BuildTimeLog,end,prepare)
++	$(call BuildTimeLog,end,host-prepare)
+ 
+   $(call Host/Exports,$(HOST_STAMP_CONFIGURED))
+   $(if $(and $(CONFIGURE_CACHE_BASE),$(HOST_CONFIGURE_CACHE)),$(HOST_STAMP_CONFIGURED) : export CONFIGURE_CACHE_FILE:=$(HOST_CONFIGURE_CACHE_FILE))
+   $(HOST_STAMP_CONFIGURED): $(HOST_STAMP_PREPARED)
+-	$(call BuildTimeLog,begin,configure)
++	$(call BuildTimeLog,begin,host-configure)
+ 	$(foreach hook,$(Hooks/HostConfigure/Pre),$(call $(hook))$(sep))
+ 	$(call Host/Configure)
+ 	$(foreach hook,$(Hooks/HostConfigure/Post),$(call $(hook))$(sep))
+ 	touch $$@
+-	$(call BuildTimeLog,end,configure)
++	$(call BuildTimeLog,end,host-configure)
+ 
+   $(call Host/Exports,$(HOST_STAMP_BUILT))
+   $(HOST_STAMP_BUILT): $(HOST_STAMP_CONFIGURED)
+-		$(call BuildTimeLog,begin,compile)
++		$(call BuildTimeLog,begin,host-compile)
+ 		$(foreach hook,$(Hooks/HostCompile/Pre),$(call $(hook))$(sep))
+ 		$(call Host/Compile)
+ 		$(foreach hook,$(Hooks/HostCompile/Post),$(call $(hook))$(sep))
+ 		touch $$@
+-		$(call BuildTimeLog,end,compile)
++		$(call BuildTimeLog,end,host-compile)
+ 
+   $(call Host/Exports,$(HOST_STAMP_INSTALLED))
+   $(HOST_STAMP_INSTALLED): $(HOST_STAMP_BUILT) $(if $(FORCE_HOST_INSTALL),FORCE)
+-		$(call BuildTimeLog,begin,install)
++		$(call BuildTimeLog,begin,host-install)
+ 		$(call Host/Install,$(HOST_BUILD_PREFIX))
+ 		$(foreach hook,$(Hooks/HostInstall/Post),$(call $(hook))$(sep))
+ 		mkdir -p $$(shell dirname $$@)
+ 		touch $(HOST_STAMP_BUILT)
+ 		touch $$@ $(HOST_STAMP_PROGRAMS)
+-		$(call BuildTimeLog,end,install)
++		$(call BuildTimeLog,end,host-install)
+ 
+   $(call DefaultTargets,$(patsubst %,host-%,$(DEFAULT_SUBDIR_TARGETS)))
+   ifndef STAMP_BUILT

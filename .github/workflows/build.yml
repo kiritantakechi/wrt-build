@@ -24,20 +24,36 @@
 # place (repository variable RELEASE_SIGNING = enabled). Only sign has a secret.
 name: build
 
+# Code changes run it, and so do the documents system tests read (release-integrity
+# D7; tests/build/test_ci.py holds the list to them); other documentation does not.
 on:
   push:
     branches: [main]
-    paths-ignore: ["openspec/**", "docs/**", "**/*.md"]
+    paths:
+      - "**"
+      - "!openspec/**"
+      - "!docs/**"
+      - "!**/*.md"
+      - docs/patches.md
+      - docs/services.md
   pull_request:
-    paths-ignore: ["openspec/**", "docs/**", "**/*.md"]
+    paths:
+      - "**"
+      - "!openspec/**"
+      - "!docs/**"
+      - "!**/*.md"
+      - docs/patches.md
+      - docs/services.md
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# A new run cancels the older run of its ref; a re-run of an older run waits for
+# the newer one instead of cancelling it (release-integrity D1).
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.run_attempt == '1' }}
 
 defaults:
   run:
@@ -66,7 +82,7 @@ jobs:
         # Before Nix is installed, so the script runs directly rather than via just.
         run: scripts/runner-prepare.sh
 
-      - uses: DeterminateSystems/nix-installer-action@v23
+      - uses: ./.github/actions/nix
 
       - name: Boards
         id: boards
@@ -168,7 +184,7 @@ jobs:
         # Before Nix is installed, so the script runs directly rather than via just.
         run: scripts/runner-prepare.sh
 
-      - uses: DeterminateSystems/nix-installer-action@v23
+      - uses: ./.github/actions/nix
 
       - name: Fetch, patch and configure
         run: nix develop .#build -c just fetch patch config "$BOARD" ci
@@ -207,39 +223,39 @@ jobs:
       - name: Unpack toolchain
         run: nix develop .#build -c just toolchain-unpack "$WRT_WORKDIR/toolchain-cache.tar.zst"
 
+      # Every source the build needs, before it builds: the download cache is
+      # saved only when this step got them all (release-integrity D6).
+      - name: Download sources
+        id: download
+        run: nix develop .#build -c just download
+
       - name: Build firmware
         env:
           # The board's own cache: it keeps what this build used (scripts/build.sh).
           WRT_COMPILER_CACHE_TRIM: 1
         run: nix develop .#build -c scripts/build.sh "$BOARD" ci
 
-      # Off the default branch, each only within the quota's room, so that
-      # main's caches stay (build-integrity D5).
-      - name: Room for the download cache
-        id: dl-room
+      # Off the default branch, only within the quota's room, so that main's
+      # caches stay (build-integrity D5): the room for both caches, which every
+      # board's job may save at once (release-integrity D6).
+      - name: Room for the caches
+        id: room
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: nix develop .#build -c just cache-room "$WRT_WORKDIR/dl" >> "$GITHUB_OUTPUT"
+          CACHE_SAVERS: ${{ strategy.job-total }}
+        run: nix develop .#build -c just cache-room "$WRT_WORKDIR/dl" "$WRT_WORKDIR/compiler-cache" >> "$GITHUB_OUTPUT"
 
       - name: Save download cache
-        if: always() && steps.dl-room.outputs.save == 'true'
+        if: always() && steps.download.outcome == 'success' && steps.room.outputs.save == 'true'
         uses: actions/cache/save@v6
         with:
           key: dl-${{ hashFiles('upstream.lock', 'feed/**/Makefile') }}
           path: ${{ env.WRT_WORKDIR }}/dl
 
-      - name: Room for the compiler cache
-        id: compiler-cache-room
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: nix develop .#build -c just cache-room "$WRT_WORKDIR/compiler-cache" >> "$GITHUB_OUTPUT"
-
       - name: Save compiler cache
-        if: always() && steps.compiler-cache-room.outputs.save == 'true'
+        if: always() && steps.room.outputs.save == 'true'
         uses: actions/cache/save@v6
         with:
           key: ${{ steps.compiler-cache.outputs.key }}
@@ -322,7 +338,7 @@ jobs:
         # Before Nix is installed, so the script runs directly rather than via just.
         run: scripts/runner-prepare.sh
 
-      - uses: DeterminateSystems/nix-installer-action@v23
+      - uses: ./.github/actions/nix
 
       - uses: actions/download-artifact@v8
         with:
@@ -375,7 +391,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: DeterminateSystems/nix-installer-action@v23
+      - uses: ./.github/actions/nix
 
       - uses: actions/download-artifact@v8
         with:
@@ -390,8 +406,14 @@ jobs:
           umask 077
           printf '%s\n' "$APK_KEY" >"$RUNNER_TEMP/apk.key"
           printf '%s\n' "$FW_KEY" >"$RUNNER_TEMP/fw.key"
-          for build in "$RUNNER_TEMP"/unsigned/*/; do
-            board=$(jq -r .board "$build/manifest.json")
+          # Each build is the board its artifact is named after, a board of
+          # boards/, whose manifest must say so (release-integrity D2).
+          for build in "$RUNNER_TEMP"/unsigned/firmware-unsigned-*/; do
+            build=${build%/}
+            board=${build##*/firmware-unsigned-}
+            [ -f "boards/$board.json" ] || { echo "::error::$board is no board of boards/"; exit 1; }
+            jq -e --arg board "$board" '.board == $board' "$build/manifest.json" >/dev/null ||
+              { echo "::error::the manifest of $board's build names another board"; exit 1; }
             nix run .#sign-tools -- scripts/release-sign.sh "$build" "$RUNNER_TEMP/signed/$board" \
               --apk-key "$RUNNER_TEMP/apk.key" --fw-key "$RUNNER_TEMP/fw.key"
           done
@@ -423,7 +445,7 @@ jobs:
         # Before Nix is installed, so the script runs directly rather than via just.
         run: scripts/runner-prepare.sh
 
-      - uses: DeterminateSystems/nix-installer-action@v23
+      - uses: ./.github/actions/nix
 
       - uses: actions/download-artifact@v8
         with:
@@ -469,7 +491,9 @@ jobs:
   # had: a matrix reports each board's drill on its own. It fails unless the
   # system tests passed and every board's drill passed, or signing, and with it
   # every drill, did not run (pull requests, no release keys yet). A failed or
-  # rejected signing skips the drills too, and fails here.
+  # rejected signing skips the drills too, and fails here. A bump's pull request
+  # cannot sign: while signing is set up, its run fails here, and the bump
+  # branch's own run, which drills, passes it (release-integrity D4).
   upgrade-drill:
     needs: [system-test, sign, drill]
     if: always()
@@ -481,8 +505,16 @@ jobs:
           SYSTEM_TEST: ${{ needs.system-test.result }}
           SIGN: ${{ needs.sign.result }}
           DRILL: ${{ needs.drill.result }}
+          BUMP_PULL_REQUEST: >-
+            ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'bump/') &&
+            vars.RELEASE_SIGNING == 'enabled' }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           echo "system-test: $SYSTEM_TEST, sign: $SIGN, drill: $DRILL"
+          if [ "$BUMP_PULL_REQUEST" = true ]; then
+            echo "::error::a bump's pull request does not drill; its branch's run does: gh workflow run build.yml --ref $HEAD_REF"
+            exit 1
+          fi
           [ "$SYSTEM_TEST" = success ] &&
             { [ "$DRILL" = success ] || { [ "$SIGN" = skipped ] && [ "$DRILL" = skipped ]; }; }
 
@@ -497,7 +529,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: DeterminateSystems/nix-installer-action@v23
+      - uses: ./.github/actions/nix
 
       - uses: actions/download-artifact@v8
         with:

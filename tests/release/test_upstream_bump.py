@@ -2,6 +2,9 @@
 
 scripts/upstream-bump.sh runs against local repositories standing in for the
 three upstreams; scripts/patch.sh against one the patch queue does not apply to.
+The bump workflow's step that opens the pull request runs in a clone of a local
+repository standing in for GitHub's, with a gh that records its calls; the
+drill check's step runs as build.yml has it.
 The drill tests (marked drill) are what CI's upgrade-drill job runs with the
 production keys and the latest stable release as the base; here, and in
 system-test, they run with the session's keys and this build as the base.
@@ -16,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+import yaml
 
 from wrt_tests import spec
 from wrt_tests.model.boards import load_all
@@ -32,6 +36,22 @@ REPO = Path(__file__).resolve().parents[2]
 NAMES = ("openwrt", "packages", "luci")
 BBR_PATCH = "patches/openwrt/0001-generic-6.18-add-TCP-BBRv3.patch"
 DRILL_BASE = REPO / "scripts" / "drill-base.sh"
+WORKFLOWS = REPO / ".github" / "workflows"
+# The day a bump runs on, and so its branch.
+DAY = "2026-10-26"
+BRANCH = f"bump/{DAY}"
+# Stand-ins for the bump's step: a date of DAY, and a gh that records its calls
+# in gh.calls, lists the pull requests that pulls holds, and creates none while
+# refuse exists.
+DATE = f"#!/bin/sh\necho {DAY}\n"
+GH_PULL_REQUESTS = """#!/bin/sh
+here=$(dirname "$0")
+printf '%s\\n' "$*" >>"$here/gh.calls"
+case "$1 $2" in
+    "pr list") cat "$here/pulls" 2>/dev/null || true ;;
+    "pr create") [ ! -e "$here/refuse" ] ;;
+esac
+"""
 # A stand-in for gh: the latest release is latest.json beside it, or GitHub's
 # error in latest.error, and the release's assets are the files in assets/.
 GH = """#!/bin/sh
@@ -154,6 +174,128 @@ def test_no_updates_make_nothing(tmp_path: Path) -> None:
     assert lock.read_text() == before
 
 
+def _github(tmp_path: Path, *, branch_commits: int = 0) -> tuple[Path, Path]:
+    """Make a repository standing in for GitHub's and a clone of it with a moved lock.
+
+    Its bump branch of the day exists when ``branch_commits`` makes commits on
+    it, as the maintainer would. Return the stand-in and the clone.
+    """
+    origin = tmp_path / "origin.git"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", origin.name)
+    clone = tmp_path / "clone"
+    _git(tmp_path, "init", "-q", "-b", "main", clone.name)
+    (clone / "upstream.lock").write_text("openwrt old\n")
+    _git(clone, "add", "upstream.lock")
+    _git(clone, "commit", "-q", "-m", "main")
+    _git(clone, "remote", "add", "origin", str(origin))
+    _git(clone, "push", "-q", "origin", "main")
+    if branch_commits:
+        _git(clone, "switch", "-q", "-c", BRANCH)
+        for number in range(branch_commits):
+            _commit(clone, f"maintainer {number}")
+        _git(clone, "push", "-q", "origin", BRANCH)
+        _git(clone, "switch", "-q", "main")
+        _git(clone, "branch", "-q", "-D", BRANCH)
+    (clone / "upstream.lock").write_text("openwrt new\n")
+    return origin, clone
+
+
+def _open_pull_request(
+    tmp_path: Path, clone: Path, *, pulls: str = "", refused: bool = False
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Run bump.yml's step that opens the pull request; return its result and gh's calls."""
+    (step,) = [
+        step
+        for step in yaml.safe_load((WORKFLOWS / "bump.yml").read_text(encoding="utf-8"))["jobs"][
+            "bump"
+        ]["steps"]
+        if step.get("name") == "Open the pull request"
+    ]
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    (runner / "pull-request.md").write_text("upstream: bump openwrt\n\nthe commits\n")
+    directory = tmp_path / "bin"
+    directory.mkdir()
+    for name, script in (("gh", GH_PULL_REQUESTS), ("date", DATE)):
+        (directory / name).write_text(script, encoding="utf-8")
+        (directory / name).chmod(0o755)
+    (directory / "pulls").write_text(pulls)
+    if refused:
+        (directory / "refuse").touch()
+    result = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", step["run"]],
+        cwd=clone,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "PATH": f"{directory}{os.pathsep}{os.environ['PATH']}",
+            "RUNNER_TEMP": str(runner),
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+        },
+    )
+    calls = directory / "gh.calls"
+    return result, calls.read_text().splitlines() if calls.exists() else []
+
+
+@spec(CAPABILITY, "Weekly automated PR", "The PR cannot be opened")
+def test_a_pull_request_that_cannot_be_opened_leaves_the_checks_running(
+    tmp_path: Path,
+) -> None:
+    origin, clone = _github(tmp_path)
+    result, calls = _open_pull_request(tmp_path, clone, refused=True)
+    assert result.returncode != 0
+    assert f"cannot open the pull request of {BRANCH}" in result.stdout
+    # The branch is pushed with the new lock, and its check and build were
+    # started before the pull request was asked for.
+    assert _git(origin, "show", f"{BRANCH}:upstream.lock") == "openwrt new"
+    started = [f"workflow run {workflow} --ref {BRANCH}" for workflow in ("check.yml", "build.yml")]
+    assert calls[:2] == started
+    assert calls[-1].startswith(f"pr create --base main --head {BRANCH} ")
+
+
+@spec(CAPABILITY, "Weekly automated PR", "Bump run again")
+@pytest.mark.parametrize("pulls", ["", "7\n"], ids=["without its pull request", "with it"])
+def test_a_bump_run_again_keeps_the_branch(tmp_path: Path, pulls: str) -> None:
+    origin, clone = _github(tmp_path, branch_commits=2)
+    before = _git(origin, "rev-parse", BRANCH)
+    result, calls = _open_pull_request(tmp_path, clone, pulls=pulls)
+    assert result.returncode == 0, result.stdout
+    assert _git(origin, "rev-parse", BRANCH) == before
+    assert not [call for call in calls if call.startswith("workflow run")]
+    created = [call for call in calls if call.startswith("pr create")]
+    assert len(created) == (0 if pulls else 1)
+
+
+@spec(CAPABILITY, "Merge only after the upgrade drill passes", "The PR's own run of a bump")
+def test_a_bump_s_pull_request_run_fails_the_drill_check() -> None:
+    check = yaml.safe_load((WORKFLOWS / "build.yml").read_text(encoding="utf-8"))["jobs"][
+        "upgrade-drill"
+    ]
+    (step,) = check["steps"]
+    # A pull request's run of a bump branch, while signing is set up.
+    condition = step["env"]["BUMP_PULL_REQUEST"]
+    for part in (
+        "github.event_name == 'pull_request'",
+        "startsWith(github.head_ref, 'bump/')",
+        "vars.RELEASE_SIGNING == 'enabled'",
+    ):
+        assert part in condition
+    # The results such a run has: the system tests passed, and nothing signed.
+    results = {"SYSTEM_TEST": "success", "SIGN": "skipped", "DRILL": "skipped"}
+    result = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", step["run"]],
+        env={**os.environ, **results, "BUMP_PULL_REQUEST": "true", "HEAD_REF": BRANCH},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert f"gh workflow run build.yml --ref {BRANCH}" in result.stdout
+
+
 @spec(CAPABILITY, "Fail clearly when patches do not apply", "BBRv3 patch conflict")
 def test_a_patch_that_does_not_apply_is_named(tmp_path: Path) -> None:
     # openwrt took a BBR patch of its own, under the name ours adds; a copy of
@@ -209,6 +351,7 @@ def _manifest(board: Board, run: str, files: dict[str, str]) -> Manifest:
             "toolchain_cflags": "-O3",
             "upstream_lock_sha256": "0" * 64,
             "patches_sha256": "0" * 64,
+            "commit": "0" * 40,
             "openwrt_head": "0" * 40,
             "kernel_version": "",
             "vermagic": "",

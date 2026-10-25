@@ -33,18 +33,20 @@ image_logs() (
 	awk -f "${REPO_DIR}/scripts/lib/image-logs.awk" "$1" "$2"
 )
 
-# warnings_harvest <logs> <records> <since>: record the UB-indicative warnings of
-# every package's build log written since the file <since>, in <records> under the
-# log's path. OpenWrt rewrites the logs of all packages whenever it runs their
-# compile steps, also of those it finds up to date: such a log holds nothing but
-# make's time line, and leaves the package's record of its last build standing.
-# A package that compiles without a word (base-files) writes the same log the
-# first time, and gets an empty record.
+# warnings_harvest <logs> <records> <time_log>: record the UB-indicative warnings
+# of every package the build compiled, as its time log names them (a compile
+# stage, timing.sh), from its log, in <records> under the log's path. OpenWrt
+# rewrites a package's log whenever it runs its compile step: also when it finds
+# the package up to date, and when it only packs it again (its package missing
+# from the output directory, or its packaging rules changed), which writes no
+# compiler output. Only a compiled package's record changes; one that compiles
+# without a word (base-files) gets an empty record.
 warnings_harvest() (
-	find "$1/package" -name compile.txt -newer "$3" | while IFS= read -r log; do
-		record="$2/${log#"$1"/}"
-		record=${record%.txt}.tsv
-		grep -qv '^time: ' "${log}" || [ ! -f "${record}" ] || continue
+	awk -F '\t' '$2 == "begin" && $3 == "compile" && $4 ~ /^package\// { print $4 }' "$3" |
+		LC_ALL=C sort -u | while IFS= read -r package; do
+		log="$1/${package}/compile.txt"
+		[ -f "${log}" ] || die "no log of ${package}, which the build compiled"
+		record="$2/${package}/compile.tsv"
 		mkdir -p "${record%/*}"
 		ub_warnings "${log}" >"${record}"
 	done

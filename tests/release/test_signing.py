@@ -1,10 +1,13 @@
 """release/signing: a job of its own signs with keys only it sees; devices trust only them.
 
-The workflow checks read .github/workflows. Signing runs scripts/release-sign.sh,
-the script the sign job runs, with the session's release keys; the router
-trusts those keys (conftest), as a release image trusts the production ones.
+The workflow checks read .github/workflows, and run the sign job's script with a
+stand-in nix that records what it would sign. Signing runs
+scripts/release-sign.sh, the script the sign job runs, with the session's release
+keys; the router trusts those keys (conftest), as a release image trusts the
+production ones.
 """
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -14,7 +17,11 @@ import pytest
 import yaml
 
 from wrt_tests import spec
+from wrt_tests.device.emu import sha256
+from wrt_tests.model.boards import load_all
+from wrt_tests.model.data import read_json, write_json
 from wrt_tests.model.keys import APK_KEYS, FIRMWARE_KEYS, Keys, sign
+from wrt_tests.model.outputs import MANIFEST_FILE, Manifest
 from wrt_tests.model.trees import linked_copy, replace
 from wrt_tests.sandbox.oci import extract_root
 
@@ -30,10 +37,19 @@ SECRETS = ("RELEASE_APK_KEY", "RELEASE_FW_KEY")
 ENVIRONMENT = "release-signing"
 INDEX = "targets/packages/packages.adb"
 ON_ROUTER = "/tmp/packages.adb"  # noqa: S108 (a path on the router)
-# The only actions the sign job may use: the checkout, Nix and the artifacts.
-SIGN_ACTIONS = {"actions/checkout", "DeterminateSystems/nix-installer-action"} | {
+# The only actions the sign job may use: the checkout, the pinned Nix and the
+# artifacts.
+SIGN_ACTIONS = {"actions/checkout", "./.github/actions/nix"} | {
     f"actions/{verb}-artifact" for verb in ("download", "upload")
 }
+# A board of boards/, whose build the sign job tests sign.
+BOARD = load_all()[0].id
+# What signing adds to a build's files.
+SIGNING = {MANIFEST_FILE, f"{MANIFEST_FILE}.sig", "SHA256SUMS"}
+# A stand-in for nix that records its arguments, one call per line.
+NIX = """#!/bin/sh
+printf '%s\\n' "$*" >>"$NIX_CALLS"
+"""
 
 
 def _jobs() -> dict[str, tuple[str, dict[str, Any]]]:
@@ -81,6 +97,98 @@ def test_a_changed_artifact_is_not_signed(
         sign(changed, tmp_path / "signed", release_keys)
     assert "do not match manifest.json" in failure.value.stderr
     assert not (tmp_path / "signed").exists()
+
+
+def _sign_job(tmp_path: Path, artifact: str, board: str) -> tuple[bool, list[str]]:
+    """Run the sign job's script on an artifact whose manifest names ``board``.
+
+    Return whether it succeeded and what it had nix run.
+    """
+    (step,) = [step for step in _jobs()["build/sign"][1]["steps"] if "run" in step]
+    build = tmp_path / "unsigned" / f"firmware-unsigned-{artifact}"
+    build.mkdir(parents=True)
+    (build / MANIFEST_FILE).write_text(f'{{"board": "{board}"}}\n', encoding="utf-8")
+    directory = tmp_path / "bin"
+    directory.mkdir()
+    (directory / "nix").write_text(NIX, encoding="utf-8")
+    (directory / "nix").chmod(0o755)
+    calls = tmp_path / "nix.calls"
+    result = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", step["run"]],
+        cwd=REPO,
+        capture_output=True,
+        check=False,
+        env={
+            **os.environ,
+            "PATH": f"{directory}{os.pathsep}{os.environ['PATH']}",
+            "RUNNER_TEMP": str(tmp_path),
+            "APK_KEY": "apk",
+            "FW_KEY": "firmware",
+            "NIX_CALLS": str(calls),
+        },
+    )
+    made = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+    return result.returncode == 0, made
+
+
+@spec(CAPABILITY, "Signing targets", "A build of another board")
+@pytest.mark.parametrize(
+    ("artifact", "named"),
+    [
+        pytest.param("..", BOARD, id="artifact of no board"),
+        pytest.param(BOARD, f"../{BOARD}", id="manifest of another board"),
+        pytest.param(BOARD, BOARD, id="the board's own"),
+    ],
+)
+def test_each_build_is_signed_as_its_artifact_s_board(
+    tmp_path: Path, artifact: str, named: str
+) -> None:
+    signed, made = _sign_job(tmp_path, artifact, named)
+    # Only a board of boards/ whose manifest says so is signed, into its own
+    # directory of the signed builds.
+    if artifact == named:
+        assert signed
+        build = tmp_path / "unsigned" / f"firmware-unsigned-{BOARD}"
+        (call,) = made
+        assert call.startswith(
+            f"run .#sign-tools -- scripts/release-sign.sh {build} {tmp_path}/signed/{BOARD} "
+        )
+    else:
+        assert not signed
+        assert made == []
+
+
+@spec(CAPABILITY, "Signing targets", "Manifest that names a path outside the build")
+@pytest.mark.parametrize("name", ["../outside/packages.adb", "targets/../../outside/packages.adb"])
+def test_a_file_out_of_the_build_is_not_signed(
+    build_output: Path, release_keys: Keys, tmp_path: Path, name: str
+) -> None:
+    # A package index beside the build, which the manifest names with its hash.
+    outside = tmp_path / "outside" / "packages.adb"
+    outside.parent.mkdir()
+    shutil.copy(build_output / INDEX, outside)
+    before = outside.read_bytes()
+    build = linked_copy(build_output, tmp_path / "build")
+    manifest = read_json(build / MANIFEST_FILE, Manifest)
+    files = manifest.files | {name: sha256(outside)}
+    write_json(build / MANIFEST_FILE, manifest.model_copy(update={"files": files}))
+    with pytest.raises(subprocess.CalledProcessError) as failure:
+        sign(build, tmp_path / "signed", release_keys)
+    assert "lists a file that is no plain path inside its build" in failure.value.stderr
+    assert not (tmp_path / "signed").exists()
+    assert outside.read_bytes() == before
+
+
+@spec(CAPABILITY, "Signing targets", "A file the manifest does not list")
+def test_only_the_files_the_manifest_lists_are_signed(
+    build_output: Path, release_keys: Keys, tmp_path: Path
+) -> None:
+    build = linked_copy(build_output, tmp_path / "build")
+    (build / "targets" / "unlisted-factory.img.gz").write_bytes(b"unlisted")
+    signed = sign(build, tmp_path / "signed", release_keys)
+    listed = read_json(build_output / MANIFEST_FILE, Manifest).files
+    held = {path.relative_to(signed).as_posix() for path in signed.rglob("*") if path.is_file()}
+    assert held == listed.keys() | SIGNING
 
 
 def _resigned(index: Path, path: Path, keys: Keys) -> Path:

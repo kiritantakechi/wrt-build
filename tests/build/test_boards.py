@@ -264,8 +264,8 @@ def _tree_with_toolchain(workdir: Path, board: Board, record: ToolchainRecord | 
         "val.%:\n\t@echo '$($*)'\n"
         "download:\n\t@:\n"
         "world:\n\t@touch $(CURDIR)/built\n"
-        # COMPILED (from the environment) logs a stage the build compiled.
-        "\t@[ -z '$(COMPILED)' ] || printf '1\\tbegin\\tcompile\\t%s\\n' '$(COMPILED)'"
+        # COMPILED (from the environment) logs a host build the build compiled.
+        "\t@[ -z '$(COMPILED)' ] || printf '1\\tbegin\\thost-compile\\t%s\\n' '$(COMPILED)'"
         " >>'$(BUILD_TIME_LOG)'\n"
     )
     return tree
@@ -687,7 +687,7 @@ def test_a_board_build_that_compiles_the_toolchain_fails(tmp_path: Path) -> None
     assert (tree / "built").exists()
     assert result.returncode != 0
     assert "compiled part of the toolchain" in result.stderr
-    assert "package/feeds/packages/rust [compile]" in result.stderr
+    assert "package/feeds/packages/rust [host-compile]" in result.stderr
 
 
 def _configure(source: Path, *targets: str) -> dict[str, str]:

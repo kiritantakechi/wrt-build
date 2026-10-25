@@ -42,7 +42,6 @@ def _caches_of_two_runs(repository: Repository, ref: str) -> None:
         repository.cache(ref, f"dl-{run}")
         for stage in ("host", "r4s"):
             repository.cache(ref, f"compiler-cache-{stage}-settings-{run}")
-    repository.cache(ref, "ccache-r4s-1")
 
 
 def test_a_run_prunes_what_it_superseded(tmp_path: Path) -> None:

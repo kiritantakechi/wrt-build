@@ -55,13 +55,15 @@ fetch_locked() (
 # <patch dir>/*.patch applied in name order. It is made in the object database,
 # on an index of its own, so the work tree stays as it is: what git am makes of
 # the series, with each patch's author, its date for both dates, and a fixed
-# committer, so the same series always gives the same commit. Dies naming the
-# first patch that does not apply.
+# committer, so the same series always gives the same commit. git reads neither
+# the user's nor the system's configuration, which could fix whitespace, sign
+# or otherwise change it (release-integrity D8). Dies naming the first patch
+# that does not apply.
 series_commit() (
 	dir=$1 repository=$2 commit=$3
 	scratch=$(mktemp -d "${TMPDIR:-/tmp}/wrt-series.XXXXXX")
 	trap 'rm -rf "${scratch}"' EXIT
-	export GIT_INDEX_FILE="${scratch}/index" \
+	export GIT_INDEX_FILE="${scratch}/index" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
 		GIT_COMMITTER_NAME=wrt-build GIT_COMMITTER_EMAIL=wrt-build@localhost
 	git -C "${repository}" read-tree "${commit}"
 	for patch in "${dir}"/*.patch; do

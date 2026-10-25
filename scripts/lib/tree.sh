@@ -1,5 +1,6 @@
 # tree: the build tree's files: what lives outside it, linked in; files written
-# only when their content changes; its configuration; and its checkout.
+# only when their content changes; its configuration, and the packages it no
+# longer builds; and its checkout.
 # Usage: use tree   (POSIX sh; sourced)
 # shellcheck shell=sh
 : "${REPO_DIR:?load scripts/lib/core.sh first}"
@@ -65,6 +66,18 @@ missing_config_lines() (
 		done
 )
 
+# stale_packages <output_dir> <config> <packageinfo>: the apks under the output
+# directory of packages the configuration does not build, one path per line
+# (stale-packages.awk). OpenWrt removes a package's older apk when it packs it
+# again, and leaves the apks of a package it no longer builds: its clean rule
+# of a deselected package would remove them, and nothing runs it. An output
+# directory no build has made yet holds none.
+stale_packages() (
+	[ -d "$1" ] || exit 0
+	find "$1" -type f -name '*.apk' | LC_ALL=C sort |
+		awk -f "${REPO_DIR}/scripts/lib/stale-packages.awk" "$2" "$3" -
+)
+
 # configure_tree <tree> <seed file>: the tree's .config from the seeds. Fails if
 # make defconfig dropped or changed any of their lines (renamed or removed
 # options, unmet dependencies). A configuration the same as the one its build
@@ -97,8 +110,11 @@ configure_tree() (
 # counts as unchanged too: the index is refreshed first, or checkout would take
 # it for a local change and write it again. Untracked files that are not ignored
 # go, such as a patch a package would apply, but version.date, which patch.sh
-# keeps; ignored build output stays.
+# keeps; ignored build output stays. git reads neither the user's nor the
+# system's configuration, whose line ending conversions would change the files
+# (release-integrity D8).
 move_tree() (
+	export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 	git -C "$1" update-index -q --refresh >/dev/null || true
 	git -C "$1" -c advice.detachedHead=false checkout -q -f --detach "$2"
 	git -C "$1" clean -q -f -d -e /version.date

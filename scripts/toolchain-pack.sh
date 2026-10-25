@@ -12,6 +12,12 @@ require_linux
 tree=$(workdir_tree)
 ensure_fhs build "$@"
 
+# The archive where the caller named it, as toolchain-unpack reads it: the
+# directory changes below (release-integrity D8).
+case "${archive}" in
+	/*) ;;
+	*) archive="${PWD}/${archive}" ;;
+esac
 cd "${tree}"
 # The toolchain the tree is configured for, as toolchain-build leaves it; not a
 # directory another configuration left.

@@ -9,6 +9,7 @@
   "toolchain_cflags": "-Os -pipe -mcpu=generic -Warray-bounds -Wuninitialized -Wmaybe-uninitialized -Wstrict-aliasing -Wuse-after-free -Wdangling-pointer -Wshift-negative-value -fno-caller-saves -fno-plt -O3 -fhonour-copts",
   "upstream_lock_sha256": "f8df55f7d61af40f648ab7d074d106b2202fe6c3739e7a3c2fdf729fcadf3d0e",
   "patches_sha256": "4930e7716bfbacfeced841564dcfe0baf615d413c58197b22af6b6b3c39bd026",
+  "commit": "db88cf4838dc7bc37dda3e6404fabb549b214e82",
   "openwrt_head": "f879fa1be82c24f12a3b75f6b14c454771c43301",
   "kernel_version": "6.18.52~96aa0a1385b8ca83e6c87595d2ad4a04-r1",
   "vermagic": "96aa0a1385b8ca83e6c87595d2ad4a04",
