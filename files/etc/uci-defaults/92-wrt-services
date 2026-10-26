@@ -7,9 +7,9 @@
 #    it as a mount point to wait for, even before there is a disk;
 #  - logs persist on the data disk, 64 MiB before they rotate; logd writes them
 #    only while it is mounted (the log service's mount trigger);
-#  - containers keep their storage on the data disk; podman's API service stays
-#    off, as the Pods are wrt-containers'; the LAN may reach containers (podman's
-#    own defaults made the zone, with its way to wan);
+#  - podman's API service stays off, as the Pods are wrt-containers' (whose
+#    storage.conf.d keeps their storage on the data disk); the LAN may reach
+#    containers (podman's own defaults made the zone, with its way to wan);
 #  - SMB: one share on the data disk, LAN only; SMB 3.0 at least, and an unknown
 #    user is refused rather than taken for a guest;
 #  - WireGuard: wg0 in a zone of its own, off until the config push brings its
@@ -81,7 +81,6 @@ uci -q batch <<-EOF
 	set firewall.tailscale_in.target='ACCEPT'
 	set prometheus-node-exporter-ucode.main.listen_interface='lan'
 EOF
-sed -i 's#^graphroot = .*#graphroot = "/mnt/data/containers/storage"#' /etc/containers/storage.conf
 sed -i -e 's/^\(\tmap to guest =\).*/\1 never/' \
 	-e '/^\[global\]/a\	server min protocol = SMB3_00' /etc/ksmbd/ksmbd.conf.template
 /etc/init.d/podman disable

@@ -26,6 +26,7 @@ endef
 
 define Package/wrt-containers/conffiles
 /etc/containers/containers.conf.d/50-wrt.conf
+/etc/containers/storage.conf.d/50-wrt.conf
 endef
 
 define Build/Compile

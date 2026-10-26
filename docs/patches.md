@@ -611,3 +611,15 @@ What the patches do:
 Alternatives considered: 120 alone ends the merge, but on the VM the `oldconfig` after it, with stdin from /dev/null, wrote 1.1 GB of prompts for the empty `ENV_ADDR_REDUND` in 20 s. Stopping `oldconfig` at the end of its input was a 2023 Linux series, dropped for breaking builds that run make with stdin from /dev/null. OpenWrt's `FAIL_ON_UNCONFIGURED` hack for its kernel's Kconfig is meant for OpenWrt only.
 
 Verification log: the `build/boards` test "A fragment leaves a question for the next" configures a copy of the emulator's prepared U-Boot source as the build does. Without the patches, its merge was still asking after a minute; with 120 alone, the merge ended and the `oldconfig` after it was still asking (2026-10-18, both boards' build trees). With both, it passes on both boards' build trees, and both boards built anew with every U-Boot's `.config`, the boards' and the emulator's, the same as before (2026-10-18).
+
+### prometheus-node-exporter-ucode: written without reassigning puts
+
+Patch: `patches/packages/0008-prometheus-node-exporter-ucode-write-without-reassig.patch`, for openwrt/packages.
+
+Problem: `metrics.uc` declares `puts()`, which writes to uhttpd, and when it runs from the command line it assigns `puts` another function, which prints. ucode's ddb06a197e ("compiler: make strict mode function names constant bindings", in OpenWrt's ucode of 2026-10-18) binds the name of a function declaration as a constant in strict mode, as forward declarations always were. The assignment is then a syntax error: the script no longer compiles, uhttpd cannot load its handler (`Invalid assignment to constant 'puts'`), and procd gives up on the exporter after six starts.
+
+Why it matters here: the node exporter is the router's monitoring (services/monitoring). With the upstream pins of 2026-10-25 it never listened, and every monitoring test failed.
+
+What the patch does: `puts()` writes to uhttpd when the script runs in it, and prints otherwise; the assignment goes. `PKG_RELEASE` goes to 5.
+
+Verification log: the image's ucode compiles the patched script, and run from the command line it prints its metrics (2026-10-26, the R4S's root filesystem); the services/monitoring tests on both boards.

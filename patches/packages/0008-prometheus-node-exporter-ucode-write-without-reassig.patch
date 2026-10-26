@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 26 Oct 2026 13:10:00 +0800
+Subject: [PATCH] prometheus-node-exporter-ucode: write without reassigning
+ puts
+
+metrics.uc declares puts() to write to uhttpd, and run from the command
+line, it assigns another function to puts that prints. ucode now binds
+the name of a function declaration as a constant in strict mode
+(ucode commit ddb06a197e, "compiler: make strict mode function names
+constant bindings"), so the assignment is a syntax error: the script no
+longer compiles, uhttpd cannot load its handler, and the exporter fails
+on every start.
+
+Have puts() write to uhttpd when the script runs in it, and print
+otherwise, and drop the assignment.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ utils/prometheus-node-exporter-ucode/Makefile         | 2 +-
+ utils/prometheus-node-exporter-ucode/files/metrics.uc | 9 ++++-----
+ 2 files changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/utils/prometheus-node-exporter-ucode/Makefile b/utils/prometheus-node-exporter-ucode/Makefile
+index 961f4c7..47648d4 100644
+--- a/utils/prometheus-node-exporter-ucode/Makefile
++++ b/utils/prometheus-node-exporter-ucode/Makefile
+@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=prometheus-node-exporter-ucode
+ PKG_VERSION:=2024.02.07
+-PKG_RELEASE:=4
++PKG_RELEASE:=5
+ 
+ PKG_MAINTAINER:=Andre Heider <a.heider@gmail.com>
+ PKG_LICENSE:=Apache-2.0
+diff --git a/utils/prometheus-node-exporter-ucode/files/metrics.uc b/utils/prometheus-node-exporter-ucode/files/metrics.uc
+index 3dce77a..7433ca4 100644
+--- a/utils/prometheus-node-exporter-ucode/files/metrics.uc
++++ b/utils/prometheus-node-exporter-ucode/files/metrics.uc
+@@ -11,7 +11,10 @@ function debug(...s) {
+ }
+ 
+ function puts(...s) {
+-	return uhttpd.send(...s, "\n");
++	if ("uhttpd" in global)
++		return uhttpd.send(...s, "\n");
++
++	return print(...s, "\n");
+ }
+ 
+ function govalue(value) {
+@@ -216,10 +219,6 @@ warn(`prometheus-node-exporter-ucode now serving requests with ${length(collecto
+ if (!("uhttpd" in global)) {
+ 	global.debug = true;
+ 
+-	puts = function(...s) {
+-		return print(...s, "\n");
+-	};
+-
+ 	handle_request({
+ 		QUERY_STRING: join("&", map(ARGV, v => "collect=" + v)),
+ 	});
