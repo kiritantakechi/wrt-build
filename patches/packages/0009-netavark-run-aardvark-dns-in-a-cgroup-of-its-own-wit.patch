@@ -1,0 +1,198 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Mon, 26 Oct 2026 18:30:00 +0800
+Subject: [PATCH] netavark: run aardvark-dns in a cgroup of its own without
+ systemd
+
+procd kills what a service leaves in its cgroup once the service's main
+process exits. aardvark-dns, which netavark starts for podman's DNS
+enabled networks, runs in the cgroup of the service that ran podman, so
+it died with the first such service to end, and stopping the network's
+last container then failed. Add a patch that runs aardvark-dns in a
+cgroup of its own, as systemd-run --scope does with systemd.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ net/netavark/Makefile                         |   2 +-
+ ...-a-cgroup-of-its-own-without-systemd.patch | 158 ++++++++++++++++++
+ 2 files changed, 159 insertions(+), 1 deletion(-)
+ create mode 100644 net/netavark/patches/010-aardvark-run-aardvark-dns-in-a-cgroup-of-its-own-without-systemd.patch
+
+diff --git a/net/netavark/Makefile b/net/netavark/Makefile
+index 1ba3ec9..0daa116 100644
+--- a/net/netavark/Makefile
++++ b/net/netavark/Makefile
+@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=netavark
+ PKG_VERSION:=2.1.0
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+ PKG_SOURCE_URL:=https://codeload.github.com/containers/netavark/tar.gz/v$(PKG_VERSION)?
+diff --git a/net/netavark/patches/010-aardvark-run-aardvark-dns-in-a-cgroup-of-its-own-without-systemd.patch b/net/netavark/patches/010-aardvark-run-aardvark-dns-in-a-cgroup-of-its-own-without-systemd.patch
+new file mode 100644
+index 0000000..edb84ea
+--- /dev/null
++++ b/net/netavark/patches/010-aardvark-run-aardvark-dns-in-a-cgroup-of-its-own-without-systemd.patch
+@@ -0,0 +1,158 @@
++From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
++From: kiritantakechi <kiritantakechi@gmail.com>
++Date: Mon, 26 Oct 2026 18:30:00 +0800
++Subject: [PATCH] aardvark: run aardvark-dns in a cgroup of its own without
++ systemd
++
++netavark starts aardvark-dns when a container needs it, and aardvark-dns
++then outlives the netavark run, serving every container of its networks.
++With systemd, it runs in a scope of its own (systemd-run --scope).
++Without systemd it stays in the cgroup of whatever ran netavark: when
++podman runs from a service, the service's cgroup. A service manager that
++cleans up what a service leaves in its cgroup, as procd does when the
++service's main process exits and OpenRC's rc_cgroup_cleanup does when it
++stops, then kills aardvark-dns. Its pid file stays; the next netavark
++run that removes a network's last container finds no process behind it,
++starts aardvark-dns on a configuration with no container, which exits
++at once, and fails: "aardvark-dns failed to start: Error from child
++process".
++
++On the cgroup v2 hierarchy, give aardvark-dns a cgroup of its own,
++aardvark-dns below the hierarchy's root, made when it is missing, and
++have its process join it between fork and exec, so that the daemon it
++forks runs there too. A rootless netavark has no say over the
++hierarchy, and keeps running aardvark-dns where it is.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++Upstream-Status: Pending
++---
++ src/dns/aardvark.rs | 68 ++++++++++++++++++++++++++++++++++++++++++---
++ 1 file changed, 64 insertions(+), 4 deletions(-)
++
++diff --git a/src/dns/aardvark.rs b/src/dns/aardvark.rs
++index 47114ee..488d89e 100644
++--- a/src/dns/aardvark.rs
+++++ b/src/dns/aardvark.rs
++@@ -6,7 +6,7 @@ use libc::pid_t;
++ use nix::sys::signal::{self, Signal};
++ use nix::unistd::Pid;
++ use std::collections::HashMap;
++-use std::ffi::{OsStr, OsString};
+++use std::ffi::{CStr, CString, OsStr, OsString};
++ use std::fs;
++ use std::fs::File;
++ use std::fs::OpenOptions;
++@@ -15,11 +15,17 @@ use std::io::Result;
++ use std::io::Write;
++ use std::net::Ipv4Addr;
++ use std::net::{IpAddr, Ipv6Addr};
+++use std::os::unix::ffi::OsStrExt;
+++use std::os::unix::process::CommandExt;
++ use std::path::{Path, PathBuf};
++ use std::process::{Command, Stdio};
++ 
++ const SYSTEMD_RUN: &str = "systemd-run";
++ const AARDVARK_COMMIT_LOCK: &str = "aardvark.lock";
+++/// The cgroup v2 hierarchy, in which aardvark-dns gets a cgroup of its own
+++/// without systemd.
+++const CGROUP_ROOT: &str = "/sys/fs/cgroup";
+++const AARDVARK_CGROUP: &str = "aardvark-dns";
++ 
++ /// For better safety we wrap &str in our own custom type here
++ /// where we can enforce that the caller can only construct it
++@@ -109,10 +115,29 @@ impl Aardvark {
++         false
++     }
++ 
+++    /// The cgroup.procs file of a cgroup of aardvark-dns's own on the cgroup v2
+++    /// hierarchy, made when it is missing; None without the hierarchy, or when
+++    /// the cgroup cannot be made.
+++    fn own_cgroup() -> Option<CString> {
+++        let root = Path::new(CGROUP_ROOT);
+++        if !root.join("cgroup.controllers").exists() {
+++            return None;
+++        }
+++        let dir = root.join(AARDVARK_CGROUP);
+++        if let Err(err) = fs::create_dir(&dir) {
+++            if err.kind() != ErrorKind::AlreadyExists {
+++                log::warn!("failed to create cgroup {dir:?} for aardvark-dns: {err}");
+++                return None;
+++            }
+++        }
+++        CString::new(dir.join("cgroup.procs").as_os_str().as_bytes()).ok()
+++    }
+++
++     pub fn start_aardvark_server(&self) -> NetavarkResult<()> {
++         log::debug!("Spawning aardvark server");
++ 
++         let mut aardvark_args = vec![];
+++        let mut cgroup = None;
++         // only use systemd when it is booted
++         if is_using_systemd() && Aardvark::is_executable_in_path(SYSTEMD_RUN) {
++             // TODO: This could be replaced by systemd-api.
++@@ -125,6 +150,13 @@ impl Aardvark {
++             if self.rootless {
++                 aardvark_args.push(OsStr::new("--user"));
++             }
+++        } else if !self.rootless {
+++            // Without systemd, aardvark-dns would stay in the cgroup of whatever
+++            // ran netavark, and go with it when a service manager cleans up the
+++            // service that ran podman, as procd and OpenRC kill what a service
+++            // leaves in its cgroup. A cgroup of its own keeps it running, as the
+++            // scope of systemd-run does.
+++            cgroup = Aardvark::own_cgroup();
++         }
++ 
++         aardvark_args.extend(vec![
++@@ -141,13 +173,21 @@ impl Aardvark {
++         // After https://github.com/containers/aardvark-dns/pull/148 this command
++         // will block till aardvark-dns's parent process returns back and let
++         // aardvark inherit all the fds.
++-        let out = Command::new(aardvark_args[0])
+++        let mut command = Command::new(aardvark_args[0]);
+++        command
++             .args(&aardvark_args[1..])
++             .stdin(Stdio::null())
++             .stdout(Stdio::null())
++             // set RUST_LOG for aardvark
++-            .env("RUST_LOG", log::max_level().as_str())
++-            .output()?;
+++            .env("RUST_LOG", log::max_level().as_str());
+++        if let Some(procs) = cgroup {
+++            // SAFETY: join_cgroup makes only async-signal-safe calls, as the
+++            // child of a fork must until it executes.
+++            unsafe {
+++                command.pre_exec(move || join_cgroup(&procs));
+++            }
+++        }
+++        let out = command.output()?;
++ 
++         if out.status.success() {
++             return Ok(());
++@@ -515,6 +555,26 @@ impl Aardvark {
++     }
++ }
++ 
+++/// Move the calling process into the cgroup whose cgroup.procs file is `procs`;
+++/// what it starts then runs there too.
+++fn join_cgroup(procs: &CStr) -> Result<()> {
+++    // SAFETY: procs is a valid C string, and open, write and close are
+++    // async-signal-safe.
+++    unsafe {
+++        let fd = libc::open(procs.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC);
+++        if fd < 0 {
+++            return Err(std::io::Error::last_os_error());
+++        }
+++        let written = libc::write(fd, b"0".as_ptr().cast(), 1);
+++        let error = std::io::Error::last_os_error();
+++        libc::close(fd);
+++        if written != 1 {
+++            return Err(error);
+++        }
+++    }
+++    Ok(())
+++}
+++
++ fn write_comma_separated_list<I, T>(buf: &mut String, mut iter: I)
++ where
++     T: AsRef<str>,

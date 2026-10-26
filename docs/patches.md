@@ -623,3 +623,15 @@ Why it matters here: the node exporter is the router's monitoring (services/moni
 What the patch does: `puts()` writes to uhttpd when the script runs in it, and prints otherwise; the assignment goes. `PKG_RELEASE` goes to 5.
 
 Verification log: the image's ucode compiles the patched script, and run from the command line it prints its metrics (2026-10-26, the R4S's root filesystem); the services/monitoring tests on both boards.
+
+### netavark: aardvark-dns in a cgroup of its own without systemd
+
+Patch: `patches/packages/0009-netavark-run-aardvark-dns-in-a-cgroup-of-its-own-wit.patch` (adds the netavark patch `010-aardvark-run-aardvark-dns-in-a-cgroup-of-its-own-without-systemd.patch`), for netavark, carried by openwrt/packages until then.
+
+Problem: netavark starts aardvark-dns, the DNS server of a network with DNS enabled, when a container on it needs one, and aardvark-dns then outlives that run of netavark and serves every container of its networks until the last one goes. With systemd it runs in a scope of its own (`systemd-run --scope`); without systemd it stays in the cgroup of whatever ran netavark. procd's 39b5aac8c1 (2026-10-18, in OpenWrt's procd of the pins of 2026-10-25) kills what a service leaves in its cgroup once the service's main process exits, as OpenRC's `rc_cgroup_cleanup` does when a service stops. aardvark-dns then died with the first service that ran a container and ended, its pid file staying behind. The next run of netavark that removed the network's last container found no process behind the pid file, started aardvark-dns on a configuration without a container, which exits at once, and failed: `aardvark-dns failed to start: Error from child process`.
+
+Why it matters here: podman's default network, which wrt-containers' Pods and wrt-sync's fetch container join, has DNS enabled. wrt-sync and `wrt-containers apply` run as procd instances that end once their work is done. On the R4S, aardvark-dns ran in `/services/wrt-sync/instance1` and was gone once wrt-sync had ended; stopping the app Pod then failed (2026-10-26).
+
+What the patch does: on the cgroup v2 hierarchy, a rootful netavark without systemd has aardvark-dns join a cgroup of its own, `/sys/fs/cgroup/aardvark-dns`, made when it is missing, between fork and exec, so that the daemon it forks runs there too. podman moves conmon and the containers into `libpod_parent` the same way. A rootless netavark has no say over the hierarchy and leaves aardvark-dns where it is. `PKG_RELEASE` goes to 2.
+
+Verification log: without the patch, on the R4S, aardvark-dns ran in `/services/wrt-sync/instance1`, was gone with wrt-sync, and stopping the app Pod failed as above. With it, the services/containers tests passed on the R4S, "A service's container ended" among them (device-integrity): after wrt-sync ended, the app Pod stopped and started again, and aardvark-dns answered its name (2026-10-26).
