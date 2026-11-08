@@ -23,7 +23,7 @@ An audit of the code that runs on the router (2026-10-26) found places where a f
 - **`wrt-containers apply`** starts every Pod it can and fails at the end if any did not start.
 - **dae's init script** writes its entry under a lock and atomically, a reload waits for dae to take it, and a reload of a disabled dae stops it.
 - **Snapshots** are kept for the seven most recent days on which one was taken.
-- **procd's unmount triggers** (patch 0035) tell the action which mount point goes away, and a new helper says whether every fstab mount point holding a path is mounted; ksmbd (packages 0001) and the log service (patch 0008) use them.
+- **`mount.remove` follows the unmount**, as `mount.add` follows the mount (patch 0044), so an unmount trigger (patch 0035) finds the mount point gone; a new helper says whether every fstab mount point holding a path is mounted; ksmbd (packages 0001) and the log service (patch 0008) use them.
 - **config-push** keeps the secrets readable by root alone, removes its upload however it ends, passes the Tailscale key in a file, saves and restores every file a service's push changes (Tailscale's state and the SMB users included), and checks every service it reloads.
 - **einat's health check** uses the init script's default interface.
 - **Every ucode file of the image** is compiled on the router by the image's own ucode, as ucode loads it; firewall4's stray template goes (patch 0041).
@@ -50,6 +50,6 @@ None.
 - `feed/utils/wrt-ab`: `ab.uc`, `wrt-healthcheck`, `wrt-slot`, `lib/upgrade/wrt-ab.sh`.
 - `feed/utils/wrt-sync`: `wrt-sync`, `wrt-update`, `libexec/wrt-sync/fetch`.
 - `feed/utils/wrt-containers`, `feed/utils/wrt-data` (`wrt-snap`), `feed/net/dae` (init, hotplug), `feed/net/einat` (health check).
-- `patches/openwrt/0035` (procd.sh), `patches/openwrt/0008` (ubox log), `patches/packages/0001` (ksmbd-tools), `patches/openwrt/0041` (firewall4).
+- `patches/openwrt/0035` (procd.sh), `patches/openwrt/0008` (ubox log), `patches/packages/0001` (ksmbd-tools), `patches/openwrt/0041` (firewall4), `patches/openwrt/0043` (procd's report of its trigger commands), `patches/openwrt/0044` (fstools).
 - `scripts/config-push.sh`, `scripts/config-push.d/device.uc`.
 - Tests in `tests/firmware`, `tests/release`, `tests/services`, `tests/network`, `tests/storage`, `tests/ops`; docs where they describe these.

@@ -25,5 +25,5 @@ After the configuration is written, if a service fails to reload, the push tool 
 - **THEN** Tailscale is logged in again as before the push, and the push tool exits nonzero and states the reason
 
 #### Scenario: A service that stops with its new configuration
-- **WHEN** a push changes a configuration other than the network's, dae's or Tailscale's, and a service that ran before the push no longer runs once the configuration is applied
+- **WHEN** a push changes a configuration other than the network's, dae's or Tailscale's, and a service that ran before the push no longer runs once the configuration is applied, however long the system takes to apply it
 - **THEN** that configuration is restored, the service runs again, and the push tool exits nonzero and states the reason

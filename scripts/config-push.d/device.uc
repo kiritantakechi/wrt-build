@@ -12,10 +12,10 @@
 //                or it does not come back, puts the saved files back, reloads
 //                it again and fails.
 // What a service's push changes is saved whole, Tailscale's state and the SMB
-// users included, and a service is back once its own check passes and every
-// daemon that ran before runs on, unrestarted for as long as procd may take to
-// act on the change (device-integrity D8). The commands it runs report on
-// standard error: standard output is the hashes'.
+// users included, and a service is back once procd has run what the change
+// queued, its own check passes and every daemon that ran before runs on,
+// unrestarted for as long as a restart may take (device-integrity D8). The
+// commands it runs report on standard error: standard output is the hashes'.
 'use strict';
 
 import { glob, lsdir, mkdir, open, popen, readfile, stat, writefile } from 'fs';
@@ -30,7 +30,9 @@ const SAVED = `${PUSH}/saved`;
 const TAILSCALE_KEY = `${STATE}/tailscale.key`;
 const TAILSCALE_OPTIONS = `${STATE}/tailscale.options`;
 const KSMBD_CONF = '/var/etc/ksmbd/ksmbd.conf';
-// Seconds a service has to come back in, and between two of its checks.
+// Seconds procd has to run what a change queued, a service then has to come
+// back in, and between two of its checks.
+const QUEUE_WAIT = 300;
 const WAIT = 60;
 const STEP = 2;
 
@@ -285,14 +287,26 @@ function restart_restored(name) {
 	return name == 'tailscale' ? run('/etc/init.d/tailscale restart') : reload(name);
 }
 
-// procd_services(verbose): procd's services, with their triggers if verbose.
-function procd_services(verbose) {
+// procd_services(): procd's services.
+function procd_services() {
 	let connection = ubus.connect();
-	let services = connection?.call('service', 'list', { verbose }) ?? {};
+	let services = connection?.call('service', 'list') ?? {};
 
 	connection?.disconnect();
 
 	return services;
+}
+
+// trigger_commands(): the commands procd's triggers queued that have yet to
+// end. procd runs them one at a time, each after its trigger's delay, so a
+// change's own can wait behind those of every other change.
+function trigger_commands() {
+	let connection = ubus.connect();
+	let reply = connection?.call('service', 'trigger_commands');
+
+	connection?.disconnect();
+
+	return reply?.commands ?? fail('procd does not report its trigger commands');
 }
 
 // daemons(): the procd instances that run and are respawned when they end, the
@@ -301,7 +315,7 @@ function procd_services(verbose) {
 function daemons() {
 	let found = {};
 
-	for (let service, description in procd_services(false))
+	for (let service, description in procd_services())
 		for (let instance, state in description.instances ?? {})
 			if (state.running && (state.respawn ?? state.respawn_policy))
 				found[`${service}/${instance}`] = state.incarnation;
@@ -309,23 +323,18 @@ function daemons() {
 	return found;
 }
 
-// quiet(before): the seconds procd may take to act on a change and have the
-// daemons (before) show it: its longest trigger delay; the longest one of them
-// takes to stop before it starts again, at most twice its term_timeout (a jailed
-// instance's); and a check's time for the init scripts procd runs.
+// quiet(before): the seconds the daemons (before) may take to show a change
+// procd has acted on: the longest one of them takes to stop before it starts
+// again, at most twice its term_timeout (a jailed instance's), and a check's time.
 function quiet(before) {
-	let delay = 0, stop = 0;
+	let stop = 0;
 
-	for (let service, description in procd_services(true)) {
-		for (let trigger in description.triggers ?? [])
-			delay = max(delay, (trigger[2] ?? 0) / 1000);
-
+	for (let service, description in procd_services())
 		for (let instance, state in description.instances ?? {})
 			if (`${service}/${instance}` in before)
 				stop = max(stop, 2 * (state.term_timeout ?? 0));
-	}
 
-	return delay + stop + STEP;
+	return stop + STEP;
 }
 
 // pods_running(): every declared Pod runs.
@@ -348,57 +357,87 @@ function sharing() {
 	return !length(offered) || system('pidof ksmbd.mountd >/dev/null') == 0;
 }
 
-// back(name, before, running): the service is back after its reload: its own
-// check passes, and every daemon that ran before (before) runs (running).
-function back(name, before, running) {
-	let ok;
-
+// back(name): the service's own check passes after its reload.
+function back(name) {
 	switch (name) {
 	case 'dae':
-		ok = system('/etc/healthcheck.d/50-dae >/dev/null 2>&1') == 0;
-		break;
+		return system('/etc/healthcheck.d/50-dae >/dev/null 2>&1') == 0;
 
 	case 'network':
 		let connection = ubus.connect();
 		let lan = connection?.call('network.interface.lan', 'status');
 
 		connection?.disconnect();
-		ok = lan?.up == true;
-		break;
+
+		return lan?.up == true;
 
 	case 'pods':
-		ok = pods_running();
-		break;
+		return pods_running();
 
 	case 'smb':
-		ok = sharing();
-		break;
+		return sharing();
 
 	case 'tailscale':
-		ok = system('tailscale status >/dev/null 2>&1') == 0;
-		break;
+		return system('tailscale status >/dev/null 2>&1') == 0;
 
 	default:
-		ok = true;
+		return true;
 	}
-
-	return ok && length(filter(keys(before), (daemon) => !(daemon in running))) == 0;
 }
 
-// settle(name, before): wait until the service is back, and every daemon that
-// ran before runs through one incarnation for quiet() seconds. procd acts on a
-// change after a delay, and respawns a daemon that fails, which then runs for a
-// moment at a time: a reload still to come, a restart under way and a failing
-// daemon all break the run. True if the service came back within WAIT.
+// acted(): wait until procd has run every command its triggers queued; true if
+// it did within QUEUE_WAIT. A command that hangs would hold up all the others.
+function acted() {
+	let commands;
+
+	for (let waited = 0; waited <= QUEUE_WAIT; waited += STEP) {
+		commands = trigger_commands();
+
+		if (!length(commands))
+			return true;
+
+		sleep(STEP * 1000);
+	}
+
+	warn(`config-push: procd still has to run: ${join(' ', commands[0].command)}\n`);
+
+	return false;
+}
+
+// settle(name, before): wait until procd has acted on the change, then until the
+// service's own check passes, and every daemon that ran before runs through one
+// incarnation for quiet() seconds with no trigger command left. A restart under
+// way and a failing daemon, which procd respawns and which then runs for a moment
+// at a time, break the run, as do the commands that the change's own set off.
+// True if the service came back within WAIT of procd's acting on the change;
+// otherwise says what kept it from counting as back.
 function settle(name, before) {
+	if (!acted())
+		return false;
+
 	let needed = quiet(before);
-	let steady = 0, last = null;
+	let steady = 0, last = null, holding;
 
 	for (let waited = 0; waited <= WAIT + needed; waited += STEP) {
-		let now = daemons();
-		let same = last && length(filter(keys(before), (daemon) => now[daemon] != last[daemon])) == 0;
+		let now = daemons(), commands = trigger_commands();
+		let stopped = filter(keys(before), (daemon) => !(daemon in now));
+		let restarted = filter(keys(before), (daemon) => last && daemon in now && now[daemon] != last[daemon]);
 
-		steady = back(name, before, now) && same ? steady + STEP : 0;
+		holding = [];
+
+		if (!back(name))
+			push(holding, 'its own check fails');
+
+		if (length(stopped))
+			push(holding, `stopped: ${join(' ', stopped)}`);
+
+		if (length(restarted))
+			push(holding, `restarted: ${join(' ', restarted)}`);
+
+		if (length(commands))
+			push(holding, `queued: ${join(' ', commands[0].command)}`);
+
+		steady = last && !length(holding) ? steady + STEP : 0;
 		last = now;
 
 		if (steady >= needed)
@@ -406,6 +445,8 @@ function settle(name, before) {
 
 		sleep(STEP * 1000);
 	}
+
+	warn(`config-push: ${name}: ${join('; ', holding)}\n`);
 
 	return false;
 }

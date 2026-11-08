@@ -4,6 +4,7 @@ Commands run over SSH: the runner reaches the router's LAN address from inside t
 sandbox. ``reset`` returns the emulator to its post-boot snapshot.
 """
 
+import json
 import re
 import shlex
 import socket
@@ -406,6 +407,11 @@ class Router:
         """
         self.detached = Detached(command, self.address, self.emulator.console.mark())
         self.run(f"({command}) >{DETACHED_LOG} 2>&1 </dev/null &")
+
+    def trigger_commands(self) -> list[dict[str, object]]:
+        """Return the commands procd's triggers queued that have yet to end."""
+        report = json.loads(self.run("ubus call service trigger_commands"))
+        return cast("list[dict[str, object]]", report["commands"])
 
     def boot_id(self) -> str:
         """Return the kernel's boot ID, which changes with every boot."""

@@ -14,7 +14,7 @@ All shares SHALL point to directories under `@shares`. When the data disk is abs
 - **THEN** within a few seconds the SMB service no longer runs and no LAN client can connect to it, nothing is written to the boot disk in the disk's place, and once the disk is mounted again the shares are offered again
 
 #### Scenario: Data disk removed while an unmount script runs
-- **WHEN** the data disk is removed while the SMB service offers its shares, and a script that the system runs before it unmounts a disk takes several seconds
+- **WHEN** the data disk is removed while the SMB service offers its shares, a script that the system runs before it unmounts a disk takes several seconds, and the SMB service reloads meanwhile
 - **THEN** once the disk is unmounted the SMB service no longer runs, and nothing is written to the boot disk in the disk's place
 
 #### Scenario: Share within a disk within another

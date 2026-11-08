@@ -35,7 +35,7 @@
 
 ## 5. The mount triggers (design D7)
 
-- [x] 5.1 procd.sh's `procd_mountpoints_mounted` and the unmount triggers' arguments (patch 0035), ksmbd's init (packages 0001), the log service (patch 0008); their write-ups in `docs/patches.md`.
+- [x] 5.1 procd.sh's `procd_mountpoints_mounted` and the unmount triggers (patch 0035), `mount.remove` after the unmount (patch 0044), ksmbd's init (packages 0001), the log service (patch 0008); their write-ups in `docs/patches.md`.
 
   Verify: the services/file-sharing tests and the persistent log test pass on both boards.
 - [x] 5.2 The test that compiles the image's ucode files, and firewall4's stray template removed (patch 0041) with its write-up in `docs/patches.md` (D11).
@@ -48,12 +48,16 @@
 
   Verify: the ops/config-push tests pass on both boards.
 
+- [x] 6.2 procd's report of its trigger commands (patch 0043), and `device.uc` waiting for them before it judges a service (D8); the write-up in `docs/patches.md`.
+
+  Verify: the ops/config-push test "A service that stops with its new configuration" passes on both boards with a command ahead of the reload, and fails without the wait.
+
 ## 7. Integration
 
 - [x] 7.1 Run every suite on both boards.
 
   Verify: no failure; record the runs.
-  Done 2026-10-26/27 on the VM, from the change's branch on main's sync: every suite passed on both boards (R4S: upgrade 16, boot 24, system 294, network 48, services 39, release 72 tests; R6S: 16, 24, 295, 48, 39, 72).
+  Done 2026-11-08/09 on the VM, on the change's final form: every suite passed on both boards (R4S: upgrade 16, boot 24, system 294, network 48, services 39, release 72 tests; R6S: 16, 24, 295, 48, 39, 72). On the first pass over the R4S, three tests failed and passed when their suites ran again: two WireGuard tests in services, during a load of 16 to 29 on the Mac, and the Tailscale rollback in release, at a load of 2 to 4, whose cause is not known ("nor with the previous one"; three traced runs of its module passed too). A push now says what held a service back, should it come again.
 - [ ] 7.2 Get a green CI run for both boards.
 
   Verify: record the run in `docs/ci.md`.

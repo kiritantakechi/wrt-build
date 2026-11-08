@@ -4,6 +4,7 @@ smbclient connects from a LAN client, from the internet side, from wg-peer over
 WireGuard and from ts-peer over the tailnet; only the LAN gets an answer.
 """
 
+import json
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,8 @@ from wrt_tests.device.storage import announce, boot_disk_entries, mount_options,
 from wrt_tests.model.poll import until
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from wrt_tests.device.router import Router
     from wrt_tests.device.storage import Disk
     from wrt_tests.sandbox.net import Netns
@@ -24,13 +27,19 @@ CAPABILITY = "services/file-sharing"
 SHARE = "shares"
 LAN_ADDRESS = "10.0.0.1"
 SMB_TIMEOUT = 60
-# From the disk's removal to a stopped service: procd runs the unmount trigger a
-# second after blockd's event, then the reload.
+# From the disk's removal to a stopped service, with nothing else for procd to
+# run: its unmount trigger comes a second after blockd's event, then the reload.
 STOP_TIMEOUT = 30
-# A mount hotplug script that holds the unmount up: blockd waits for the scripts
-# before it answers block, which unmounts then, up to its 3 s limit.
+# What the disk's return sets off, for procd to run one at a time: the restarts
+# of the services on it among them.
+QUEUE_TIMEOUT = 180
+# A mount hotplug script that asks for a reload and holds the unmount up for as
+# long as it can: blockd waits for the scripts before it answers block, which
+# unmounts then, after 3 s at the most. The reload starts a second after it is
+# asked for, and looks at the mount points about a second later.
 SLOW_SCRIPT = "/etc/hotplug.d/mount/00-slow"
-SLOW_SECONDS = 2
+SLOW_SECONDS = 3
+RELOAD_EVENT = json.dumps({"type": "config.change", "data": {"package": "ksmbd"}})
 # Mount points within one another, in fstab but mounted by the test alone (tmpfs).
 OUTER = "/tmp/outer"  # noqa: S108 (a path on the router)
 INNER = f"{OUTER}/inner"
@@ -65,11 +74,39 @@ def _sharing_state(router: Router) -> str:
         "pidof ksmbd.mountd",
         "logread -e ksmbd | tail -n 20",
         # procd runs one trigger command at a time: one that hangs holds up the rest.
-        "ps w | grep -e /etc/init.d/ -e podman | grep -v grep",
+        "ubus call service trigger_commands",
         'ubus call service list \'{"name": "ksmbd", "verbose": true}\'',
     )
     return router.run(
         "; ".join(f"echo '$ {command}'; {command}" for command in commands) + "; true"
+    )
+
+
+def _wait(router: Router, probe: Callable[[], object], *, timeout: float, what: str) -> None:
+    """Wait for ``probe``; if it never answers, show the state of the SMB service."""
+    try:
+        until(probe, timeout=timeout, what=what)
+    except TimeoutError as error:
+        error.add_note(_sharing_state(router))
+        raise
+
+
+def _wait_stopped(router: Router) -> None:
+    """Wait until the SMB service no longer runs."""
+    _wait(
+        router,
+        lambda: router.returncode("pidof ksmbd.mountd || [ -e /sys/module/ksmbd ]") != 0,
+        timeout=STOP_TIMEOUT,
+        what="the SMB service stopped",
+    )
+
+
+def _wait_queue_empty(router: Router) -> None:
+    """Wait until procd has run what earlier tests set off, for it to act on what comes next."""
+    until(
+        lambda: not router.trigger_commands(),
+        timeout=QUEUE_TIMEOUT,
+        what="procd's trigger commands run",
     )
 
 
@@ -161,17 +198,14 @@ def test_shares_go_with_the_data_disk(
     sharing: Online, smb_user: tuple[str, str], data_disk: Disk
 ) -> None:
     router = sharing.router
+    _wait_queue_empty(router)
     assert _list(sharing.client(), LAN_ADDRESS, smb_user)[0] == 0
     announce(router, data_disk, "remove")
     try:
         until(
             lambda: mount_options(router) is None, timeout=STOP_TIMEOUT, what="the disk unmounted"
         )
-        until(
-            lambda: router.returncode("pidof ksmbd.mountd || [ -e /sys/module/ksmbd ]") != 0,
-            timeout=STOP_TIMEOUT,
-            what="the SMB service stopped",
-        )
+        _wait_stopped(router)
         assert router.run("ss -Htln 'sport = :445'") == ""
         code, output = _list(sharing.client(), LAN_ADDRESS, smb_user)
         assert code != 0
@@ -180,15 +214,12 @@ def test_shares_go_with_the_data_disk(
     finally:
         announce(router, data_disk, "add")
         wait_mounted(router)
-    try:
-        until(
-            lambda: _list(sharing.client(), LAN_ADDRESS, smb_user)[0] == 0,
-            timeout=SMB_TIMEOUT,
-            what="the shares back",
-        )
-    except TimeoutError as error:
-        error.add_note(_sharing_state(router))
-        raise
+    _wait(
+        router,
+        lambda: _list(sharing.client(), LAN_ADDRESS, smb_user)[0] == 0,
+        timeout=SMB_TIMEOUT,
+        what="the shares back",
+    )
 
 
 @spec(CAPABILITY, "Shares on the data disk", "Data disk removed while an unmount script runs")
@@ -196,10 +227,16 @@ def test_shares_go_with_the_data_disk_whatever_runs_on_its_unmount(
     sharing: Online, smb_user: tuple[str, str], data_disk: Disk
 ) -> None:
     router = sharing.router
+    _wait_queue_empty(router)
     assert _list(sharing.client(), LAN_ADDRESS, smb_user)[0] == 0
+    script = (
+        '[ "$ACTION" = remove ] && {\n'
+        f"\tubus call service event '{RELOAD_EVENT}'\n"
+        f"\tsleep {SLOW_SECONDS}\n"
+        "}\n"
+    )
     router.run(
-        f"mkdir -p {SLOW_SCRIPT.rsplit('/', 1)[0]}"
-        f" && printf '%s\\n' '[ \"$ACTION\" = remove ] && sleep {SLOW_SECONDS}' >{SLOW_SCRIPT}"
+        f"mkdir -p {SLOW_SCRIPT.rsplit('/', 1)[0]} && cat >{SLOW_SCRIPT} <<'EOF'\n{script}EOF"
     )
     try:
         announce(router, data_disk, "remove")
@@ -208,11 +245,7 @@ def test_shares_go_with_the_data_disk_whatever_runs_on_its_unmount(
         )
         # The reload came while the disk was still mounted; once it is gone, the
         # service must be too, with nothing written where the disk was.
-        until(
-            lambda: router.returncode("pidof ksmbd.mountd || [ -e /sys/module/ksmbd ]") != 0,
-            timeout=STOP_TIMEOUT,
-            what="the SMB service stopped",
-        )
+        _wait_stopped(router)
         assert boot_disk_entries(router) == []
     finally:
         router.run(f"rm -f {SLOW_SCRIPT}")

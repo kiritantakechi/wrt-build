@@ -1,0 +1,141 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Sun, 8 Nov 2026 19:30:00 +0800
+Subject: [PATCH] procd: report the trigger commands yet to run
+
+procd runs the commands of its triggers one at a time, each after its
+trigger's delay, and reload_config returns once they are queued. One
+change can queue many, reload_config those of every configuration
+changed since its last run, so that nothing tells when procd has acted
+on a change: config-push saw a service's reload start 41 s after it had
+asked for it, on a slow device.
+
+Carry the procd patch that lists these commands in a new
+"trigger_commands" method of the service object. It is meant for procd
+upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/system/procd/Makefile                 |  2 +-
+ ...port-the-trigger-commands-yet-to-run.patch | 98 +++++++++++++++++++
+ 2 files changed, 99 insertions(+), 1 deletion(-)
+ create mode 100644 package/system/procd/patches/101-service-report-the-trigger-commands-yet-to-run.patch
+
+diff --git a/package/system/procd/Makefile b/package/system/procd/Makefile
+index 136c692..f8c8dbc 100644
+--- a/package/system/procd/Makefile
++++ b/package/system/procd/Makefile
+@@ -8,7 +8,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=procd
+-PKG_RELEASE:=3
++PKG_RELEASE:=4
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/procd.git
+diff --git a/package/system/procd/patches/101-service-report-the-trigger-commands-yet-to-run.patch b/package/system/procd/patches/101-service-report-the-trigger-commands-yet-to-run.patch
+new file mode 100644
+index 0000000..36c7fc5
+--- /dev/null
++++ b/package/system/procd/patches/101-service-report-the-trigger-commands-yet-to-run.patch
+@@ -0,0 +1,98 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] service: report the trigger commands yet to run
++
++procd runs the commands of its triggers one at a time, each after its
++trigger's delay, and "ubus call service event" and reload_config return
++once they are queued. One change can queue many, reload_config those of
++every configuration changed since its last run, so a command can start
++long after its delay, and nothing tells when procd has acted on a
++change.
++
++Add the "trigger_commands" method to the service object: the commands
++yet to end, each delayed (with the milliseconds left), queued behind
++others, or running (with its process). The list is empty once procd has
++run them all.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++ procd.h           |  1 +
++ service/service.c | 13 +++++++++++++
++ service/trigger.c | 25 +++++++++++++++++++++++++
++ 3 files changed, 39 insertions(+)
++
++diff --git a/procd.h b/procd.h
++index 6fa4fb2..c9b17b9 100644
++--- a/procd.h
+++++ b/procd.h
++@@ -65,6 +65,7 @@ struct trigger;
++ void trigger_event(const char *type, struct blob_attr *data);
++ void trigger_add(struct blob_attr *rule, void *id);
++ void trigger_del(void *id);
+++void trigger_dump(struct blob_buf *b);
++ 
++ void watch_add(const char *_name, void *id);
++ void watch_del(void *id);
++diff --git a/service/service.c b/service/service.c
++index 25242d9..73bae6c 100644
++--- a/service/service.c
+++++ b/service/service.c
++@@ -865,6 +865,18 @@ static void ubus_event_bcast(const char *type, const char *param1, const char *v
++ 	ubus_notify(ctx, &main_object, type, b.head, -1);
++ }
++ 
+++static int
+++service_handle_trigger_commands(struct ubus_context *ctx, struct ubus_object *obj,
+++				struct ubus_request_data *req, const char *method,
+++				struct blob_attr *msg)
+++{
+++	blob_buf_init(&b, 0);
+++	trigger_dump(&b);
+++	ubus_send_reply(ctx, req, b.head);
+++
+++	return 0;
+++}
+++
++ static int
++ service_handle_event(struct ubus_context *ctx, struct ubus_object *obj,
++ 			struct ubus_request_data *req, const char *method,
++@@ -1198,6 +1210,7 @@ static struct ubus_method main_object_methods[] = {
++ 	UBUS_METHOD("update_start", service_handle_update, service_attrs),
++ 	UBUS_METHOD("update_complete", service_handle_update, service_attrs),
++ 	UBUS_METHOD("event", service_handle_event, event_policy),
+++	UBUS_METHOD_NOARG("trigger_commands", service_handle_trigger_commands),
++ 	UBUS_METHOD("validate", service_handle_validate, validate_policy),
++ 	UBUS_METHOD("get_data", service_get_data, get_data_policy),
++ 	UBUS_METHOD("set_data", service_handle_set_data, set_data_policy),
++diff --git a/service/trigger.c b/service/trigger.c
++index 86cbc0f..8c7dbc9 100644
++--- a/service/trigger.c
+++++ b/service/trigger.c
++@@ -304,3 +304,28 @@ void trigger_event(const char *type, struct blob_attr *data)
++ 		json_script_run(&t->jctx, t->type, data);
++ 	}
++ }
+++
+++void trigger_dump(struct blob_buf *b)
+++{
+++	struct trigger_command *cmd;
+++	void *commands, *c;
+++
+++	commands = blobmsg_open_array(b, "commands");
+++	avl_for_each_element(&trigger_pending, cmd, avl) {
+++		c = blobmsg_open_table(b, NULL);
+++		blobmsg_add_field(b, BLOBMSG_TYPE_ARRAY, "command",
+++				  blobmsg_data(cmd->data), blobmsg_data_len(cmd->data));
+++		if (cmd->delay.pending) {
+++			blobmsg_add_string(b, "state", "delayed");
+++			blobmsg_add_u64(b, "remaining",
+++					uloop_timeout_remaining64(&cmd->delay));
+++		} else if (cmd->proc.task.running) {
+++			blobmsg_add_string(b, "state", "running");
+++			blobmsg_add_u32(b, "pid", cmd->proc.proc.pid);
+++		} else {
+++			blobmsg_add_string(b, "state", "queued");
+++		}
+++		blobmsg_close_table(b, c);
+++	}
+++	blobmsg_close_array(b, commands);
+++}

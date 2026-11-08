@@ -11,6 +11,7 @@ upgrade to the other slot comes last.
 
 import hashlib
 import json
+import shlex
 import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -67,6 +68,10 @@ TAILSCALE_ARGUMENTS = "/tmp/tailscale-arguments"  # noqa: S108 (a path on the ro
 REFUSED_KEY = "tskey-auth-refused-0000"
 # A docroot uhttpd refuses to start with.
 NO_DOCROOT = "/nonexistent"
+# A command procd runs ahead of uhttpd's reload, for longer than a daemon may
+# take to restart: procd runs its trigger commands one at a time.
+AHEAD = "wrt-test-ahead"
+AHEAD_SECONDS = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +130,13 @@ def _recorded_tailscale(router: Router) -> Generator[None]:
         yield
     finally:
         router.run(f"ln -sf tailscaled {TAILSCALE}")
+
+
+def _assert_put_back(result: subprocess.CompletedProcess[str], name: str) -> None:
+    """Assert that the push failed, and says that ``name``'s previous configuration is back."""
+    assert result.returncode != 0, result.stderr
+    assert f"{name} did not come back with the new configuration" in result.stderr, result.stderr
+    assert "the previous one is back" in result.stderr, result.stderr
 
 
 def _dae_sha256(router: Router) -> str:
@@ -225,9 +237,7 @@ def test_a_service_that_fails_is_put_back(pushed: Pushed) -> None:
         pushed.repository.discard()
         # The LAN was gone for a while, and the harness's connection with it.
         router.disconnect()
-    assert result.returncode != 0
-    assert "network did not come back with the new configuration" in result.stderr
-    assert "the previous one is back" in result.stderr
+    _assert_put_back(result, "network")
     assert (
         router.run("uci get network.lan.ipaddr"),
         router.run("cat /etc/wrt-config/network"),
@@ -274,11 +284,21 @@ def test_a_refused_tailscale_login_is_put_back(pushed: Pushed) -> None:
         result = pushed.push()
     finally:
         pushed.repository.discard()
-    assert result.returncode != 0
-    assert "tailscale did not come back with the new configuration" in result.stderr
-    assert "the previous one is back" in result.stderr
+    _assert_put_back(result, "tailscale")
     until(lambda: _tailscale_running(router), timeout=TAILSCALE_TIMEOUT, what="tailscale back")
     assert (router.run("tailscale ip -4"), router.run("cat /etc/wrt-config/tailscale")) == before
+
+
+@contextmanager
+def _command_ahead_of_reloads(router: Router, package: str) -> Generator[None]:
+    """Have procd run a slow command, ahead of the reloads, on a change to ``package``."""
+    condition = ["if", ["eq", "package", package], ["run_script", "/bin/sleep", str(AHEAD_SECONDS)]]
+    service = {"name": AHEAD, "triggers": [["config.change", condition, 0]]}
+    router.run(f"ubus call service set {shlex.quote(json.dumps(service))}")
+    try:
+        yield
+    finally:
+        router.run(f'ubus call service delete \'{{"name": "{AHEAD}"}}\'')
 
 
 @spec(CAPABILITY, "Roll back on service failure", "A service that stops with its new configuration")
@@ -289,12 +309,11 @@ def test_a_service_that_stops_is_put_back(pushed: Pushed) -> None:
     template = pushed.repository.directory / "uci" / "uhttpd.uci.tmpl"
     template.write_text(f"set uhttpd.main.home='{NO_DOCROOT}'\n")
     try:
-        result = pushed.push()
+        with _command_ahead_of_reloads(router, "uhttpd"):
+            result = pushed.push()
     finally:
         pushed.repository.discard()
-    assert result.returncode != 0
-    assert "uhttpd did not come back with the new configuration" in result.stderr
-    assert "the previous one is back" in result.stderr
+    _assert_put_back(result, "uhttpd")
     assert router.run("uci get uhttpd.main.home") == before
     until(
         lambda: router.returncode("pidof uhttpd >/dev/null") == 0,
