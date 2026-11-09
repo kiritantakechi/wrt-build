@@ -406,11 +406,11 @@ function acted() {
 
 // settle(name, before): wait until procd has acted on the change, then until the
 // service's own check passes, and every daemon that ran before runs through one
-// incarnation for quiet() seconds with no trigger command left. A restart under
-// way and a failing daemon, which procd respawns and which then runs for a moment
-// at a time, break the run, as do the commands that the change's own set off.
-// True if the service came back within WAIT of procd's acting on the change;
-// otherwise says what kept it from counting as back.
+// incarnation for quiet() seconds. A restart under way and a failing daemon, which
+// procd respawns and which then runs for a moment at a time, break the run; the
+// commands other services' triggers bring all the while, on interface events for
+// one, do not. True if the service came back within WAIT of procd's acting on the
+// change; otherwise says what kept it from counting as back.
 function settle(name, before) {
 	if (!acted())
 		return false;
@@ -419,7 +419,7 @@ function settle(name, before) {
 	let steady = 0, last = null, holding;
 
 	for (let waited = 0; waited <= WAIT + needed; waited += STEP) {
-		let now = daemons(), commands = trigger_commands();
+		let now = daemons();
 		let stopped = filter(keys(before), (daemon) => !(daemon in now));
 		let restarted = filter(keys(before), (daemon) => last && daemon in now && now[daemon] != last[daemon]);
 
@@ -433,9 +433,6 @@ function settle(name, before) {
 
 		if (length(restarted))
 			push(holding, `restarted: ${join(' ', restarted)}`);
-
-		if (length(commands))
-			push(holding, `queued: ${join(' ', commands[0].command)}`);
 
 		steady = last && !length(holding) ? steady + STEP : 0;
 		last = now;

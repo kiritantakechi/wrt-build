@@ -57,7 +57,7 @@
 - [x] 7.1 Run every suite on both boards.
 
   Verify: no failure; record the runs.
-  Done 2026-11-08/09 on the VM, on the change's final form: every suite passed on both boards (R4S: upgrade 16, boot 24, system 294, network 48, services 39, release 72 tests; R6S: 16, 24, 295, 48, 39, 72). On the first pass over the R4S, three tests failed and passed when their suites ran again: two WireGuard tests in services, during a load of 16 to 29 on the Mac, and the Tailscale rollback in release, at a load of 2 to 4, whose cause is not known ("nor with the previous one"; three traced runs of its module passed too). A push now says what held a service back, should it come again.
+  Done 2026-11-08/09 on the VM, on the change's final form: every suite passed on both boards (R4S: upgrade 16, boot 24, system 294, network 48, services 39, release 72 tests; R6S: 16, 24, 295, 48, 39, 72). On the first pass over the R4S, three tests failed and passed when their suites ran again: two WireGuard tests in services, during a load of 16 to 29 on the Mac, and the Tailscale rollback in release, at a load of 2 to 4 ("nor with the previous one"; three traced runs of its module passed too). The cause was not seen there; a push now says what held a service back, and CI's run 42527830422 then showed a wait ruined by other services' trigger commands (D8), which took the same time.
 - [ ] 7.2 Get a green CI run for both boards.
 
   Verify: record the run in `docs/ci.md`.
