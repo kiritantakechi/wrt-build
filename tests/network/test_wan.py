@@ -38,6 +38,8 @@ MSS_MAX = PATH_MTU - 40
 DOWNLOAD_SECONDS = 60
 OFFLOAD_TIMEOUT = 20
 RECEIVED_TIMEOUT = 10
+# A table of the test's own: a reload of the firewall leaves it alone.
+FORWARD_COUNTER = "wrt_test_forward"
 
 
 @spec(CAPABILITY, "PPPoE dial-up", "Image contains no credentials")
@@ -152,12 +154,55 @@ def test_inbound_ipv6_is_rejected(online: Online) -> None:
 
 
 def _offloaded(router: Router) -> list[str]:
-    """Return the conntrack entries of the download while the flowtable carries it."""
+    """Return the conntrack entries of the download that show the flowtable's flag."""
     return [
         line
         for line in router.run("cat /proc/net/nf_conntrack").splitlines()
         if f"dport={IPERF_PORTS[0]}" in line and "[OFFLOAD]" in line
     ]
+
+
+def _count_forwarded(router: Router) -> None:
+    """Have the router count the segments to the download's server at the forward hook.
+
+    Those are the direction the flowtable can carry. einat translates on
+    pppoe-wan, so the flowtable knows a flow's replies by the LAN address, which
+    they do not carry yet on the device below pppoe-wan where it would take them.
+    """
+    router.run(
+        f"nft add table inet {FORWARD_COUNTER}"
+        f" && nft 'add chain inet {FORWARD_COUNTER} forward"
+        " { type filter hook forward priority filter; }'"
+        f" && nft add rule inet {FORWARD_COUNTER} forward tcp dport {IPERF_PORTS[0]} counter"
+    )
+
+
+def _forwarded(router: Router) -> int:
+    """Return how many segments to the download's server have reached the forward hook."""
+    shown = router.run(f"nft list chain inet {FORWARD_COUNTER} forward")
+    counted = re.search(r"counter packets (\d+)", shown)
+    assert counted is not None, shown
+    return int(counted[1])
+
+
+def _carried(online: Online, inet: Netns) -> list[str]:
+    """Return the download's conntrack entries if the flowtable carries it for a whole reading.
+
+    The flag alone does not tell: the kernel sets it while it tries to add a flow
+    and clears it when that fails, so a flow that never enters the flowtable
+    shows it now and then. The segments of a flow the flowtable carries do not
+    reach the forward hook, while the server goes on receiving them, from the WAN
+    address: untranslated, they would come from the LAN address, which no server
+    socket takes (test-fidelity D2).
+    """
+    forwarded = _forwarded(online.router)
+    before = _received(inet)
+    until(
+        lambda: _received(inet)[online.wan_address] > before[online.wan_address],
+        timeout=RECEIVED_TIMEOUT,
+        what="segments of the download at the server",
+    )
+    return _offloaded(online.router) if _forwarded(online.router) == forwarded else []
 
 
 def _received(inet: Netns) -> Counter[str]:
@@ -197,6 +242,7 @@ def test_offloaded_flows_keep_the_wan_address(
     online: Online, record_testsuite_property: Callable[[str, object], None]
 ) -> None:
     inet = online.network["inet"]
+    _count_forwarded(online.router)
     download = online.client().spawn(
         "iperf3",
         "--client",
@@ -209,20 +255,11 @@ def test_offloaded_flows_keep_the_wan_address(
     )
     try:
         flow = until(
-            lambda: _offloaded(online.router), timeout=OFFLOAD_TIMEOUT, what="offloaded download"
+            lambda: _carried(online, inet), timeout=OFFLOAD_TIMEOUT, what="offloaded download"
         )
         record_testsuite_property("offloaded flow", flow[0])
-        # While the flowtable carries the flow, the server goes on receiving its
-        # segments, from the WAN address: untranslated, they would come from the
-        # LAN address, which no server socket takes (test-fidelity D2).
-        before = _received(inet)
-        until(
-            lambda: _received(inet)[online.wan_address] > before[online.wan_address],
-            timeout=RECEIVED_TIMEOUT,
-            what="segments of the offloaded flow at the server",
-        )
-        assert _offloaded(online.router), "the download left the flowtable meanwhile"
         assert set(_received(inet)) == {online.wan_address}
     finally:
         download.terminate()
         download.wait()
+        online.router.run(f"nft delete table inet {FORWARD_COUNTER}")

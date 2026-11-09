@@ -184,7 +184,7 @@ function = "read_comsub"
 reason = "bufn starts at 0, so the first iteration refills the buffer and sets bufp, which is used afterwards only while bufn > 0, inside the last successful read."
 reviewed = 2026-10-05
 
-# ppp 2.5.4
+# ppp 2.5.5
 [[warning]]
 package = "ppp"
 option = "-Waddress-of-packed-member"
@@ -225,7 +225,7 @@ function = "ppp_get_path"
 reason = "The switch covers every ppp_path_t enumerator (PPP_WITH_PLUGINS is 1), and every caller passes an enumerator constant, so path is always assigned."
 reviewed = 2026-10-05
 
-# iproute2 6.18.0
+# iproute2 7.3.0
 [[warning]]
 package = "iproute2"
 option = "-Wstringop-overflow"
@@ -303,15 +303,6 @@ file = "vendor/github.com/mattn/go-sqlite3/sqlite3-binding.c"
 function = "sqlite3ColumnSetColl"
 reason = "COLFLAG_HASTYPE is set only together with a non-NULL zCnName that holds \"name\\0type\\0\", so the second sqlite3Strlen30 never sees a NULL name; a NULL name arises only after an allocation failure, where the parser stops."
 reviewed = 2026-10-05
-
-# procd 2026.10.18
-[[warning]]
-package = "procd"
-option = "-Wmaybe-uninitialized"
-file = "uxc.c"
-function = "uxc_list"
-reason = "arr is assigned and used under the same if (json_output); json_output is a file-static that only cli_list's option parsing sets, before it calls uxc_list, and never address-taken."
-reviewed = 2026-10-26
 
 # util-linux 2.42.2
 [[warning]]

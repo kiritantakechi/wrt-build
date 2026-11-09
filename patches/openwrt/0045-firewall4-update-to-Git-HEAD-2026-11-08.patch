@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Tue, 10 Nov 2026 05:19:32 +0800
+Subject: [PATCH] firewall4: update to Git HEAD (2026-11-08)
+
+Since the kernel's backport of 871df5007eda ("netfilter: flowtable:
+bail out if forward path cannot be discovered"), a flow enters the
+flowtable only if the device at the bottom of its forward path is one
+of the flowtable's devices. firewall4 of 2026-10-29 lists only the
+zone devices for software offloading, so a flow through a bridge finds
+its port missing: nft_flow_route() answers -ENOENT for every packet,
+and the flow stays on the classic path. firewall4 now lists the devices
+below a zone's bridge or VLAN device.
+
+The update also removes the stray template mangle-rule.uc.
+
+3722eadc088c fw4: list the software flowtable devices for hardware offloading too
+b25508586879 fw4: list the layer 3 devices of zones in the software flowtable
+55e0d749d041 fw4: list the devices a zone names in the software flowtable
+a945b12c989f fw4: list lower devices for software flow offloading
+d961882bafe8 Revert "fw4: restart in a single nft transaction"
+358d42144b72 config: mark unsupported fw3 options correctly
+a314df48644e Set has_ports for helper rules and require helper port
+4b686774d2a7 templates: remove stray file
+7f34d9e0e678 fw4: support multiple ipset references per rule and redirect
+daf6cf607cab fw4: reject unknown tokens in ipset references
+296ddab860a1 fw4: add WDS ports to the flowtable by prefix
+c22c2f241e9e fw4: restart in a single nft transaction
+5474da96eb44 ruleset: Add snat_port support for MASQUERADE
+613198bebd0b ruleset: avoid no-op port translation in dnat
+e497bdcc78f0 config: add dest addr restrictions for DHCPv6 rules
+2be5820d470d templates: allow inverted limits
+ba2ae80a48c6 firewall4: enable mac ranges for rule
+3ab89e865b0d redirect: preserve destination ipsets in NAT reflection
+ffa015c64f06 fw4: fix parsing of repeated separators in ipset references
+b8a32285c252 fw4: fix misleading family conflict message
+466e78ee25a7 fw4: skip protocols a referenced port set does not apply to
+40f032c29a0e fw4: skip an include section with invalid options
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Backport [firewall4 3722eadc088c, ahead of openwrt/openwrt]
+---
+ package/network/config/firewall4/Makefile | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/package/network/config/firewall4/Makefile b/package/network/config/firewall4/Makefile
+index ccd5b73c..36af5718 100644
+--- a/package/network/config/firewall4/Makefile
++++ b/package/network/config/firewall4/Makefile
+@@ -9,9 +9,9 @@ PKG_RELEASE:=1
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/firewall4.git
+-PKG_SOURCE_DATE:=2026-10-29
+-PKG_SOURCE_VERSION:=e6f600c458bda7bc2d87b07e78fd06b50c9d7131
+-PKG_MIRROR_HASH:=d67c4a2fe4072f641ea532379f463ab3169aea8c2aa54966154a4670fda2e1ac
++PKG_SOURCE_DATE:=2026-11-08
++PKG_SOURCE_VERSION:=3722eadc088c3ab81389596ca9796112b436583a
++PKG_MIRROR_HASH:=a95c6cfe419c7d4e22bda5608aa6e46c67dadc9c7096879702d614cc498759d0
+ PKG_MAINTAINER:=Jo-Philipp Wich <jo@mein.io>
+ PKG_LICENSE:=ISC
+ 

@@ -614,18 +614,6 @@ What the patch does: on the cgroup v2 hierarchy, a rootful netavark without syst
 
 Verification log: without the patch, on the R4S, aardvark-dns ran in `/services/wrt-sync/instance1`, was gone with wrt-sync, and stopping the app Pod failed as above. With it, the services/containers tests passed on the R4S, "A service's container ended" among them (device-integrity): after wrt-sync ended, the app Pod stopped and started again, and aardvark-dns answered its name (2026-10-26).
 
-### firewall4: the stray mangle-rule template removed
-
-Patch: `patches/openwrt/0041-firewall4-remove-the-stray-mangle-rule-template.patch` (adds the firewall4 patch `001-templates-remove-the-stray-mangle-rule-template.patch`), for firewall4, carried by openwrt/openwrt until then.
-
-Problem: firewall4's commit 39e8c70957 ("fw4: fix handling the ipset "comment" option", 2023) added `templates/mangle-rule.uc` by accident, beside `ruleset.uc.orig` and `ruleset.uc.rej`, the leftovers of applying a patch, which upstream removed since. No template includes it and `fw4.uc` never renders it. Its first block, `{%+ for (let src_devices in rule.src?.zone) }`, lacks its `%}`, so ucode does not compile it: the ucode of the earlier pins (2026-07-09) did not either.
-
-Why it matters here: the firmware/base-system test compiles every ucode file of the image with the image's ucode (device-integrity D11), so that a ucode update that rejects a program, as the one of 2026-10-18 rejected the node exporter's, fails the tests. The stray template is the one file that would fail it without being used.
-
-What the patch does: the firewall4 patch deletes the template. `PKG_RELEASE` goes to 2.
-
-Verification log: GNU patch, as OpenWrt applies a package's patches (`patch -f -p1`), removes the file from firewall4's source of 2026-10-25; both the old and the new host ucode reject the template (`Template blocks may not be nested`); the firmware/base-system test on both boards.
-
 ### build: a host build's stages named after its logs in the time log
 
 Patch: `patches/openwrt/0042-build-name-a-host-build-s-stages-after-its-logs-in-t.patch`, for openwrt/openwrt.
@@ -662,3 +650,14 @@ What the patch does: `block` reports a finished unmount with blockd's new `umoun
 
 Verification log: the window is at most blockd's 3 s; the file-sharing test "Data disk removed while an unmount script runs" holds the unmount script that long, has a reload asked for meanwhile, and fails on a build without the patch: the SMB service stays running.
 
+### libpfring: ring_bind with the kernel's address type
+
+Patch: `patches/packages/0010-libpfring-build-against-Linux-6.18.57-and-later.patch` (adds the package patch `902-pf_ring-bind-with-the-address-type-of-the-kernel.patch`), for ntop/PF_RING, carried by openwrt/packages until then.
+
+Problem: `proto_ops.bind` takes a `struct sockaddr_unsized *` in mainline since 6.19 (0e50474fa514), and 6.18.57 took that change as a dependency of a Bluetooth fix (946dc5835c8f). PF_RING 9.2.0's `ring_bind` still takes a `struct sockaddr *`, and GCC rejects the initializer of `ring_ops.bind` as an incompatible pointer type. PF_RING's development branch has the new type from 6.19.0 on, which leaves out the stable releases that took it.
+
+Why it matters here: the `ci` profile sets `CONFIG_ALL_KMODS`, so this one module stopped the firmware build on kernel 6.18.60.
+
+What the patch does: `ring_bind` is declared with the new type from 6.18.57 on, in the version check `pf_ring.c` uses throughout; it already has one on a stable release, 6.5.3 for `sendpage`. The body reads the same in both types. `PKG_RELEASE` goes to 2.
+
+Verification log: the module is built by both boards' `ci` builds on 6.18.60.
