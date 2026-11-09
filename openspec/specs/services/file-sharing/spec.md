@@ -17,7 +17,7 @@ The SMB service SHALL be offered only on the LAN interface. It MUST NOT be reach
 - **THEN** the connection is refused in all three cases
 
 ### Requirement: Shares on the data disk
-All shares SHALL point to directories under `@shares`. When the data disk is absent, the SMB service MUST NOT offer any shares: neither when the system boots without it, nor once it is unmounted while the service runs. The service SHALL offer the shares again when the disk is mounted again.
+All shares SHALL point to directories under `@shares`. When the data disk is absent, the SMB service MUST NOT offer any shares: neither when the system boots without it, nor once it is unmounted while the service runs, however long the system takes over the unmount. The service SHALL offer the shares again when the disk is mounted again. A share SHALL count as on a mounted disk only while every mount point that holds its directory is mounted.
 
 #### Scenario: Data disk absent
 - **WHEN** the system boots without the data disk
@@ -26,6 +26,14 @@ All shares SHALL point to directories under `@shares`. When the data disk is abs
 #### Scenario: Data disk removed while sharing
 - **WHEN** the data disk is unmounted, as a removal of its device unmounts it, while the SMB service offers its shares
 - **THEN** within a few seconds the SMB service no longer runs and no LAN client can connect to it, nothing is written to the boot disk in the disk's place, and once the disk is mounted again the shares are offered again
+
+#### Scenario: Data disk removed while an unmount script runs
+- **WHEN** the data disk is removed while the SMB service offers its shares, a script that the system runs before it unmounts a disk takes several seconds, and the SMB service reloads meanwhile
+- **THEN** once the disk is unmounted the SMB service no longer runs, and nothing is written to the boot disk in the disk's place
+
+#### Scenario: Share within a disk within another
+- **WHEN** a share lies under a mount point that lies under another, and only the outer one is mounted, and the SMB service is reloaded
+- **THEN** that share is not offered
 
 ### Requirement: Authentication required
 Access to shares SHALL require a username and password, and anonymous access MUST NOT be allowed. Credentials for share users MUST NOT be preset in the image.

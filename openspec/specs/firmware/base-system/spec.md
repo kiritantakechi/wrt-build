@@ -70,3 +70,10 @@ The image MUST NOT contain the following components: UPX-compressed executables,
 #### Scenario: Check installed packages and executables
 - **WHEN** the packages in the image are listed and its executables are scanned
 - **THEN** none of the components above are present, no executable carries a UPX marker, and there is no `/etc/opkg`
+
+### Requirement: The image's ucode programs compile
+Every ucode script, module and template the image ships SHALL compile with the image's own ucode, each as ucode loads it, so that a program a newer ucode no longer accepts is found when the image is tested, not when it fails to start on the router.
+
+#### Scenario: Compile the image's ucode files
+- **WHEN** every ucode file of the image is compiled on the router with the image's ucode: templates as templates, modules as modules, scripts as scripts
+- **THEN** every one compiles

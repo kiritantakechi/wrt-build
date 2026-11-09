@@ -41,9 +41,10 @@
 
   Verify: no failure; the suites' durations recorded beside the previous runs'.
   Done 2026-10-26/27 on the VM: every suite passed on both boards. Minutes, R4S: upgrade 44, boot 32, system 20, network 17, services 27, release 45 (the morning's run on the same VM: 44, 33, 20, 19, 26, 38); R6S: 40, 30, 18, 13, 25, 37.
-- [ ] 4.2 Get a green CI run for both boards.
+- [x] 4.2 Get a green CI run for both boards.
 
   Verify: record the run in `docs/ci.md`.
+  Done 2026-11-09: run 42572816158 on 67638e4 passed for both boards; recorded in `docs/ci.md`.
 
 ## Workflow follow-up
 

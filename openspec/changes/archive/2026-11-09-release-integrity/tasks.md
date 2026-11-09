@@ -44,7 +44,9 @@
 
 ## 6. Integration
 
-- [ ] 6.1 Get a green CI run for both boards with the change.
+- [x] 6.1 Get a green CI run for both boards with the change.
+
+  Done 2026-11-09: run 42572816158 on 67638e4 passed for both boards; recorded in `docs/ci.md`.
 
   Verify: record the run in `docs/ci.md`.
 

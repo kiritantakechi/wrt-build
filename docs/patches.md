@@ -684,5 +684,5 @@ Why it matters here: procd.sh's unmount triggers (patch 0035) had to tell their 
 
 What the patch does: `block` reports a finished unmount with blockd's new `umounted` call, and blockd sends `mount.remove` from that. The hotplug scripts still run before the unmount, and a failed unmount sends no event. Nothing else in the tree listens for `mount.remove`. `PKG_RELEASE` goes to 4.
 
-Verification log: the window could not be provoked on the VM, being at most blockd's 3 s; the file-sharing test "Data disk removed while an unmount script runs" has a reload asked for while the unmount waits, and fails on a build without the patch.
+Verification log: the window is at most blockd's 3 s; the file-sharing test "Data disk removed while an unmount script runs" holds the unmount script that long, has a reload asked for meanwhile, and fails on a build without the patch: the SMB service stays running.
 

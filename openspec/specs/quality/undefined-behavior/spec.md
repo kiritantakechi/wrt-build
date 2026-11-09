@@ -16,6 +16,10 @@ Every warning that the build of a package the image ships emits for one of the U
 - **WHEN** an entry of the register matches no warning of the build
 - **THEN** the check fails, and names the entry
 
+#### Scenario: Package packed again without a compile
+- **WHEN** an incremental build packs a package again without compiling it, as when its package is gone from the output directory or OpenWrt's packaging rules changed
+- **THEN** the warnings of the package's last compile still count in the check
+
 ### Requirement: Undefined behavior traps under UBSan
 A build of the `ubsan` profile SHALL instrument every target package with UBSan in trap mode, except the toolchain's libraries and the kernel. A trap while the system tests run SHALL fail a test and name the process that trapped: the test during which it trapped, or, for a trap in a fixture outside every test, the last test that used the fixture.
 
