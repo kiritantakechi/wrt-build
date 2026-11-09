@@ -21,15 +21,15 @@ Upstream-Status: Pending
  create mode 100644 package/utils/busybox/patches/800-printf-do-not-subtract-from-a-null-pointer.patch
 
 diff --git a/package/utils/busybox/Makefile b/package/utils/busybox/Makefile
-index a950cff..bb00d33 100644
+index 658d9ed..83987b3 100644
 --- a/package/utils/busybox/Makefile
 +++ b/package/utils/busybox/Makefile
 @@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
  
  PKG_NAME:=busybox
  PKG_VERSION:=1.38.0
--PKG_RELEASE:=3
-+PKG_RELEASE:=4
+-PKG_RELEASE:=5
++PKG_RELEASE:=6
  PKG_FLAGS:=essential
  
  PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.bz2

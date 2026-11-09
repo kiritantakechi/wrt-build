@@ -13,7 +13,7 @@ Leave such a share out until its mount point is mounted, and reload the
 service when it is mounted or unmounted: a mount trigger and an unmount
 trigger per share, the latter from procd.sh's unmount helpers. A share
 counts as mounted only while every mount point that holds it is
-(procd_mountpoints_mounted). A reload starts the service anew, as
+(procd_mountpoints_ready). A reload starts the service anew, as
 start_service resets the server hard; a restart would drop the service,
 and its triggers with it, until it has started again, so a disk that
 comes back while the service restarts would go unnoticed. With every
@@ -40,7 +40,7 @@ index df3a142..c1b26d8 100644
  PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
  PKG_SOURCE_URL:=https://github.com/cifsd-team/ksmbd-tools/releases/download/$(PKG_VERSION)
 diff --git a/net/ksmbd-tools/files/ksmbd.init b/net/ksmbd-tools/files/ksmbd.init
-index f87b392..95d06d6 100644
+index f87b392..a2ee6e0 100644
 --- a/net/ksmbd-tools/files/ksmbd.init
 +++ b/net/ksmbd-tools/files/ksmbd.init
 @@ -109,6 +109,15 @@ smb_add_share()
@@ -49,7 +49,7 @@ index f87b392..95d06d6 100644
  
 +	# A share on a mount point that is not mounted would expose the directory
 +	# underneath (on the root filesystem): leave it out until it is mounted.
-+	if ! procd_mountpoints_mounted "$path"; then
++	if ! procd_mountpoints_ready "$path"; then
 +		logger -p daemon.info -t 'ksmbd' "Share $name waits for its mount point to be mounted."
 +		SHARES_WAITING=$((SHARES_WAITING + 1))
 +		return

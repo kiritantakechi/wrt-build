@@ -20,15 +20,15 @@ Upstream-Status: Pending
  create mode 100644 package/network/services/ppp/patches/210-pppd-hash-the-host-name-without-signed-overflow.patch
 
 diff --git a/package/network/services/ppp/Makefile b/package/network/services/ppp/Makefile
-index 30da13f..251b7ca 100644
+index 01659fc..f5e3d16 100644
 --- a/package/network/services/ppp/Makefile
 +++ b/package/network/services/ppp/Makefile
 @@ -10,7 +10,7 @@ include $(INCLUDE_DIR)/kernel.mk
  
  PKG_NAME:=ppp
- PKG_VERSION:=2.5.4
--PKG_RELEASE:=3
-+PKG_RELEASE:=4
+ PKG_VERSION:=2.5.5
+-PKG_RELEASE:=2
++PKG_RELEASE:=3
  
  PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
  PKG_SOURCE_URL:=https://download.samba.org/pub/ppp

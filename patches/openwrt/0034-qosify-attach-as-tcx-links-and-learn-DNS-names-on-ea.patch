@@ -31,13 +31,13 @@ Upstream-Status: Pending
  create mode 100644 package/network/config/qosify/patches/103-interface-attach-the-classifiers-as-tcx-links.patch
 
 diff --git a/package/network/config/qosify/Makefile b/package/network/config/qosify/Makefile
-index 22fa36c..2127f0e 100644
+index 7e0a9fa..84cf6b0 100644
 --- a/package/network/config/qosify/Makefile
 +++ b/package/network/config/qosify/Makefile
 @@ -14,7 +14,7 @@ PKG_SOURCE_PROTO:=git
- PKG_SOURCE_DATE:=2026-10-14
- PKG_SOURCE_VERSION:=b3ee50eff9d924a6c7a0c02b9ab1afc6056b7a00
- PKG_MIRROR_HASH:=924dd93cfc3205da58127bbd0397322e0b48819be28db3538e6ab9fc6196c536
+ PKG_SOURCE_DATE:=2026-10-15
+ PKG_SOURCE_VERSION:=143d71d2479176ad5fdb0f9ce191affa2dc9640d
+ PKG_MIRROR_HASH:=23f337614c2a1b806b4e34c20c8f742b41bd47e7da3d7085584216d4a65f15d9
 -PKG_RELEASE:=4
 +PKG_RELEASE:=5
  

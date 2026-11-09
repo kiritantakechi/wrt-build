@@ -22,15 +22,15 @@ Upstream-Status: Pending
  create mode 100644 package/system/procd/patches/100-system-validate-images-without-blocking-the-main-loop.patch
 
 diff --git a/package/system/procd/Makefile b/package/system/procd/Makefile
-index 7a29b50..136c692 100644
+index 53a2a59..1e5898a 100644
 --- a/package/system/procd/Makefile
 +++ b/package/system/procd/Makefile
 @@ -8,7 +8,7 @@
  include $(TOPDIR)/rules.mk
  
  PKG_NAME:=procd
--PKG_RELEASE:=2
-+PKG_RELEASE:=3
+-PKG_RELEASE:=3
++PKG_RELEASE:=4
  
  PKG_SOURCE_PROTO:=git
  PKG_SOURCE_URL=$(PROJECT_GIT)/project/procd.git

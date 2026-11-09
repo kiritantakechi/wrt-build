@@ -111,7 +111,7 @@ Patch: `patches/packages/0001-ksmbd-tools-share-only-what-is-mounted-and-start-o
 
 Problem: ksmbd's init script shares every configured path whether or not the disk it belongs on is mounted. A share on a USB disk that is late or absent then shares the empty directory underneath, on the router's flash: what clients write there fills the flash, and disappears from view once the disk is mounted over it. Nothing starts the service again when the disk arrives, and nothing withdraws a share whose disk is unmounted while the service runs.
 
-What the patch does: `smb_add_share` leaves a share out unless every fstab mount point its path lies on is mounted (`procd_mountpoints_mounted`, patch 0035). `service_triggers` adds a reload trigger per share path for the mount, and one for the unmount (procd's unmount helpers, patch 0035), so the mount brings the share and the unmount takes it away: `mount.remove` follows the unmount (patch 0044), and `/proc/mounts` tells the reload what went. A reload starts the service anew, as every start resets the server hard; a restart would drop the service, and its triggers with it, until it had started again, so a disk back within that time went unnoticed. A start with every share waiting stops a running server, after that hard reset, and starts nothing. Shares on no fstab mount point are unaffected. `PKG_RELEASE` goes to 4.
+What the patch does: `smb_add_share` leaves a share out unless every fstab mount point its path lies on is mounted (`procd_mountpoints_ready`, patch 0035). `service_triggers` adds a reload trigger per share path for the mount, and one for the unmount (procd's unmount helpers, patch 0035), so the mount brings the share and the unmount takes it away: `mount.remove` follows the unmount (patch 0044), and `/proc/mounts` tells the reload what went. A reload starts the service anew, as every start resets the server hard; a restart would drop the service, and its triggers with it, until it had started again, so a disk back within that time went unnoticed. A start with every share waiting stops a running server, after that hard reset, and starts nothing. Shares on no fstab mount point are unaffected. `PKG_RELEASE` goes to 4.
 
 How this project uses it: the share `shares` lies on the data disk, whose fstab entry exists from the first boot (r4s-services D2).
 
@@ -123,7 +123,7 @@ Patch: `patches/openwrt/0008-ubox-log-to-a-file-only-while-its-mount-point-is-mo
 
 Problem: the log service leaves its log file out while the file's fstab mount point is not mounted, but only at boot. A start or reload later on, such as the reload that any change to the system configuration brings, creates the directory on the root filesystem and logs there: onto the flash, underneath where the disk mounts.
 
-What the patch does: the log file is left out whenever a mount point that holds it is not mounted (`procd_mountpoints_mounted`, patch 0035: of mount points within one another, every one counts, where the old check took any); its mount trigger starts it once the mount point is mounted, as at boot. `PKG_RELEASE` goes to 2.
+What the patch does: the log file is left out whenever a mount point that holds it is not mounted (`procd_mountpoints_ready`, patch 0035: of mount points within one another, every one counts, where the old check took any); its mount trigger starts it once the mount point is mounted, as at boot. `PKG_RELEASE` goes to 2.
 
 How this project uses it: the persistent log is `/mnt/data/logs/messages`, on the data disk (r4s-services D2).
 
@@ -256,18 +256,6 @@ Why it matters here: the `ubsan` profile (`docs/undefined-behavior.md`) compiles
 What the patch does: `include/package.mk` adds the sanitizer options of `TARGET_CFLAGS` to `TARGET_LDFLAGS`. A build without sanitizers is unchanged.
 
 Verification log: 2026-10-06, on the VM, in the R4S's `ubsan` tree: without the patch, mtd's link failed on undefined `__ubsan_handle_add_overflow` and `__ubsan_handle_sub_overflow`, and glib2's on four; with it, mtd linked with no call into the runtime and 264 trap instructions.
-
-### mold: LTO objects claimed in the command line order
-
-Patch: `patches/openwrt/0018-tools-mold-claim-LTO-objects-in-the-command-line-ord.patch` (adds the mold patch `tools/mold/patches/001-claim-lto-objects-in-the-command-line-order.patch`), for rui314/mold, carried by openwrt/openwrt until then.
-
-Problem: mold reads input files in parallel, and its reader threads called the LTO plugin's claim hook for each LTO object as they reached it, one at a time under a mutex. GCC's plugin hands the objects to the compiler in the order it claimed them, and what LTO makes depends on that order: a link with LTO and mold is not reproducible, and the warnings GCC gives while linking come and go.
-
-Why it matters here: both boards build with LTO and mold (`config/toolchain.seed`). jansson's three warnings appeared in some builds of a board and not in others, locally and in CI (runs 37293958173 and 37324813891), so the register's reviews of them were now unmatched, now missing.
-
-What the patch does: mold records the LTO objects while it reads, and claims them once all input files and linker scripts are read, one at a time and in the command line order, as it already parses linker scripts after the parallel read. The files are still read in parallel; links of the same objects give the same output, as they do with GNU ld. Upstream, the patch belongs to mold.
-
-Verification log: 2026-10-06, on the VM, mold 2.42.0: six links of jansson's library from the same objects gave six different libraries without the patch, and the overflow warnings in some of them only; with the patch, with mold's threads, the six gave the same library, the one GNU ld gives, and the three warnings each time.
 
 ### libtool: every sanitizer option passed to the link
 
@@ -473,9 +461,9 @@ Why it matters here: ksmbd's shares are on the data disk, and services/file-shar
 
 What the patch does: one helper registers a trigger for an event and an action on the mount points that hold the given paths. `_procd_add_action_mount_trigger` is it with `mount.add`, as before, and the new `_procd_add_action_unmount_trigger`, with `procd_add_restart_unmount_trigger` and `procd_add_reload_unmount_trigger`, with `mount.remove`. The mount points become separate arguments, so several of them give one `or`, and `_procd_add_mount_trigger` names the script from `$initscript`. A single mount point's trigger is the same as before, and `_procd_add_mount_trigger` keeps its arguments.
 - With patch 0044 `mount.remove` follows the unmount, as `mount.add` follows the mount: an action that reads `/proc/mounts` finds the mount point gone.
-- `procd_mountpoints_mounted <path>...` tells whether every fstab mount point that holds the paths is mounted. Of mount points within one another, `procd_get_mountpoints` lists each, and a check of its output as one pattern, as ubox's log service and ksmbd-tools made it, took any of them for all. It pipes that list into one awk, which reads `/proc/mounts` first, unescaping its mount points as the kernel escapes them, and fails at the first mount point of the list it has not seen. The list is not split by a newline `IFS` in the shell: `procd_get_mountpoints` would run with it, and `config_foreach` splits the list of sections on `IFS`.
+- `procd_mountpoints_ready <path>...`, upstream's check since a530a202, tells whether every fstab mount point that holds the paths is mounted. It took a mount point with a space in it for one never mounted: it split the list of mount points on any white space, and compared each with the second field of `/proc/mounts` as the kernel escapes it. It now splits on lines, once `procd_get_mountpoints` has run, since `config_foreach` splits its list of sections on `IFS`, and unescapes the field; the mount point reaches awk through the environment, which leaves it as it is.
 
-Verification log: 2026-10-12, the triggers `procd.sh` builds, compared before and after with the build tree's host `jshn`: the same for one mount point with restart, reload and start (as ubox's log, ksmbd-tools, transmission, nfs-kernel-server and postgresql call them), one `or` for two mount points, and `mount.remove` from the unmount helpers. 2026-10-26, the same way with an fstab of `/mnt/data` and `/mnt/data/media`: one `mount.add` trigger with an `or` of both, and a `mount.remove` trigger for each whose action is `reload unmounting <mountpoint>`; `procd_mountpoints_mounted` false for a path under a mount point that is not mounted inside one that is (device-integrity D7). The R4S's suites then found the services on the data disk started without it: that version split the list with a newline `IFS`, under which `config_foreach` took the whole list of sections for one and `procd_get_mountpoints` found no mount point, so every path counted as mounted. In a chroot of the R4S's root filesystem with its BusyBox and the VM's `/proc`, the current version: `/mnt/data/shares` not mounted, `/proc/self` mounted, a path no fstab mount point holds mounted, and `/proc/self` with `/mnt/data/logs` not mounted; the awk alone found mount points with a space, a tab and a backslash in `/proc/mounts`' escapes (2026-10-26). 2026-11-08: with `mount.remove` after the unmount (patch 0044) an unmount trigger is a mount trigger on that event, its action without arguments.
+Verification log: 2026-10-12, the triggers `procd.sh` builds, compared before and after with the build tree's host `jshn`: the same for one mount point with restart, reload and start (as ubox's log, ksmbd-tools, transmission, nfs-kernel-server and postgresql call them), one `or` for two mount points, and `mount.remove` from the unmount helpers. 2026-10-26, the same way with an fstab of `/mnt/data` and `/mnt/data/media`: one `mount.add` trigger with an `or` of both, and a `mount.remove` trigger for each whose action is `reload unmounting <mountpoint>`; `procd_mountpoints_ready` false for a path under a mount point that is not mounted inside one that is (device-integrity D7). The R4S's suites then found the services on the data disk started without it: that version split the list with a newline `IFS`, under which `config_foreach` took the whole list of sections for one and `procd_get_mountpoints` found no mount point, so every path counted as mounted. In a chroot of the R4S's root filesystem with its BusyBox and the VM's `/proc`, the current version: `/mnt/data/shares` not mounted, `/proc/self` mounted, a path no fstab mount point holds mounted, and `/proc/self` with `/mnt/data/logs` not mounted; the awk alone found mount points with a space, a tab and a backslash in `/proc/mounts`' escapes (2026-10-26). 2026-11-08: with `mount.remove` after the unmount (patch 0044) an unmount trigger is a mount trigger on that event, its action without arguments.
 
 ### fstools: the mount point of a removed device's unmount
 
@@ -613,18 +601,6 @@ What the patches do:
 Alternatives considered: 120 alone ends the merge, but on the VM the `oldconfig` after it, with stdin from /dev/null, wrote 1.1 GB of prompts for the empty `ENV_ADDR_REDUND` in 20 s. Stopping `oldconfig` at the end of its input was a 2023 Linux series, dropped for breaking builds that run make with stdin from /dev/null. OpenWrt's `FAIL_ON_UNCONFIGURED` hack for its kernel's Kconfig is meant for OpenWrt only.
 
 Verification log: the `build/boards` test "A fragment leaves a question for the next" configures a copy of the emulator's prepared U-Boot source as the build does. Without the patches, its merge was still asking after a minute; with 120 alone, the merge ended and the `oldconfig` after it was still asking (2026-10-18, both boards' build trees). With both, it passes on both boards' build trees, and both boards built anew with every U-Boot's `.config`, the boards' and the emulator's, the same as before (2026-10-18).
-
-### prometheus-node-exporter-ucode: written without reassigning puts
-
-Patch: `patches/packages/0008-prometheus-node-exporter-ucode-write-without-reassig.patch`, for openwrt/packages.
-
-Problem: `metrics.uc` declares `puts()`, which writes to uhttpd, and when it runs from the command line it assigns `puts` another function, which prints. ucode's ddb06a197e ("compiler: make strict mode function names constant bindings", in OpenWrt's ucode of 2026-10-18) binds the name of a function declaration as a constant in strict mode, as forward declarations always were. The assignment is then a syntax error: the script no longer compiles, uhttpd cannot load its handler (`Invalid assignment to constant 'puts'`), and procd gives up on the exporter after six starts.
-
-Why it matters here: the node exporter is the router's monitoring (services/monitoring). With the upstream pins of 2026-10-25 it never listened, and every monitoring test failed.
-
-What the patch does: `puts()` writes to uhttpd when the script runs in it, and prints otherwise; the assignment goes. `PKG_RELEASE` goes to 5.
-
-Verification log: the image's ucode compiles the patched script, and run from the command line it prints its metrics (2026-10-26, the R4S's root filesystem); the services/monitoring tests on both boards.
 
 ### netavark: aardvark-dns in a cgroup of its own without systemd
 

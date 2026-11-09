@@ -12,7 +12,7 @@ file for the one it needs: of an fstab mount point within another, a
 mounted outer one passed for a missing inner one.
 
 Leave the file out whenever a mount point that holds it is not mounted,
-as procd.sh's procd_mountpoints_mounted tells; its mount trigger starts
+as procd.sh's procd_mountpoints_ready tells; its mount trigger starts
 it once the mount point is mounted, as at boot.
 
 boot() set _BOOT for that check only, and goes with it.
@@ -38,7 +38,7 @@ index 0ba418c..cccbf33 100644
  PKG_SOURCE_PROTO:=git
  PKG_SOURCE_URL=$(PROJECT_GIT)/project/ubox.git
 diff --git a/package/system/ubox/files/log.init b/package/system/ubox/files/log.init
-index e02cc27..8e66a48 100644
+index e02cc27..6514b86 100644
 --- a/package/system/ubox/files/log.init
 +++ b/package/system/ubox/files/log.init
 @@ -52,12 +52,9 @@ start_service_file()
@@ -53,7 +53,7 @@ index e02cc27..8e66a48 100644
 -		return 0
 +	# A log file on a mount point that is not mounted would go to the
 +	# directory underneath; the mount trigger starts it once it is mounted.
-+	procd_mountpoints_mounted "${log_file}" || return 0
++	procd_mountpoints_ready "${log_file}" || return 0
  
  	mkdir -p "$(dirname "${log_file}")"
  

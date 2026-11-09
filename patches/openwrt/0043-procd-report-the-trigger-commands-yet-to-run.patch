@@ -23,15 +23,15 @@ Upstream-Status: Pending
  create mode 100644 package/system/procd/patches/101-service-report-the-trigger-commands-yet-to-run.patch
 
 diff --git a/package/system/procd/Makefile b/package/system/procd/Makefile
-index 136c692..f8c8dbc 100644
+index 1e5898a..8e38311 100644
 --- a/package/system/procd/Makefile
 +++ b/package/system/procd/Makefile
 @@ -8,7 +8,7 @@
  include $(TOPDIR)/rules.mk
  
  PKG_NAME:=procd
--PKG_RELEASE:=3
-+PKG_RELEASE:=4
+-PKG_RELEASE:=4
++PKG_RELEASE:=5
  
  PKG_SOURCE_PROTO:=git
  PKG_SOURCE_URL=$(PROJECT_GIT)/project/procd.git

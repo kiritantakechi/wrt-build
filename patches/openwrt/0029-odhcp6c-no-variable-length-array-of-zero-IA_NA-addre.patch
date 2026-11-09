@@ -20,15 +20,15 @@ Upstream-Status: Pending
  create mode 100644 package/network/ipv6/odhcp6c/patches/100-dhcpv6-no-variable-length-array-of-zero-IA_NA-addresses.patch
 
 diff --git a/package/network/ipv6/odhcp6c/Makefile b/package/network/ipv6/odhcp6c/Makefile
-index 98ed16b..52f66a6 100644
+index 52f66a6..0e5de65 100644
 --- a/package/network/ipv6/odhcp6c/Makefile
 +++ b/package/network/ipv6/odhcp6c/Makefile
 @@ -8,7 +8,7 @@
  include $(TOPDIR)/rules.mk
  
  PKG_NAME:=odhcp6c
--PKG_RELEASE:=3
-+PKG_RELEASE:=4
+-PKG_RELEASE:=4
++PKG_RELEASE:=5
  
  PKG_SOURCE_PROTO:=git
  PKG_SOURCE_URL=$(PROJECT_GIT)/project/odhcp6c.git
