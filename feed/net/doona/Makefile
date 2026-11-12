@@ -66,12 +66,13 @@ PNPM_ENV:= \
 	XDG_STATE_HOME=$(HOST_BUILD_DIR)/.local/state \
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH)
 
+# pnpm's bin, linked as a package manager installs it; it runs on the Node in
+# PATH (its #!/usr/bin/env node).
 define Host/Prepare
 	$(call Host/Prepare/Default)
 	mkdir -p $(PNPM_DIR)/bin
 	tar -xzf $(DL_DIR)/pnpm-$(PNPM_VERSION).tgz -C $(PNPM_DIR)
-	printf '#!/bin/sh\nexec node %s "$$@"\n' $(PNPM_DIR)/package/bin/pnpm.mjs >$(PNPM_DIR)/bin/pnpm
-	chmod 755 $(PNPM_DIR)/bin/pnpm
+	ln -s ../package/bin/pnpm.mjs $(PNPM_DIR)/bin/pnpm
 endef
 
 define Host/Configure
