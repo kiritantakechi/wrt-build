@@ -1,8 +1,8 @@
-"""services/vpn: WireGuard and Tailscale into the LAN, and how each passes dae.
+"""services/vpn: WireGuard and Tailscale into the LAN, and how each passes honk.
 
 wg-peer connects over WireGuard and routes the LAN and the proxied target
 through its tunnel; ts-peer is a tailnet node that takes the LAN through the
-router's subnet route and, when asked, the router as its exit node. dae is on:
+router's subnet route and, when asked, the router as its exit node. honk is on:
 tailnet traffic is split by its rules, WireGuard traffic goes direct.
 """
 
@@ -16,7 +16,7 @@ import pytest
 from wrt_tests import spec
 from wrt_tests.model.poll import until
 from wrt_tests.sandbox.net import PROXIED_TARGET, PROXY
-from wrt_tests.services.datapath import hooks
+from wrt_tests.services.datapath import PROXY_HOOKS_L3, hooks
 
 if TYPE_CHECKING:
     from wrt_tests.sandbox.net import Netns
@@ -31,15 +31,13 @@ LAN_ADDRESS = "10.0.0.1"
 # The router's services for the LAN alone: SSH and LuCI.
 LAN_ONLY_PORTS = (22, 80)
 BIND_TIMEOUT = 60
-# dae's programs for an interface without Ethernet headers, on both directions.
-TUN_HOOKS = ("tcx/ingress", "tcx/egress")
 
 
 @pytest.fixture(scope="module")
-def remote(dae: Online, lan_host: Netns) -> Online:
-    """Run dae, and a server on a LAN host for the peers to reach."""
+def remote(proxy: Online, lan_host: Netns) -> Online:
+    """Run honk, and a server on a LAN host for the peers to reach."""
     del lan_host  # serving for the module
-    return dae
+    return proxy
 
 
 @spec(CAPABILITY, "WireGuard remote access", "Remote device connects")
@@ -59,7 +57,7 @@ def test_wireguard_reaches_the_lan(remote: Online, wireguard: WireGuard) -> None
 
 @spec(CAPABILITY, "Relation to the transparent proxy", "WireGuard device reaches the internet")
 def test_wireguard_goes_direct(remote: Online, wireguard: WireGuard) -> None:
-    # The proxied target is one dae would proxy for the LAN.
+    # The proxied target is one honk would proxy for the LAN.
     assert wireguard.peer.probe("tcp", PROXIED_TARGET[0])["address"] == remote.wan_address
 
 
@@ -73,11 +71,11 @@ def test_tailnet_reaches_the_lan(remote: Online, tailnet: Tailnet) -> None:
 
 
 @spec(CAPABILITY, "Relation to the transparent proxy", "Tailnet device reaches a proxied target")
-def test_tailnet_is_split_by_dae(remote: Online, tailnet: Tailnet) -> None:
+def test_tailnet_is_split_by_honk(remote: Online, tailnet: Tailnet) -> None:
     until(
-        lambda: _dae_bound(remote, "tailscale0"),
+        lambda: hooks(remote.router, "tailscale0") == PROXY_HOOKS_L3,
         timeout=BIND_TIMEOUT,
-        what="dae on tailscale0",
+        what="honk on tailscale0",
     )
     tailnet.use_exit_node(on=True)
     try:
@@ -89,14 +87,6 @@ def test_tailnet_is_split_by_dae(remote: Online, tailnet: Tailnet) -> None:
         assert seen["address"] == PROXY[0]
     finally:
         tailnet.use_exit_node(on=False)
-
-
-def _dae_bound(remote: Online, device: str) -> bool:
-    """Return whether dae's LAN programs sit on both directions of ``device``."""
-    found = hooks(remote.router, device)
-    return set(found) == set(TUN_HOOKS) and all(
-        any(name.startswith("tproxy_lan_") for name in found[hook]) for hook in TUN_HOOKS
-    )
 
 
 def _probe_or_none(peer: Netns, host: str) -> dict[str, object] | None:
@@ -113,9 +103,11 @@ def test_tailscale_marks_are_registered(remote: Online, tailnet: Tailnet) -> Non
     (mask,) = (int(row[0], 16) for row in rows if row[1] == "tailscale")
     subprocess.run([MARKS_CHECK], check=True, capture_output=True)
     # The marks tailscaled's own nftables rules set and match lie within its mask.
+    # Its tables are the ones holding its chains, named ts-*; fw4's and honk's
+    # tables hold their own marks.
     ruleset = remote.router.run("nft list ruleset")
     tables = re.split(r"^table ", ruleset, flags=re.MULTILINE)
-    theirs = [table for table in tables if table and not table.startswith("inet fw4")]
+    theirs = [table for table in tables if re.search(r"^\tchain ts-", table, flags=re.MULTILINE)]
     marks = {
         int(value, 16)
         for table in theirs

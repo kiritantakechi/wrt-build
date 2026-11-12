@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Fri, 13 Nov 2026 00:27:05 +0800
+Subject: [PATCH] build: disable the services TARGET_DISABLED_SERVICES names in
+ the image
+
+prepare_rootfs enables every init script of the image except those its
+third argument names. The image builder passes DISABLED_SERVICES there;
+a build from source passes nothing. A package whose service must not run
+before it is configured cannot ship it disabled either: its postinst runs
+before default_postinst enables its init scripts.
+
+Add TARGET_DISABLED_SERVICES to "Target Images" and pass it to
+prepare_rootfs wherever a build from source prepares a root filesystem.
+The rootfs cache key reads .config, so a changed list builds the root
+filesystem anew.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ config/Config-images.in | 8 ++++++++
+ include/image.mk        | 2 +-
+ package/Makefile        | 4 ++--
+ 3 files changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/config/Config-images.in b/config/Config-images.in
+index 7cc32251..55a83068 100644
+--- a/config/Config-images.in
++++ b/config/Config-images.in
+@@ -372,4 +372,12 @@ menu "Target Images"
+ 		  across reboots. When enabled, /var/run will still be linked
+ 		  to /tmp/run.
+ 
++	config TARGET_DISABLED_SERVICES
++		string "Services disabled in the image"
++		help
++		  The init scripts of /etc/init.d, separated by spaces, that the
++		  image ships disabled: they do not start at boot until they are
++		  enabled. The image builder takes the same list as
++		  DISABLED_SERVICES.
++
+ endmenu
+diff --git a/include/image.mk b/include/image.mk
+index 88db53e9..dbe059c1 100644
+--- a/include/image.mk
++++ b/include/image.mk
+@@ -400,7 +400,7 @@ else
+ 	-$(CP) -T $(mkfs_cur_target_dir).opkg/ $(mkfs_cur_target_dir)/etc/opkg/
+ 	rm -rf $(mkfs_cur_target_dir).opkg $(mkfs_cur_target_dir).conf
+ endif
+-	$(call prepare_rootfs,$(mkfs_cur_target_dir),$(TOPDIR)/files)
++	$(call prepare_rootfs,$(mkfs_cur_target_dir),$(TOPDIR)/files,$(call qstrip,$(CONFIG_TARGET_DISABLED_SERVICES)))
+ 
+ $(KDIR)/root.%: kernel_prepare
+ 	$(call Image/mkfs/$(word 1,$(target_params)),$(target_params))
+diff --git a/package/Makefile b/package/Makefile
+index eec58b3d..5890eab9 100644
+--- a/package/Makefile
++++ b/package/Makefile
+@@ -149,7 +149,7 @@ define apk_install_rootfs
+ 		$$(cat $(TMP_DIR)/apk_install_list)
+ 	rm -rf $(TARGET_DIR)/run
+ 	$(CP) $(TARGET_DIR) $(TARGET_DIR_ORIG)
+-	$(call prepare_rootfs,$(TARGET_DIR),$(TOPDIR)/files)
++	$(call prepare_rootfs,$(TARGET_DIR),$(TOPDIR)/files,$(call qstrip,$(CONFIG_TARGET_DISABLED_SERVICES)))
+ 	rm -rf $(ROOTFS_CACHE)
+ 	mkdir -p $(ROOTFS_CACHE)
+ 	cp -a $(TARGET_DIR) $(ROOTFS_CACHE)/root
+@@ -176,7 +176,7 @@ else
+ 		done; \
+ 	done || true
+ 	$(CP) $(TARGET_DIR) $(TARGET_DIR_ORIG)
+-	$(call prepare_rootfs,$(TARGET_DIR),$(TOPDIR)/files)
++	$(call prepare_rootfs,$(TARGET_DIR),$(TOPDIR)/files,$(call qstrip,$(CONFIG_TARGET_DISABLED_SERVICES)))
+ endif
+ 
+ $(curdir)/index: FORCE

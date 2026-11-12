@@ -1,7 +1,7 @@
 """release/device-sync: the router's local repository of releases, which wrt-sync keeps.
 
 The module's router is online, resolves and trusts the emulated internet, and
-runs dae with the test configuration, which routes the Releases stand-in
+runs honk with the test configuration, which routes the Releases stand-in
 through the proxy as an administrator routes GitHub. The releases are the
 session's signed build, assembled once (release-publish.sh) and published under
 a new tag for each release in the stand-in's repository wrt-build/sync, where
@@ -55,8 +55,8 @@ CUT = 1 << 20
 TAMPERED = 1 << 20
 SYNC_TIMEOUT = 900
 # What the router logged around a failed sync: the container's fetch goes through
-# podman's network and dae, either of which can refuse it (EPERM).
-SYNC_LOG = "logread | grep -E 'wrt-sync|podman|netavark|dae' | tail -n 40"
+# podman's network and honk, either of which can refuse it (EPERM).
+SYNC_LOG = "logread | grep -E 'wrt-sync|podman|netavark|honk' | tail -n 40"
 # Release names that are no plain file name, as a misbehaving service could give.
 NOT_FILE_NAMES = ("..", "r1/../..", "it's")
 # What a package archive must not carry beside the packages: a manifest, an
@@ -131,7 +131,7 @@ class Releases:
 
 @pytest.fixture(scope="module")
 def stand_in(
-    dae: Online,
+    proxy: Online,
     trusted_ca: Online,
     board: Board,
     signed_boards: Path,
@@ -145,12 +145,12 @@ def stand_in(
         check=True,
         capture_output=True,
     )
-    dae.router.run(
+    proxy.router.run(
         f"uci set wrt-sync.main.api=https://{RELEASES[0]}"
         f" && uci set wrt-sync.main.repository={REPOSITORY} && uci commit wrt-sync"
     )
-    root = dae.network.workdir / releases.ROOT
-    yield Releases(dae, assembled, root)
+    root = proxy.network.workdir / releases.ROOT
+    yield Releases(proxy, assembled, root)
     shutil.rmtree(root / REPOSITORY, ignore_errors=True)
 
 

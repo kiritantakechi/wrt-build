@@ -15,19 +15,19 @@ staging_dir/hostpkg, where package builds find cargo and rustc on their
 PATH.
 
 Most of the time goes into LLVM, which is built for every backend it
-has. rustc needs only the host's, for build scripts and procedural
-macros, and the target's: build these two, or every backend as before
-when either is not known. With CONFIG_CCACHE, LLVM's C++ goes through
-ccache.
+has. rustc needs the host's, for build scripts and procedural macros,
+the target's, and BPF's, which Rust's eBPF programs compile to: build
+these three, or every backend as before when the host's or the target's
+is not known. With CONFIG_CCACHE, LLVM's C++ goes through ccache.
 
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Inappropriate [every board of this tree shares one architecture]
 ---
- lang/rust/Makefile | 37 ++++++++++++++++++++++++++++---------
- 1 file changed, 28 insertions(+), 9 deletions(-)
+ lang/rust/Makefile | 38 +++++++++++++++++++++++++++++---------
+ 1 file changed, 29 insertions(+), 9 deletions(-)
 
 diff --git a/lang/rust/Makefile b/lang/rust/Makefile
-index 300dbb1..304d611 100644
+index 300dbb16..997a8699 100644
 --- a/lang/rust/Makefile
 +++ b/lang/rust/Makefile
 @@ -11,7 +11,7 @@ PKG_RELEASE:=1
@@ -48,14 +48,15 @@ index 300dbb1..304d611 100644
  
  # Target Flags
  TARGET_CONFIGURE_ARGS = \
-@@ -60,23 +60,42 @@ TARGET_CONFIGURE_ARGS = \
+@@ -60,23 +60,43 @@ TARGET_CONFIGURE_ARGS = \
  # CARGO_HOME is an environmental
  HOST_CONFIGURE_VARS += CARGO_HOME="$(CARGO_HOME)"
  
 +# The host toolchain, with the standard library for the target, is built once
 +# for every target of the same architecture and shared like any host package,
 +# in build_dir/hostpkg and staging_dir/hostpkg. Its LLVM has the backends of
-+# the host, for build scripts and procedural macros, and of the target only.
++# the host, for build scripts and procedural macros, of the target, and BPF,
++# which Rust's eBPF programs compile to.
 +rust_llvm_target=$(strip \
 +  $(if $(filter aarch64%,$(1)),AArch64, \
 +  $(if $(filter x86_64 i386 i486 i586 i686,$(1)),X86, \
@@ -67,7 +68,7 @@ index 300dbb1..304d611 100644
 +# Built for every backend, as upstream does, when one of the two is not known.
 +RUST_LLVM_HOST:=$(call rust_llvm_target,$(HOST_ARCH))
 +RUST_LLVM_TARGET:=$(call rust_llvm_target,$(ARCH))
-+RUST_LLVM_TARGETS:=$(if $(and $(RUST_LLVM_HOST),$(RUST_LLVM_TARGET)),$(subst $(space),;,$(sort $(RUST_LLVM_HOST) $(RUST_LLVM_TARGET))))
++RUST_LLVM_TARGETS:=$(if $(and $(RUST_LLVM_HOST),$(RUST_LLVM_TARGET)),$(subst $(space),;,$(sort $(RUST_LLVM_HOST) $(RUST_LLVM_TARGET) BPF)))
 +
  # Rust Configuration Arguments
  HOST_CONFIGURE_ARGS = \
@@ -97,7 +98,7 @@ index 300dbb1..304d611 100644
  	$(TARGET_CONFIGURE_ARGS)
  
  define Host/Uninstall
-@@ -102,7 +121,7 @@ define Host/Install
+@@ -102,7 +122,7 @@ define Host/Install
  			$(STAGING_DIR_HOST)/bin/libdeflate-gzip -dc "$$$$targz" | tar -xf - ; \
  		done ; \
  		find . -mindepth 2 -maxdepth 2 -type f -name install.sh \

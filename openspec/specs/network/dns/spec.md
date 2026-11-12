@@ -1,7 +1,7 @@
 # network/dns Specification
 
 ## Purpose
-Define the LAN DNS path: dnsmasq handles DHCP and local hostnames, and queries for external domains go to dae, which performs the resolution that domain-based splitting needs.
+Define the LAN DNS path: dnsmasq handles DHCP and local hostnames, and queries for external domains go to the transparent proxy, which performs the resolution that domain-based splitting needs.
 
 ## Requirements
 
@@ -22,13 +22,13 @@ dnsmasq SHALL forward all non-local queries to dae's DNS listener on the loopbac
 ### Requirement: Fall back to upstream DNS without dae
 When dae's DNS listener is unavailable, dnsmasq SHALL keep resolving with the upstream DNS obtained on WAN, so the LAN is not cut off.
 
-#### Scenario: Resolve after dae stops
+#### Scenario: Resolve after the proxy stops
 - **WHEN** a LAN client queries an external domain after dae is stopped
 - **THEN** it still gets a result
 
 ### Requirement: dae DNS port not exposed
 dae's DNS listener MUST bind only to the loopback address, and it MUST NOT be reachable from LAN or WAN.
 
-#### Scenario: Query dae's DNS port from LAN
+#### Scenario: Query the proxy's DNS port from LAN
 - **WHEN** a LAN client sends a query to the dae DNS port on the router's LAN address
 - **THEN** the query gets no response

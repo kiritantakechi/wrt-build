@@ -22,6 +22,7 @@ from wrt_tests.sandbox import releases
 from wrt_tests.sandbox.internet import RELEASES
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
     from wrt_tests.device.router import Router
@@ -105,16 +106,19 @@ class Drill:
             )
         return self.published
 
-    def remember(self, **values: str) -> None:
-        """Record uci options the configuration push set, to find them after the upgrade."""
-        self.pushed.update(values)
+    def remember(self, pushed: Mapping[str, str]) -> None:
+        """Record what the configuration push set, to find it after the upgrade.
+
+        Each entry is a command on the router and what it prints for the pushed state.
+        """
+        self.pushed.update(pushed)
 
     def configuration_kept(self) -> bool:
-        """Return whether every recorded option has its pushed value."""
+        """Return whether every recorded command prints what it printed for the push."""
         router = self.online.router
         return all(
-            router.run(f"uci -q get {option} || true") == value
-            for option, value in self.pushed.items()
+            router.run(f"{{ {command}; }} 2>&1 || true") == printed
+            for command, printed in self.pushed.items()
         )
 
     def register_failing_check(self) -> None:

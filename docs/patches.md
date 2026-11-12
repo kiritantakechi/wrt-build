@@ -661,3 +661,51 @@ Why it matters here: the `ci` profile sets `CONFIG_ALL_KMODS`, so this one modul
 What the patch does: `ring_bind` is declared with the new type from 6.18.57 on, in the version check `pf_ring.c` uses throughout; it already has one on a stable release, 6.5.3 for `sendpage`. The body reads the same in both types. `PKG_RELEASE` goes to 2.
 
 Verification log: the module is built by both boards' `ci` builds on 6.18.60.
+
+### rust: 1.99.1
+
+Patch: `patches/packages/0011-rust-update-to-1.99.1.patch`, for openwrt/packages.
+
+Problem: openwrt/packages builds Rust 1.96.1 (2026-11-05); the stable release is 1.99.1 (2026-10-16).
+
+Why it matters here: honk (honk-datapath) depends on Aya 0.16, whose crates require rustc 1.98.0; with 1.96.1, cargo refuses to build them.
+
+What the patch does: `PKG_VERSION` and `PKG_HASH` of rustc 1.99.1's source, which bundles LLVM 23.1.1. Rust's bootstrap manifest moved, so the xz2 patch (`0001-Update-xz2-and-use-it-static.patch`) is refreshed on it; the AtomicExpand patch applies as it is.
+
+Verification log: pending.
+
+### rust: the LLVM rustc links, installed for host tools
+
+Patch: `patches/packages/0012-rust-install-the-LLVM-rustc-links-for-host-tools-tha.patch`, for openwrt/packages.
+
+Problem: rust/host builds LLVM for rustc and keeps it to itself. A host tool that works on rustc's LLVM bitcode needs an LLVM that reads it: the same version, or a newer one.
+
+Why it matters here: bpf-linker links honk's eBPF programs, which rustc emits as bitcode. The host's other LLVM (`flake.nix`, for C BPF objects) is 21, older than Rust 1.99's 23, and a second LLVM of the right version would be a second toolchain to build and trust.
+
+What the patch does: rust/host's dist adds Rust's `rust-dev` component, its LLVM with `llvm-config`, libraries and headers, and installs it under a prefix of its own, `RUST_LLVM_PREFIX` (`rust-values.mk`, `$(STAGING_DIR_HOSTPKG)/lib/llvm-rust`), so that `llvm-config` stays off other packages' PATH, where configure scripts would find it and link LLVM.
+
+Verification log: pending.
+
+### honk: a prebuilt eBPF object
+
+Patch: `feed/net/honk/patches/001-build-take-a-prebuilt-eBPF-object.patch`, for daeuniverse/honk.
+
+Problem: honk-core's build script embeds an eBPF object it finds only when a `.toolchain` file beside it names the nightly that `crates/honk-ebpf/rust-toolchain.toml` pins; otherwise it builds the object with `cargo +<nightly>`, which only rustup provides.
+
+Why it matters here: the firmware builds honk with OpenWrt's own Rust, and its eBPF object in a step of its own (honk-datapath D2), with no rustup and no nightly.
+
+What the patch does: `HONK_PREBUILT_EBPF_OBJECT`, the absolute path of an object, makes the build script check that the object carries BTF and embed it as it is. Without it, nothing changes. The copy into `OUT_DIR` both paths share moves into `embed_object`.
+
+Verification log: pending.
+
+### build: services disabled in the image
+
+Patch: `patches/openwrt/0046-build-disable-the-services-TARGET_DISABLED_SERVICES-.patch`, for openwrt/openwrt.
+
+Problem: `prepare_rootfs` enables every init script of the image except those its third argument names. The image builder passes `DISABLED_SERVICES` there; a build from source passes nothing. A package cannot ship its service disabled itself either: its `postinst` runs before `default_postinst` enables its init scripts.
+
+Why it matters here: honk must not run before a configuration is pushed (its built-in DNS upstream would answer the LAN), and its start-at-boot switch is its rc.d link, as daeuniverse's LuCI page sets it. With honk disabled in the image and its rc.d links kept through upgrades (`files/lib/upgrade/keep.d/wrt-config`), a new router starts without it and an upgraded one as it was. daeuniverse's own package disables honk from a uci-defaults script, which a firmware upgrade runs again.
+
+What the patch does: `TARGET_DISABLED_SERVICES` in "Target Images", passed to `prepare_rootfs` wherever a build from source prepares a root filesystem (`package/Makefile`, `include/image.mk`). The rootfs cache key reads `.config`, so a changed list builds the root filesystem anew.
+
+Verification log: pending.

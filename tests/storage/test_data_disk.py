@@ -235,9 +235,9 @@ def test_nothing_written_without_the_disk_reaches_the_boot_disk(
 
 
 @pytest.fixture(scope="module")
-def without_disk(pod: Online, data_disk: Disk, dae: Online) -> Iterator[Online]:
-    """Boot without the data disk, dae on; plug the disk back in at the end, if no test did."""
-    del dae  # enabled, it starts with the boot
+def without_disk(pod: Online, data_disk: Disk, proxy: Online) -> Iterator[Online]:
+    """Boot without the data disk, honk on; plug the disk back in at the end, if no test did."""
+    del proxy  # enabled, it starts with the boot
     pod.reboot(while_off=data_disk.unplug)
     yield pod
     if data_disk.port is None:

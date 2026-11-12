@@ -194,7 +194,7 @@ def test_toolchain_stages_name_what_only_toolchain_build_builds(tmp_path: Path) 
                 (4, "begin", "host-compile", "package/feeds/packages/golang1.27"),
                 (5, "begin", "host-compile", "package/feeds/packages/rust"),
                 (6, "begin", "host-compile", "package/feeds/packages/rust"),
-                (7, "begin", "compile", "package/feeds/packages/dae"),
+                (7, "begin", "compile", "package/feeds/wrt/honk"),
                 (8, "begin", "compile", "package/feeds/packages/golang-protobuf"),
                 (9, "begin", "compile", "package/feeds/wrt/einat"),
                 (10, "begin", "compile", "target/linux"),

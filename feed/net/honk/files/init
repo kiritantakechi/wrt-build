@@ -1,0 +1,172 @@
+#!/bin/sh /etc/rc.common
+# These come first: rpcd's rc list reads START and STOP only near the top of the file.
+# shellcheck disable=SC2034 # read by /etc/rc.common
+USE_PROCD=1
+# shellcheck disable=SC2034
+START=99
+# shellcheck disable=SC2034
+STOP=01
+#
+# honk, bound to the LAN side only (honk-datapath design D4, D5). honk runs the
+# entry /var/run/honk/main.dae, written here: the interfaces to bind, honk's DNS
+# listener and the native DNS of private addresses, then an include of the
+# configuration (option config_file). honk takes an include only from inside the
+# entry's directory, so the configuration's directory is copied below it,
+# readable by root alone. The entry's directory is made anew beside the running
+# one, checked by honk, and only then put in its place, under
+# /var/lock/honk.lock.
+#
+# honk starts at boot while this script is enabled, as daeuniverse's LuCI page
+# switches it. The image ships it disabled, and an upgrade keeps its rc.d links
+# (/lib/upgrade/keep.d/wrt-config).
+
+CONF=honk
+PROG=/usr/bin/honk-core
+RUN=/var/run/honk
+ENTRY="${RUN}/main.dae"
+LOCK=/var/lock/honk.lock
+# procd runs the instance in services/honk/honk below this service cgroup.
+CGROUP="/sys/fs/cgroup/services/${CONF}"
+# The LAN side: br-lan, the container bridge and the tailnet's device, which
+# honk binds when they appear.
+INTERFACES="br-lan, podman0, tailscale0"
+
+# big_cores: the CPUs of the highest capacity, which are the big cores of a
+# big.LITTLE SoC, as a CPU list; empty where the kernel reports no
+# capacities (board-model D6).
+big_cores() {
+	highest=0
+	cores=
+	for file in /sys/devices/system/cpu/cpu[0-9]*/cpu_capacity; do
+		[ -r "${file}" ] || continue
+		capacity=$(cat "${file}")
+		cpu=${file%/cpu_capacity}
+		cpu=${cpu##*/cpu}
+		if [ "${capacity}" -gt "${highest}" ]; then
+			highest=${capacity}
+			cores=${cpu}
+		elif [ "${capacity}" -eq "${highest}" ]; then
+			cores="${cores},${cpu}"
+		fi
+	done
+	echo "${cores}"
+}
+
+# write_entry <configuration file> <directory>: make <directory> with the entry
+# main.dae around the file, and the file's directory copied below it.
+write_entry() {
+	file=$1
+	run=$2
+	# honk refuses configuration files others can read.
+	umask 077
+	mkdir -p "${run}/config" &&
+		cp -R "${file%/*}/." "${run}/config/" || return 1
+	{
+		echo "# Written by /etc/init.d/honk; edit ${file} instead."
+		printf 'global {\n\tlan_interface: %s\n}\n' "${INTERFACES}"
+		printf "dns {\n\tbind: '127.0.0.1:5353'\n}\n"
+		# DNS to a private address stays native: dnsmasq answers the LAN, and
+		# podman's resolver its containers (honk-datapath D4).
+		printf 'routing {\n\tdip(geoip: private) && dport(53) -> direct(must)\n}\n'
+		printf 'include {\n\tconfig/%s\n}\n' "${file##*/}"
+	} >"${run}/main.dae"
+}
+
+# prepare: the service's entry made anew, checked by honk, and put in place.
+# shellcheck disable=SC2154 # config_get assigns config_file
+prepare() {
+	config_get config_file config config_file /etc/honk/config.dae
+	(
+		flock 9
+		rm -rf "${RUN}.new" "${RUN}.old"
+		write_entry "${config_file}" "${RUN}.new" &&
+			"${PROG}" check --config "${RUN}.new/main.dae" || exit 1
+		if [ -e "${RUN}" ]; then
+			mv "${RUN}" "${RUN}.old" || exit 1
+		fi
+		mv "${RUN}.new" "${RUN}" && rm -rf "${RUN}.old"
+	) 9>"${LOCK}"
+}
+
+extra_command "check" "<file>: check a configuration as the service would run it"
+
+# check <configuration file>: honk's check of the entry the service would make
+# around the file, in a directory of its own (config-push validates this way).
+check() {
+	file=${1:?usage: /etc/init.d/honk check <configuration file>}
+	run=$(mktemp -d /tmp/honk-check.XXXXXX) || return 1
+	write_entry "${file}" "${run}" && "${PROG}" check --config "${run}/main.dae"
+	status=$?
+	rm -rf "${run}"
+	return "${status}"
+}
+
+# enable_controller <controller> <cgroup>...: the controller enabled for the
+# children of each cgroup, where the kernel has it.
+enable_controller() {
+	controller=$1
+	shift
+	grep -qsw "${controller}" /sys/fs/cgroup/cgroup.controllers || return 0
+	for cgroup in "$@"; do
+		echo "+${controller}" >"${cgroup}/cgroup.subtree_control" ||
+			logger -t honk "cannot enable the ${controller} controller in ${cgroup}"
+	done
+}
+
+# pin: honk's cgroup on the big cores while cpu_pinning is set, on every CPU
+# otherwise. The cpuset holds every task of the cgroup at once, so a running
+# honk moves without a restart.
+# shellcheck disable=SC2154 # config_get_bool assigns cpu_pinning
+pin() {
+	config_get_bool cpu_pinning config cpu_pinning 0
+	cores=
+	[ "${cpu_pinning}" = 0 ] || cores=$(big_cores)
+	if [ ! -e "${CGROUP}/cpuset.cpus" ]; then
+		[ -z "${cores}" ] || logger -t honk "no cpuset controller: honk is not pinned"
+		return 0
+	fi
+	echo "${cores}" >"${CGROUP}/cpuset.cpus"
+}
+
+start_service() {
+	config_load "${CONF}"
+	prepare || return 1
+
+	# aya pins its maps below /sys/fs/bpf, which OpenWrt does not mount by
+	# itself. It stays mounted on stop: other tools may share it.
+	grep -qs ' /sys/fs/bpf bpf ' /proc/mounts || mount -t bpf bpf /sys/fs/bpf
+
+	# The controllers honk needs: memory down to its instance, whose files
+	# honk's telemetry reads once, at startup; cpuset for its own cgroup, which
+	# pins it.
+	mkdir -p "${CGROUP}"
+	enable_controller memory /sys/fs/cgroup /sys/fs/cgroup/services "${CGROUP}"
+	enable_controller cpuset /sys/fs/cgroup /sys/fs/cgroup/services
+	pin
+
+	procd_open_instance "${CONF}"
+	procd_set_param command "${PROG}" --config "${ENTRY}" --disable-timestamp
+	# honk budgets its flow admission from RLIMIT_NOFILE.
+	procd_set_param limits core="unlimited" nofile="1048576 1048576"
+	procd_set_param respawn
+	# honk's graceful shutdown can take over 10 s; its systemd unit allows 30.
+	procd_set_param term_timeout 30
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+# reload_service: a stopped honk stays stopped. A running one is pinned anew and
+# rereads its entry on SIGHUP, which honk applies or, for a field that needs a
+# restart, refuses (config-push restarts).
+reload_service() {
+	procd_running "${CONF}" "${CONF}" || return 0
+	config_load "${CONF}"
+	prepare || return 1
+	pin
+	procd_send_signal "${CONF}" "${CONF}" HUP
+}
+
+service_triggers() {
+	procd_add_reload_trigger "${CONF}"
+}

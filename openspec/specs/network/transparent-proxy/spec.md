@@ -1,7 +1,7 @@
 # network/transparent-proxy Specification
 
 ## Purpose
-Use dae to provide rule-based transparent proxying for the LAN, containers, and overlay-network devices: direct traffic is forwarded entirely in the kernel, and router-originated traffic does not go through the proxy.
+Provide rule-based transparent proxying for the LAN, containers, and overlay-network devices: direct traffic is forwarded entirely in the kernel, and router-originated traffic does not go through the proxy.
 
 ## Requirements
 
@@ -12,11 +12,11 @@ dae SHALL bind only br-lan, plus podman0 and tailscale0 when they exist. dae MUS
 - **WHEN** dae is running and the BPF programs attached to br-lan and pppoe-wan are inspected
 - **THEN** br-lan has dae programs, and pppoe-wan has no dae programs at all
 
-#### Scenario: Container bridge appears after dae
+#### Scenario: Container bridge appears after the proxy
 - **WHEN** dae is already running and only then podman0 is created
 - **THEN** within 60 seconds dae programs appear on podman0, and container traffic starts being split by rule
 
-#### Scenario: Container bridge appears while dae starts
+#### Scenario: Container bridge appears while the proxy starts
 - **WHEN** podman0 is created right after dae was started anew, before dae is ready
 - **THEN** within 60 seconds dae programs appear on podman0
 
@@ -65,20 +65,20 @@ dae's config SHALL be editable in LuCI and hot-reloaded on save. The full config
 - **WHEN** the dae config in the firmware image is inspected
 - **THEN** it contains only a template without subscriptions or node information
 
-#### Scenario: Turn dae off
+#### Scenario: Turn the proxy off
 - **WHEN** dae runs, its `enabled` option is set to 0, and the configuration is applied
 - **THEN** dae stops, and no dae programs remain on the bound interfaces
 
 ### Requirement: Fall back to direct when stopped
 When dae stops or crashes, the dae programs on bound interfaces SHALL be removed, and LAN traffic SHALL fall back to direct forwarding by the kernel.
 
-#### Scenario: Stop dae
+#### Scenario: Stop the proxy
 - **WHEN** the dae service is stopped
 - **THEN** LAN clients can still reach external networks, and all traffic goes direct
 
 ### Requirement: Register a health check
 dae SHALL register a check with the health check: the check passes only when dae is running and its programs are attached to every bound interface that currently exists.
 
-#### Scenario: dae not running
+#### Scenario: Proxy not running
 - **WHEN** the health check runs while the dae process is not running
 - **THEN** the dae check fails

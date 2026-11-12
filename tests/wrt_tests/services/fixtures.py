@@ -1,7 +1,7 @@
 """The fixtures of the router online and what runs on it (module-boundaries D6).
 
-A module dials in at the emulated ISP once; dae, the emulated internet's names
-and CA, and the test app's Pod build on that session.
+A module dials in at the emulated ISP once; the transparent proxy (honk), the
+emulated internet's names and CA, and the test app's Pod build on that session.
 """
 
 from collections.abc import Generator  # noqa: TC003 (pluggy reads the hook's annotations)
@@ -12,7 +12,7 @@ import pytest
 from wrt_tests.device.trust import trust_ca
 from wrt_tests.model.poll import until
 from wrt_tests.services import app
-from wrt_tests.services.datapath import Online, dae_start
+from wrt_tests.services.datapath import Online, proxy_start
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -54,9 +54,9 @@ def internet_zone(online: Online) -> Online:
 
     Its addresses are documentation ranges, which the protection counts as
     private; an operator lets a local domain through the same way. dnsmasq
-    restarts to take it, and until it listens again, dae answers a LAN query to
-    the router's port 53 itself (a query to a local socket is the one it leaves
-    alone), so the fixture waits for dnsmasq.
+    restarts to take it, and until it listens again, a LAN query to the router's
+    port 53 gets no answer (DNS to a private address passes honk natively), so
+    the fixture waits for dnsmasq.
     """
     router = online.router
     router.run(
@@ -72,11 +72,11 @@ def internet_zone(online: Online) -> Online:
 
 
 @pytest.fixture(scope="module")
-def dae(online: Online) -> Iterator[Online]:
-    """Run dae with the test configuration for the module."""
-    dae_start(online.router)
+def proxy(online: Online) -> Iterator[Online]:
+    """Run the transparent proxy, honk, with the test configuration for the module."""
+    proxy_start(online.router)
     yield online
-    online.router.run("/etc/init.d/dae stop; uci set dae.config.enabled=0; uci commit dae")
+    online.router.run("/etc/init.d/honk stop; /etc/init.d/honk disable")
 
 
 @pytest.fixture(scope="module")

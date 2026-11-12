@@ -1,5 +1,7 @@
-# dae's configuration without lan_interface and wan_interface, which the
-# firmware sets (r4s-ebpf-datapath D5). Files next to it are included from here.
+# honk's configuration, in dae's syntax as honk reads it, without lan_interface
+# and wan_interface, which the firmware sets (honk-datapath D4). Files next to it
+# are included from here. Its native API, if enabled, takes a token (secret) and
+# never writes the configuration (D8).
 global {
 	log_level: info
 }

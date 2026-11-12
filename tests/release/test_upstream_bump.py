@@ -1,7 +1,8 @@
 """release/upstream-bump: the weekly bump of upstream.lock, merged only after the upgrade drill.
 
 scripts/upstream-bump.sh runs against local repositories standing in for the
-three upstreams; scripts/patch.sh against one the patch queue does not apply to.
+upstreams of upstream.lock; scripts/patch.sh against one the patch queue does not
+apply to.
 The bump workflow's step that opens the pull request runs in a clone of a local
 repository standing in for GitHub's, with a gh that records its calls; the
 drill check's step runs as build.yml has it.
@@ -33,7 +34,12 @@ if TYPE_CHECKING:
 
 CAPABILITY = "release/upstream-bump"
 REPO = Path(__file__).resolve().parents[2]
-NAMES = ("openwrt", "packages", "luci")
+# The upstreams the bump checks: every repository of the lock, in its order.
+NAMES = tuple(
+    line.split()[0]
+    for line in (REPO / "upstream.lock").read_text().splitlines()
+    if line.strip() and not line.startswith("#")
+)
 BBR_PATCH = "patches/openwrt/0001-generic-6.18-add-TCP-BBRv3.patch"
 DRILL_BASE = REPO / "scripts" / "drill-base.sh"
 WORKFLOWS = REPO / ".github" / "workflows"
@@ -121,7 +127,7 @@ def _write_lock(tmp_path: Path, lock: Path, pinned: dict[str, str]) -> None:
 
 
 def _upstreams(tmp_path: Path, commits: int) -> tuple[Path, dict[str, str]]:
-    """Make the three upstreams with ``commits`` commits each; return a lock of their first."""
+    """Make the upstreams with ``commits`` commits each; return a lock of their first."""
     first = {}
     for name in NAMES:
         repository = tmp_path / name
@@ -150,7 +156,7 @@ def test_updates_make_a_pull_request(tmp_path: Path) -> None:
     description = tmp_path / "pull-request.md"
     assert _bump(lock, description).returncode == 0
     title, _, *body = description.read_text().splitlines()
-    assert title.startswith("upstream: bump openwrt packages luci")
+    assert title.startswith(f"upstream: bump {' '.join(NAMES)}")
     text = "\n".join(body)
     for name in NAMES:
         head = _git(tmp_path / name, "rev-parse", "HEAD")

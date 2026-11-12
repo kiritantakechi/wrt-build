@@ -1,7 +1,7 @@
 """The private configuration and config-push, as the tests drive them (r4s-release-pipeline D6).
 
 ``ConfigRepository.create`` runs scripts/config-init.sh with an age key of the
-test's own. Its secrets, dae configuration and uci templates are then written
+test's own. Its secrets, honk's configuration and uci templates are then written
 the way an administrator does, sops encrypting each file for the recipient in
 .sops.yaml, and ``push`` runs scripts/config-push.sh against the router.
 """
@@ -65,9 +65,9 @@ class ConfigRepository:
         """Replace the secrets (YAML is JSON's superset: JSON goes in as it is)."""
         self._encrypt("secrets/secrets.enc.yaml", json.dumps(secrets).encode())
 
-    def write_dae(self, name: str, text: str) -> None:
-        """Replace a file of dae's configuration."""
-        self._encrypt(f"dae/{name}.dae.enc", text.encode())
+    def write_proxy(self, name: str, text: str) -> None:
+        """Replace a file of honk's configuration."""
+        self._encrypt(f"honk/{name}.dae.enc", text.encode())
 
     def commit(self, message: str) -> None:
         """Commit everything, as the administrator does after an edit."""

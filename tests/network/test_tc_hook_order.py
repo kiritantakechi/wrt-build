@@ -1,7 +1,7 @@
 """network/tc-hook-order: who attaches where on the ports, and who owns which mark bits.
 
-The emulator tests run with dae on, so all three components hold their hooks:
-einat and then qosify on tcx on pppoe-wan, dae alone on br-lan.
+The emulator tests run with honk on, so all three components hold their hooks:
+einat and then qosify on tcx on pppoe-wan, honk alone on br-lan.
 """
 
 import json
@@ -18,7 +18,14 @@ from wrt_tests.model.poll import until
 from wrt_tests.sandbox.net import DIRECT_TARGET
 from wrt_tests.sandbox.netprobe import BIG
 from wrt_tests.services import qos
-from wrt_tests.services.datapath import DAE, EINAT, QOSIFY_CLSACT, WAN, hooks, tc_programs
+from wrt_tests.services.datapath import (
+    EINAT,
+    PROXY_HOOKS_L2,
+    QOSIFY_CLSACT,
+    WAN,
+    hooks,
+    tc_programs,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -28,8 +35,8 @@ if TYPE_CHECKING:
 
 CAPABILITY = "network/tc-hook-order"
 MARKS_CHECK = Path(__file__).resolve().parents[2] / "scripts" / "marks-check.sh"
-# The bit dae keeps for its own sockets (config/marks.tsv).
-DAE_BIT = "0x00000100"
+# The bit honk keeps for its own sockets (config/marks.tsv).
+PROXY_BIT = "0x00000100"
 # pppoe-wan when qosify falls back to clsact: einat on tcx, qosify's filters after.
 FALLBACK = {**EINAT, **QOSIFY_CLSACT}
 SETTLE = 60
@@ -50,7 +57,7 @@ def _in_order(router: Router) -> bool:
     return (hooks(router, "pppoe-wan"), _filters(router), hooks(router, "br-lan")) == (
         WAN,
         "",
-        DAE,
+        PROXY_HOOKS_L2,
     )
 
 
@@ -76,35 +83,35 @@ def _qosify_runs(router: Router, direction: str) -> int:
 
 
 @pytest.fixture
-def without_tcx(dae: Online, internet_zone: Online) -> Iterator[Online]:
+def without_tcx(proxy: Online, internet_zone: Online) -> Iterator[Online]:
     """Have qosify attach with clsact, as on a kernel without tcx, for the test."""
     del internet_zone  # the names a dns: rule sends to a class resolve to the LAN
-    router = dae.router
+    router = proxy.router
     _set_tcx(router, "0")
     try:
         until(
             lambda: hooks(router, "pppoe-wan") == FALLBACK, timeout=SETTLE, what="qosify on clsact"
         )
-        yield dae
+        yield proxy
     finally:
         _set_tcx(router, "")
         until(lambda: _in_order(router), timeout=SETTLE, what="qosify on tcx again")
 
 
 @spec(CAPABILITY, "Programs and order on the WAN port", "Check the WAN port")
-def test_wan_port_runs_einat_then_qosify(dae: Online) -> None:
-    assert hooks(dae.router, "pppoe-wan") == WAN
-    assert _filters(dae.router) == ""
+def test_wan_port_runs_einat_then_qosify(proxy: Online) -> None:
+    assert hooks(proxy.router, "pppoe-wan") == WAN
+    assert _filters(proxy.router) == ""
 
 
-@spec(CAPABILITY, "Only dae on the LAN port", "Check the LAN port")
-def test_lan_port_runs_only_dae(dae: Online) -> None:
-    assert hooks(dae.router, "br-lan") == DAE
+@spec(CAPABILITY, "Only the proxy on the LAN port", "Check the LAN port")
+def test_lan_port_runs_only_honk(proxy: Online) -> None:
+    assert hooks(proxy.router, "br-lan") == PROXY_HOOKS_L2
 
 
 @spec(CAPABILITY, "Pass-through returns continue the chain", "ICMP reply on WAN ingress")
-def test_icmp_reply_reaches_qosify_and_the_host(dae: Online) -> None:
-    router = dae.router
+def test_icmp_reply_reaches_qosify_and_the_host(proxy: Online) -> None:
+    router = proxy.router
     router.run("sysctl -qw kernel.bpf_stats_enabled=1")
     try:
         before = _qosify_runs(router, "ingress")
@@ -112,7 +119,7 @@ def test_icmp_reply_reaches_qosify_and_the_host(dae: Online) -> None:
         quiet = _qosify_runs(router, "ingress") - before
         assert quiet < PINGS // 4, f"{quiet} runs without pings: too busy a WAN to tell"
         before += quiet
-        pinged = dae.client().run(
+        pinged = proxy.client().run(
             *("ping", "-q", "-c", str(PINGS), "-i", str(PING_INTERVAL), "-W", "2"),
             DIRECT_TARGET[0],
         )
@@ -127,33 +134,35 @@ def test_icmp_reply_reaches_qosify_and_the_host(dae: Online) -> None:
 
 
 @spec(CAPABILITY, "Pass-through returns continue the chain", "Fragmented UDP reply")
-def test_fragmented_reply_arrives_whole(dae: Online) -> None:
-    seen = dae.client().probe("udp", DIRECT_TARGET[0], "--big")
+def test_fragmented_reply_arrives_whole(proxy: Online) -> None:
+    seen = proxy.client().probe("udp", DIRECT_TARGET[0], "--big")
     assert seen["size"] == BIG
-    assert seen["address"] == dae.wan_address
+    assert seen["address"] == proxy.wan_address
 
 
 @spec(CAPABILITY, "Order independent of startup order", "After restarting components")
-def test_order_survives_restarts_and_a_redial(dae: Online) -> None:
-    for step in ("qosify", "einat", "dae"):
-        dae.router.run(f"/etc/init.d/{step} restart")
+def test_order_survives_restarts_and_a_redial(proxy: Online) -> None:
+    for step in ("qosify", "einat", "honk"):
+        proxy.router.run(f"/etc/init.d/{step} restart")
         until(
-            lambda: _in_order(dae.router), timeout=SETTLE, what=f"the order after restarting {step}"
+            lambda: _in_order(proxy.router),
+            timeout=SETTLE,
+            what=f"the order after restarting {step}",
         )
-    dae.redial()
-    until(lambda: _in_order(dae.router), timeout=SETTLE, what="the order after a redial")
+    proxy.redial()
+    until(lambda: _in_order(proxy.router), timeout=SETTLE, what="the order after a redial")
 
 
 @spec(CAPABILITY, "Centralized mark bit allocation", "Overlapping mark configured")
 def test_overlapping_mark_is_reported(tmp_path: Path) -> None:
     template = tmp_path / "feed" / "net" / "demo" / "files" / "uci-config"
     template.parent.mkdir(parents=True)
-    template.write_text(f"config demo 'config'\n\toption mark '{DAE_BIT}'\n")
+    template.write_text(f"config demo 'config'\n\toption mark '{PROXY_BIT}'\n")
     result = subprocess.run(
         [MARKS_CHECK, tmp_path / "feed"], capture_output=True, text=True, check=False
     )
     assert result.returncode != 0
-    assert f"mark {DAE_BIT} (demo) overlaps {DAE_BIT} (dae)" in result.stderr
+    assert f"mark {PROXY_BIT} (demo) overlaps {PROXY_BIT} (honk)" in result.stderr
 
     template.write_text("config demo 'config'\n")
     result = subprocess.run(

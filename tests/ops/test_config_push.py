@@ -3,7 +3,7 @@
 The module's private repository is config-init's, filled in as an administrator
 fills it: the ISP account, WireGuard's key, the tailnet login (a preauth key of
 the emulated internet's headscale) and a share user in the encrypted secrets,
-the test dae configuration encrypted beside them. It is pushed once to the
+honk's test configuration encrypted beside them. It is pushed once to the
 module's router, online and trusting the emulated internet, over SSH with the
 harness's key; each test pushes what it changed and discards it after. The
 upgrade to the other slot comes last.
@@ -24,7 +24,13 @@ from wrt_tests.device.trust import trust_ca
 from wrt_tests.model.poll import until
 from wrt_tests.sandbox.isp import LOGIN
 from wrt_tests.services.config import ConfigRepository
-from wrt_tests.services.datapath import DAE, DAE_CONFIG, hooks
+from wrt_tests.services.datapath import (
+    NATIVE_API,
+    NATIVE_API_TOKEN,
+    PROXY_CONFIG,
+    PROXY_HOOKS_L2,
+    hooks,
+)
 from wrt_tests.services.vpn import HEADSCALE_URL, clear, key_pair, preauth_key
 
 if TYPE_CHECKING:
@@ -38,10 +44,10 @@ CAPABILITY = "ops/config-push"
 SHARE_USER = {"name": "pushed", "password": "pushed-secret-1"}
 # An address the LAN cannot come up with (netifd: INVALID_ADDRESS).
 BAD_LAN_ADDRESS = "10.0.0.300/24"
-SERVICES = ("dae", "network", "smb", "tailscale")
-# The processes the services' reloads restart: dae, the WAN's pppd, the SMB
+SERVICES = ("honk", "network", "smb", "tailscale")
+# The processes the services' reloads restart: honk's, the WAN's pppd, the SMB
 # server's and tailscaled.
-RESTARTED = ("dae", "pppd", "ksmbd.mountd", "tailscaled")
+RESTARTED = ("honk-core", "pppd", "ksmbd.mountd", "tailscaled")
 ROOT_PASSWORD = "not-for-config-push"  # noqa: S105 (the test router's, for a password to refuse)
 # A password gitleaks' generic rule surely catches in plain text. A random one now
 # and then falls short of its entropy threshold, or holds one of its stop words.
@@ -72,6 +78,8 @@ NO_DOCROOT = "/nonexistent"
 # take to restart: procd runs its trigger commands one at a time.
 AHEAD = "wrt-test-ahead"
 AHEAD_SECONDS = 30
+# A group honk's configuration routes to and no group block declares.
+MISSING_GROUP = "no-such-group"
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +104,7 @@ class Pushed:
 def _state(router: Router) -> dict[str, str]:
     """Return what a push changes on the router, and the processes a reload restarts."""
     return {
-        "pushed": router.run("cat /etc/wrt-config/* /etc/dae/* | sha256sum"),
+        "pushed": router.run("cat /etc/wrt-config/* /etc/honk/* | sha256sum"),
         "uci": router.run("uci export | sha256sum"),
         **{name: router.run(f"pidof {name} || true") for name in RESTARTED},
     }
@@ -139,8 +147,22 @@ def _assert_put_back(result: subprocess.CompletedProcess[str], name: str) -> Non
     assert "the previous one is back" in result.stderr, result.stderr
 
 
-def _dae_sha256(router: Router) -> str:
-    return router.run("sha256sum /etc/dae/config.dae | cut -d' ' -f1")
+def _refused(pushed: Pushed, config: str) -> subprocess.CompletedProcess[str]:
+    """Push honk's configuration as ``config``; assert that the push failed and changed nothing."""
+    router = pushed.router
+    before = _state(router)
+    pushed.repository.write_proxy("config", config)
+    try:
+        result = pushed.push()
+    finally:
+        pushed.repository.discard()
+    assert result.returncode != 0, result.stderr
+    assert _state(router) == before
+    return result
+
+
+def _proxy_sha256(router: Router) -> str:
+    return router.run("sha256sum /etc/honk/config.dae | cut -d' ' -f1")
 
 
 @pytest.fixture(scope="module")
@@ -164,7 +186,7 @@ def pushed(
             "smb": {"users": [SHARE_USER]},
         }
     )
-    repository.write_dae("config", DAE_CONFIG)
+    repository.write_proxy("config", PROXY_CONFIG)
     repository.commit("the router's configuration")
     result = Pushed(online, repository, harness_key, private)
     first = result.push()
@@ -196,20 +218,20 @@ def test_no_secret_in_the_history(pushed: Pushed, tmp_path: Path) -> None:
     assert leaks(plain.directory) is not None
 
 
-@spec(CAPABILITY, "Validate before pushing", "Syntax error in dae config")
-def test_a_dae_syntax_error_changes_nothing(pushed: Pushed) -> None:
-    router = pushed.router
-    before = _state(router)
-    pushed.repository.write_dae("config", DAE_CONFIG.replace("routing {", "routing {{", 1))
-    try:
-        result = pushed.push()
-    finally:
-        pushed.repository.discard()
-    assert result.returncode != 0
-    assert "dae does not accept the configuration" in result.stderr
+@spec(CAPABILITY, "Validate before pushing", "Syntax error in the proxy config")
+def test_a_proxy_syntax_error_changes_nothing(pushed: Pushed) -> None:
+    result = _refused(pushed, PROXY_CONFIG.replace("routing {", "routing {{", 1))
+    assert "honk does not accept the configuration" in result.stderr
     assert "is unchanged" in result.stderr
-    assert _state(router) == before
-    assert router.returncode("test -e /tmp/wrt-push") != 0
+    assert pushed.router.returncode(f"test -e {UPLOAD}") != 0
+
+
+@spec(CAPABILITY, "Validate before pushing", "Configuration the proxy would refuse")
+def test_a_configuration_honk_refuses_changes_nothing(pushed: Pushed) -> None:
+    # It parses, and names a group no group block declares.
+    result = _refused(pushed, PROXY_CONFIG.replace("-> proxy", f"-> {MISSING_GROUP}"))
+    assert "honk does not accept the configuration" in result.stderr
+    assert MISSING_GROUP in result.stderr
 
 
 @spec(CAPABILITY, "Repeatable push results", "Repeated push")
@@ -267,7 +289,7 @@ def test_secrets_on_the_device_are_root_s(pushed: Pushed) -> None:
     assert modes
     assert set(modes) <= set(ROOT_ONLY), modes
     assert router.returncode(f"[ -e {UPLOAD} ]") != 0
-    files = router.run("ls /etc/dae/* /etc/wrt-config/tailscale.key").split()
+    files = router.run("ls /etc/honk/* /etc/wrt-config/tailscale.key").split()
     assert {router.run(f"ls -ln {file}").split()[0] for file in files} == {ROOT_ONLY[0]}
     # The key reaches tailscale in its file, and no command line sampled holds it.
     assert "--auth-key=file:" in router.run(f"cat {TAILSCALE_ARGUMENTS}")
@@ -322,20 +344,28 @@ def test_a_service_that_stops_is_put_back(pushed: Pushed) -> None:
     )
 
 
-@spec(CAPABILITY, "dae user config cannot set bind interfaces", "User config sets lan_interface")
+@spec(CAPABILITY, "Proxy user config cannot set bind interfaces", "User config sets lan_interface")
 def test_lan_interface_is_the_firmware_s(pushed: Pushed) -> None:
-    router = pushed.router
-    before = _state(router)
-    pushed.repository.write_dae(
-        "config", DAE_CONFIG.replace("global {\n", "global {\n    lan_interface: br-lan\n", 1)
+    result = _refused(
+        pushed, PROXY_CONFIG.replace("global {\n", "global {\n    lan_interface: br-lan\n", 1)
     )
-    try:
-        result = pushed.push()
-    finally:
-        pushed.repository.discard()
-    assert result.returncode != 0
     assert "lan_interface and wan_interface are the firmware's" in result.stderr
-    assert _state(router) == before
+
+
+@spec(CAPABILITY, "The proxy's native API only with a token", "Native API with password login")
+def test_the_native_api_takes_no_password_login(pushed: Pushed) -> None:
+    api = NATIVE_API.replace(f"secret: '{NATIVE_API_TOKEN}'", "password_auth: true")
+    result = _refused(pushed, PROXY_CONFIG + api)
+    assert "native API needs a token" in result.stderr
+
+
+@spec(
+    CAPABILITY, "The proxy's native API only with a token", "Native API with configuration writes"
+)
+def test_the_native_api_writes_no_configuration(pushed: Pushed) -> None:
+    api = NATIVE_API.replace("enabled: true\n", "enabled: true\n        config_write: true\n", 1)
+    result = _refused(pushed, PROXY_CONFIG + api)
+    assert "configuration writes stay off" in result.stderr
 
 
 @spec(CAPABILITY, "SSH key authentication only", "No SSH key configured")
@@ -379,9 +409,9 @@ def test_the_configuration_survives_an_upgrade(pushed: Pushed, upgrade_image: Pa
     assert router.run("uci get network.wan.username") == user
     assert router.run("uci get network.wan.password") == password
     assert router.run("uci get network.wg0.private_key") == pushed.wireguard_key
-    assert _dae_sha256(router) == hashlib.sha256(DAE_CONFIG.encode()).hexdigest()
-    assert router.run("uci get dae.config.enabled") == "1"
-    until(lambda: hooks(router, "br-lan") == DAE, timeout=120, what="dae on br-lan")
+    assert _proxy_sha256(router) == hashlib.sha256(PROXY_CONFIG.encode()).hexdigest()
+    assert router.returncode("/etc/init.d/honk enabled") == 0
+    until(lambda: hooks(router, "br-lan") == PROXY_HOOKS_L2, timeout=120, what="honk on br-lan")
     until(lambda: _tailscale_running(router), timeout=TAILSCALE_TIMEOUT, what="tailscale up")
     assert router.run("tailscale ip -4") == tailnet_address
     assert router.returncode(f"grep -q '^{SHARE_USER['name']}:' /etc/ksmbd/ksmbdpwd.db") == 0

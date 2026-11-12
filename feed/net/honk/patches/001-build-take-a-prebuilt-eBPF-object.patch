@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Fri, 13 Nov 2026 01:00:00 +0800
+Subject: [PATCH] build: take a prebuilt eBPF object
+
+honk-core's build script embeds an eBPF object it finds only when a
+sibling .toolchain file names the nightly of
+crates/honk-ebpf/rust-toolchain.toml; otherwise it builds the object
+itself with `cargo +<nightly>`, which needs rustup. A distribution that
+builds everything with a toolchain of its own builds the object in a
+step of its own, and has no way to hand it over.
+
+Add HONK_PREBUILT_EBPF_OBJECT: when set to the absolute path of an
+object, the build script checks that it carries BTF and embeds it as it
+is, skipping the lookup and the build. Without it, nothing changes.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ crates/honk-core/build.rs | 35 ++++++++++++++++++++++++++++++-----
+ 1 file changed, 30 insertions(+), 5 deletions(-)
+
+--- a/crates/honk-core/build.rs
++++ b/crates/honk-core/build.rs
+@@ -5,7 +5,8 @@
+ //! When the `ebpf` feature is enabled, this script ensures the eBPF object
+ //! file is available and copies it into `OUT_DIR` so `lib.rs` can embed it
+ //! via `include_bytes!`.  If the object does not exist yet, it is built
+-//! automatically using the nightly toolchain.
++//! automatically using the nightly toolchain, unless `HONK_PREBUILT_EBPF_OBJECT`
++//! names one built beforehand.
+ 
+ fn main() {
+     emit_version();
+@@ -310,6 +311,26 @@
+             .iter()
+             .filter_map(|d| newest_mtime(d))
+             .any(|src_mtime| src_mtime > obj_mtime)
++    }
++
++    // A distribution that builds the object in a step of its own, with the
++    // toolchain it builds everything else with, hands it over here; it is
++    // embedded as it is, once it is known to carry BTF.
++    println!("cargo:rerun-if-env-changed=HONK_PREBUILT_EBPF_OBJECT");
++    if let Some(prebuilt) = std::env::var_os("HONK_PREBUILT_EBPF_OBJECT").map(PathBuf::from) {
++        assert!(
++            prebuilt.is_absolute(),
++            "HONK_PREBUILT_EBPF_OBJECT must be an absolute path: {}",
++            prebuilt.display()
++        );
++        assert!(
++            object_has_btf(&prebuilt),
++            "prebuilt eBPF object at {} has no .BTF section — aya cannot load it",
++            prebuilt.display()
++        );
++        println!("cargo:rerun-if-changed={}", prebuilt.display());
++        embed_object(&prebuilt);
++        return;
+     }
+ 
+     let candidates = [
+@@ -411,11 +432,6 @@
+         }
+     };
+ 
+-    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+-    let dest = out_dir.join("honk-ebpf.o");
+-    std::fs::copy(&obj, &dest)
+-        .unwrap_or_else(|e| panic!("copy {} -> {}: {}", obj.display(), dest.display(), e));
+-
+     println!(
+         "cargo:rerun-if-changed={}",
+         ebpf_crate.join("src").display()
+@@ -424,6 +440,16 @@
+         "cargo:rerun-if-changed={}",
+         ebpf_common_crate.join("src").display()
+     );
++    embed_object(&obj);
++}
++
++/// Copies the eBPF object into `OUT_DIR`, where `lib.rs` embeds it.
++#[cfg(feature = "ebpf")]
++fn embed_object(obj: &std::path::Path) {
++    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
++    let dest = out_dir.join("honk-ebpf.o");
++    std::fs::copy(obj, &dest)
++        .unwrap_or_else(|e| panic!("copy {} -> {}: {}", obj.display(), dest.display(), e));
+     println!("cargo:rustc-env=HONK_EBPF_OBJECT={}", dest.display());
+     println!(
+         "cargo:warning=eBPF object embedded ({} bytes)",

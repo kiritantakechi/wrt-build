@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Fri, 13 Nov 2026 00:03:28 +0800
+Subject: [PATCH 11/12] rust: update to 1.99.1
+
+Release notes:
+https://github.com/rust-lang/rust/releases/tag/1.99.0
+https://github.com/rust-lang/rust/releases/tag/1.99.1
+
+The bundled LLVM is 23.1.1. Refresh the xz2 patch on the new bootstrap
+manifest; the AtomicExpand patch applies as it is.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ lang/rust/Makefile                                        | 4 ++--
+ lang/rust/patches/0001-Update-xz2-and-use-it-static.patch | 6 +++---
+ 2 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/lang/rust/Makefile b/lang/rust/Makefile
+index 997a8699..cef7b719 100644
+--- a/lang/rust/Makefile
++++ b/lang/rust/Makefile
+@@ -5,12 +5,12 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=rust
+-PKG_VERSION:=1.96.1
++PKG_VERSION:=1.99.1
+ PKG_RELEASE:=1
+ 
+ PKG_SOURCE:=rustc-$(PKG_VERSION)-src.tar.xz
+ PKG_SOURCE_URL:=https://static.rust-lang.org/dist/
+-PKG_HASH:=77a6ff3003a4ad0cb00697b043c879e3e1a15d945b1a1f63818903bfc3fa8b98
++PKG_HASH:=6451598a99e77f07571960f6b21d577399d3a30f33e80cbd2e3a4aae6535d265
+ HOST_BUILD_DIR:=$(BUILD_DIR_HOST)/rustc-$(PKG_VERSION)-src
+ 
+ PKG_MAINTAINER:=Luca Barbato <lu_zero@luminem.org>
+diff --git a/lang/rust/patches/0001-Update-xz2-and-use-it-static.patch b/lang/rust/patches/0001-Update-xz2-and-use-it-static.patch
+index 11a55d5e..41dd70ca 100644
+--- a/lang/rust/patches/0001-Update-xz2-and-use-it-static.patch
++++ b/lang/rust/patches/0001-Update-xz2-and-use-it-static.patch
+@@ -5,16 +5,16 @@ Subject: [PATCH] Update xz2 and use it static
+ 
+ ---
+  src/bootstrap/Cargo.toml | 2 +-
+- 3 files changed, 9 insertions(+), 9 deletions(-)
++ 1 file changed, 1 insertion(+), 1 deletion(-)
+ 
+ --- a/src/bootstrap/Cargo.toml
+ +++ b/src/bootstrap/Cargo.toml
+-@@ -54,7 +54,7 @@ tar = { version = "0.4.45", default-features = false, features = ["xattr"] }
++@@ -58,7 +58,7 @@
+  termcolor = "1.4"
+  toml = "0.5"
+  walkdir = "2.4"
+ -xz2 = "0.1"
+ +xz2 = { version = "0.1", features = ["static"] }
++ # tidy-alphabetical-end
+  
+  # Dependencies needed by the build-metrics feature
+- sysinfo = { version = "0.38.4", default-features = false, optional = true, features = ["system"] }

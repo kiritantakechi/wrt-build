@@ -19,7 +19,7 @@ Secrets in the private config repository (PPPoE credentials, dae subscriptions a
 ### Requirement: Validate before pushing
 The push tool SHALL validate all configuration to be pushed, including the dae configuration syntax and the UCI configuration syntax, before it modifies the device. When validation fails, the device MUST NOT be changed in any way.
 
-#### Scenario: Syntax error in dae config
+#### Scenario: Syntax error in the proxy config
 - **WHEN** a dae configuration with a syntax error is pushed
 - **THEN** the push aborts before modifying the device, and the device's existing configuration and services remain unchanged
 

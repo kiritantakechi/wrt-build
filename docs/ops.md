@@ -15,7 +15,7 @@ export WRT_CONFIG_DIR=~/wrt-config
 |---|---|
 | `.sops.yaml` | the age recipient every file is encrypted for |
 | `secrets/secrets.enc.yaml` | the credentials, encrypted: `pppoe.username`, `pppoe.password`, `wireguard.private_key`, `tailscale.auth_key`, `tailscale.login_server`, `smb.users` (a list of `name` and `password`) |
-| `dae/*.dae.enc` | dae's configuration, encrypted, since its nodes and subscriptions are secrets: `config.dae.enc`, and any file it includes. Never `lan_interface` or `wan_interface`: the firmware sets them |
+| `honk/*.dae.enc` | honk's configuration, encrypted, since its nodes, subscriptions and native API token are secrets: `config.dae.enc`, and any file it includes. Never `lan_interface` or `wan_interface`: the firmware sets them. The native API only in token mode, and never writing the configuration (below) |
 | `uci/<config>.uci.tmpl` | uci batches; `@path@` is the secret at that path, e.g. `set network.wan.password='@pppoe.password@'` |
 | `pods/*.yaml` | Pod declarations, and a `<pod>.options` beside one where it needs them |
 
@@ -23,10 +23,37 @@ Edit an encrypted file with sops, which decrypts it into a temporary file for th
 
 ```sh
 sops ~/wrt-config/secrets/secrets.enc.yaml
-sops ~/wrt-config/dae/config.dae.enc
+sops ~/wrt-config/honk/config.dae.enc
 ```
 
 Nothing goes in as plain text: the `.gitignore` keeps out `*.dec` and `*.plain`, and gitleaks finds nothing in the history (`gitleaks git ~/wrt-config`).
+
+### honk's native API
+
+honk's native API (and doona, its web UI) is off unless the configuration turns it on, and the push takes it only with a static token: `password_auth` lets the first visitor create the administrator, `allow_anonymous_loopback` needs no credential at all, and `config_write` would let the API change a configuration whose canonical copy is this repository. A push that sets any of them fails before the router changes. honk listens where `listen` says; fw4 rejects input from `wan`, `podman` and `tailscale`, so only the LAN reaches it.
+
+```dae
+experimental {
+    native_api {
+        enabled: true
+        listen: '0.0.0.0:9527'
+        secret: '<a long random token>'
+        ui: 'embedded'
+    }
+}
+```
+
+### Moving from dae
+
+The router ran dae before honk; nothing on it migrates. In the private repository, move the configuration (`git mv dae honk`) and push: the push checks it with honk before the router changes. honk reads dae's syntax, but not all of it alike:
+
+- `pname()` matches its name anywhere in the process name; dae matched the whole name.
+- `t` and `y` read as false; `so_mark_from_dae` reads as hex; the mark of `direct(mark: 010)` is decimal.
+- One declaration per line; no `/* */` comments; a `#` glued to a value is part of the value.
+- A node scheme other than ss, vmess (TCP), vless, trojan, anytls, hysteria and hysteria2, tuic, juicity and socks rejects the whole configuration; of a chain `a -> b`, only `a` is read.
+- Group policies `random` and `min` become a selector; `fixed(N)` loses its index; a group and a node cannot share a name.
+- `file://` subscriptions are not supported; subscriptions refresh daily by default.
+- `global` keys honk takes and ignores: `allow_insecure`, `sniffing_timeout`, `utls_imitate`, `tls_fragment*`, `mptcp`, `fallback_resolver`, `bandwidth_max_*`, `auto_config_kernel_parameter`.
 
 ## Pushing
 
@@ -37,12 +64,12 @@ just config-push 192.168.1.1 --identity ~/.ssh/wrt
 The push logs in as root with that key (or the agent's), never with a password. Put the key's public half in the router's `/etc/dropbear/authorized_keys` first (LuCI: System, Administration, SSH-Keys). Then:
 
 1. The secrets are decrypted into a temporary directory, which goes when the push ends, and the templates are filled in. Its files are root's alone, here and in the router's copy, `/tmp/wrt-push`, which goes too, however the push ends.
-2. Everything is checked on the router before anything changes: dae's configuration with `dae validate`, set up as the dae service would run it, and each uci batch on a copy of the configuration. A push that fails here changes nothing.
-3. Each service whose files changed since its last push (dae, network and the other uci configurations, tailscale, smb, pods) is written and reloaded, and the push waits until it is back: its own check passes (dae's health check, the LAN up, `tailscale status`, ksmbd serving the shares it offers, every Pod running), and every daemon that ran before runs on without a restart for as long as procd may take to act on the change: its longest trigger delay, then twice the longest stop timeout among those daemons, then one more check (13 s with the image's defaults). A reload still to come, a restart under way and a daemon procd keeps starting again all show within it. One that does not come back gets everything the push changed for it back (for Tailscale its key and tailscaled's state, so it is logged in as before without logging in again; for the SMB users `/etc/passwd`, `/etc/group` and ksmbd's user database), is reloaded with it, and the push fails, naming it.
+2. Everything is checked on the router before anything changes: honk's configuration with `/etc/init.d/honk check`, which runs `honk-core check` on the entry the honk service would run around it, and each uci batch on a copy of the configuration. A push that fails here changes nothing.
+3. Each service whose files changed since its last push (honk, network and the other uci configurations, tailscale, smb, pods) is written and reloaded, and the push waits until it is back: its own check passes (honk's health check, the LAN up, `tailscale status`, ksmbd serving the shares it offers, every Pod running), and every daemon that ran before runs on without a restart for as long as procd may take to act on the change: its longest trigger delay, then twice the longest stop timeout among those daemons, then one more check (13 s with the image's defaults). A reload still to come, a restart under way and a daemon procd keeps starting again all show within it. One that does not come back gets everything the push changed for it back (for Tailscale its key and tailscaled's state, so it is logged in as before without logging in again; for the SMB users `/etc/passwd`, `/etc/group` and ksmbd's user database), is reloaded with it, and the push fails, naming it.
 
 Tailscale logs in with `tailscale up --force-reauth --auth-key=file:/etc/wrt-config/tailscale.key`: the key is in a file only root reads, never on a command line. A node logged in already ignores a key without `--force-reauth`, so a new key would not take effect, nor a refused one be noticed; with it, the node logs in anew, which drops the tailnet's connections for a moment: push over the LAN, not over the tailnet.
 
-Pushing the same configuration again reloads nothing. What the push wrote is kept through upgrades: the uci configuration, `/etc/dae`, `/etc/tailscale`, `/etc/wrt-config` (what was last pushed), the SMB users.
+Pushing the same configuration again reloads nothing. What the push wrote is kept through upgrades: the uci configuration, `/etc/honk` and whether honk starts at boot (its `/etc/rc.d` links), `/etc/tailscale`, `/etc/wrt-config` (what was last pushed), the SMB users.
 
 ## The age key
 

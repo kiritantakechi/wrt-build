@@ -63,7 +63,7 @@ reboot
 
 ## Containers
 
-podman runs app containers (qBittorrent and the like, never in the image), with crun and netavark. Their storage is on the data disk. Its bridge `podman0` is the fw4 zone `podman`: out to `wan` and in from `lan`, never to `lan`. podman writes no firewall rules of its own (netavark's `firewall_driver = "none"`): containers leave through einat like the LAN, or masquerade when einat is off. dae treats their traffic as it treats the LAN's.
+podman runs app containers (qBittorrent and the like, never in the image), with crun and netavark. Their storage is on the data disk. Its bridge `podman0` is the fw4 zone `podman`: out to `wan` and in from `lan`, never to `lan`. podman writes no firewall rules of its own (netavark's `firewall_driver = "none"`): containers leave through einat like the LAN, or masquerade when einat is off. honk treats their traffic as it treats the LAN's.
 
 ### Declare a Pod
 
@@ -138,8 +138,8 @@ More shares go under `/mnt/data/shares` in `/etc/config/ksmbd` (or LuCI's Networ
 
 Two ways in, each an fw4 zone of its own that forwards to `lan` and `wan` and rejects input to the router itself (so SMB, SSH and LuCI stay LAN-only).
 
-- **WireGuard** (`wg0`, in the kernel, UDP 51820, the router is 10.9.0.1/24): the image carries the interface disabled and no keys. The config push writes the private key and the peers (`network.wg0.private_key`, sections `wireguard_wg0`) and sets `network.wg0.disabled=0`. Its traffic bypasses dae: it goes out direct.
-- **Tailscale** (`tailscale0`, nftables mode, UDP 41641): log in once with the LAN as a subnet route; the router can also be an exit node. Its traffic goes through dae like the LAN's:
+- **WireGuard** (`wg0`, in the kernel, UDP 51820, the router is 10.9.0.1/24): the image carries the interface disabled and no keys. The config push writes the private key and the peers (`network.wg0.private_key`, sections `wireguard_wg0`) and sets `network.wg0.disabled=0`. Its traffic bypasses honk: it goes out direct.
+- **Tailscale** (`tailscale0`, nftables mode, UDP 41641): log in once with the LAN as a subnet route; the router can also be an exit node. Its traffic goes through honk like the LAN's:
 
 ```sh
 tailscale up --advertise-routes=10.0.0.0/24 --advertise-exit-node --accept-dns=false

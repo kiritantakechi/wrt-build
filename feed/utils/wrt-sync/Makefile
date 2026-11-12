@@ -19,7 +19,7 @@ endef
 
 define Package/wrt-sync/description
   The device side of r4s-release-pipeline (D4): wrt-sync fetches the newest
-  release through a container on podman's network, so dae routes it like the
+  release through a container on podman's network, so honk routes it like the
   LAN's traffic, into /mnt/data/repo, and activates it only once its signed
   manifest, its files and its package indexes verify. apk installs from that
   repository; wrt-update upgrades to its image.

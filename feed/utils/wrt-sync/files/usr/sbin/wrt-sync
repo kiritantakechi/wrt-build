@@ -1,9 +1,9 @@
 #!/bin/sh
 # wrt-sync: keep the local repository of releases (r4s-release-pipeline D4).
 # Usage: wrt-sync [--candidate]
-# A container on podman's network, so that dae routes its traffic as it does the
-# LAN's, fetches the newest release of the channel (wrt-sync.main.channel, or
-# --candidate for pre-releases too) into /mnt/data/repo/.incoming/<tag>: the
+# A container on podman's network, so that honk routes its traffic as it does
+# the LAN's, fetches the newest release of the channel (wrt-sync.main.channel,
+# or --candidate for pre-releases too) into /mnt/data/repo/.incoming/<tag>: the
 # asset set of the router's device, which upstream names after the board name
 # (board-model D10). The container gets the router's own programs read-only and
 # only that directory to write, and nothing it fetches is trusted: the release

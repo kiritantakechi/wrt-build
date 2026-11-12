@@ -2,10 +2,10 @@
 // sent over SSH for every push, so the router never runs a stale copy.
 // Usage: ucode - validate | hashes | apply <service>   (in /tmp/wrt-push)
 // config-push uploads each service's new files to /tmp/wrt-push/new/<service>:
-//  validate      checks them without touching the configuration: dae's in a
-//                scratch directory set up as the dae service would (the entry
-//                includes dae.config.config_file, and the other files lie next to
-//                it), each uci batch on a copy of /etc/config;
+//  validate      checks them without touching the configuration: honk's with
+//                honk's own check of the entry its service would write around
+//                honk.config.config_file (/etc/init.d/honk check), each uci batch
+//                on a copy of /etc/config;
 //  hashes        prints the hash of each service as last pushed;
 //  apply <name>  saves what the service has now, writes the new files, reloads
 //                the service and waits for it to come back; if the reload fails
@@ -18,7 +18,7 @@
 // commands it runs report on standard error: standard output is the hashes'.
 'use strict';
 
-import { glob, lsdir, mkdir, open, popen, readfile, stat, writefile } from 'fs';
+import { glob, lsdir, lstat, mkdir, open, popen, readfile, stat } from 'fs';
 import * as ubus from 'ubus';
 import { cursor } from 'uci';
 
@@ -66,23 +66,14 @@ function basename(path) {
 }
 
 function validate() {
-	if (stat(`${NEW}/dae`)) {
-		let check = `${PUSH}/dae-check`;
-		let entry = basename(cursor().get('dae', 'config', 'config_file') ?? '/etc/dae/config.dae');
+	if (stat(`${NEW}/honk`)) {
+		let entry = basename(cursor().get('honk', 'config', 'config_file') ?? '/etc/honk/config.dae');
 
-		if (!stat(`${NEW}/dae/${entry}`))
-			fail(`dae: ${entry} is not among the files`);
+		if (!stat(`${NEW}/honk/${entry}`))
+			fail(`honk: ${entry} is not among the files`);
 
-		if (!run(`rm -rf ${quoted(check)} && mkdir -p ${quoted(check)} && cp ${quoted(`${NEW}/dae`)}/* ${quoted(check)}/`))
-			fail('dae: cannot set up the files to validate');
-
-		writefile(`${check}/main.dae`,
-			"global {\n\tlan_interface: br-lan\n}\n" +
-			"dns {\n\tbind: '127.0.0.1:5353'\n}\n" +
-			`include {\n\t${entry}\n}\n`);
-
-		if (!run(`chmod 600 ${quoted(check)}/* && dae validate -c ${quoted(`${check}/main.dae`)}`))
-			fail('dae does not accept the configuration');
+		if (!run(`/etc/init.d/honk check ${quoted(`${NEW}/honk/${entry}`)}`))
+			fail('honk does not accept the configuration');
 	}
 
 	for (let batch in sort(glob(`${NEW}/*/*.uci`) ?? [])) {
@@ -131,8 +122,9 @@ function tailscale_state() {
 // owned(name): the paths a push of the service changes, files or directories.
 function owned(name) {
 	switch (name) {
-	case 'dae':
-		return ['/etc/dae', '/etc/config/dae'];
+	case 'honk':
+		// Its start-at-boot switch is the init script's rc.d links.
+		return ['/etc/honk', '/etc/config/honk', '/etc/rc.d/S99honk', '/etc/rc.d/K01honk'];
 
 	case 'pods':
 		return [PODS];
@@ -157,15 +149,17 @@ function save(name) {
 		fail(`${name}: cannot save its files`);
 
 	for (let i, path in owned(name))
-		if (stat(path) && !run(`cp -a ${quoted(path)} ${quoted(`${saved}/${i}`)}`))
+		if (lstat(path) && !run(`cp -a ${quoted(path)} ${quoted(`${saved}/${i}`)}`))
 			fail(`${name}: cannot save ${path}`);
 }
 
 // put_back(copy, path): the path as its saved copy has it, or gone when it had
-// none. A file is replaced in one rename; a directory gets the copy over it, then
-// loses what the push added: neither is ever missing meanwhile.
+// none. A file or a symbolic link is replaced in one rename; a directory gets the
+// copy over it, then loses what the push added: neither is ever missing
+// meanwhile. A saved link is a link, whatever its target, which a relative one
+// misses from where it is saved.
 function put_back(copy, path) {
-	switch (stat(copy)?.type) {
+	switch (lstat(copy)?.type) {
 	case null:
 		return run(`rm -rf ${quoted(path)}`);
 
@@ -193,18 +187,13 @@ function write(name) {
 	let files = `${NEW}/${name}`;
 
 	switch (name) {
-	case 'dae':
-		for (let file in glob(`${files}/*`) ?? []) {
-			let target = `/etc/dae/${basename(file)}`;
-
-			if (!run(`cp ${quoted(file)} ${quoted(target)} && chmod 600 ${quoted(target)}`))
-				fail(`dae: cannot write ${target}`);
-		}
-
-		let uci = cursor();
-
-		uci.set('dae', 'config', 'enabled', '1');
-		uci.commit('dae');
+	case 'honk':
+		// The pushed files replace the directory's, readable by root alone, and
+		// honk starts at boot from now on.
+		if (!run(`rm -rf /etc/honk.new && mkdir -m 700 /etc/honk.new && cp ${quoted(files)}/* /etc/honk.new/` +
+			' && chmod 600 /etc/honk.new/* && rm -rf /etc/honk && mv /etc/honk.new /etc/honk' +
+			' && /etc/init.d/honk enable'))
+			fail('honk: cannot write its configuration');
 		break;
 
 	case 'pods':
@@ -254,8 +243,8 @@ function write(name) {
 // that does so fails. Whether the service came back is for settle to tell.
 function reload(name) {
 	switch (name) {
-	case 'dae':
-		return run('/etc/init.d/dae restart');
+	case 'honk':
+		return run('/etc/init.d/honk restart');
 
 	case 'pods':
 		return !stat(PODS) || run('/etc/init.d/wrt-containers restart');
@@ -360,8 +349,8 @@ function sharing() {
 // back(name): the service's own check passes after its reload.
 function back(name) {
 	switch (name) {
-	case 'dae':
-		return system('/etc/healthcheck.d/50-dae >/dev/null 2>&1') == 0;
+	case 'honk':
+		return system('/etc/healthcheck.d/50-honk >/dev/null 2>&1') == 0;
 
 	case 'network':
 		let connection = ubus.connect();

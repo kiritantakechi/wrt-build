@@ -1,4 +1,4 @@
-"""services/containers: podman on the data disk, behind fw4, einat and dae like the LAN.
+"""services/containers: podman on the data disk, behind fw4, einat and honk like the LAN.
 
 The app Pod (wrt_tests.services.app) runs from the test image in the emulated internet's
 registry: uhttpd serving a page of the data disk, at a fixed address. Probes
@@ -19,7 +19,7 @@ from wrt_tests.model.poll import until
 from wrt_tests.sandbox.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
 from wrt_tests.sandbox.netprobe import HTTP_PORT, PORT
 from wrt_tests.services import app
-from wrt_tests.services.datapath import DAE, hooks
+from wrt_tests.services.datapath import PROXY_HOOKS_L2, PROXY_NFQUEUE_TABLE, hooks
 
 if TYPE_CHECKING:
     from wrt_tests.device.router import Router
@@ -71,9 +71,9 @@ FORGET = (
 
 
 @pytest.fixture(scope="module")
-def pod(app_pod: Online, dae: Online) -> Online:
-    """Return the router with the app Pod running and dae on (it splits the Pod's traffic)."""
-    del dae  # running for the module
+def pod(app_pod: Online, proxy: Online) -> Online:
+    """Return the router with the app Pod running and honk on (it splits the Pod's traffic)."""
+    del proxy  # running for the module
     return app_pod
 
 
@@ -121,7 +121,9 @@ def test_pull_goes_to_the_data_disk(registry: tuple[Online, str]) -> None:
 def test_ruleset_is_fw4_only(pod: Online, lan_host: Netns) -> None:
     del lan_host  # serving on client-a
     router = pod.router
-    assert router.run("nft list tables").splitlines() == ["table inet fw4"]
+    # fw4's table, and honk's, a datapath component's.
+    tables = set(router.run("nft list tables").splitlines())
+    assert tables == {"table inet fw4", f"table {PROXY_NFQUEUE_TABLE}"}
     ruleset = router.run("nft list ruleset")
     assert "netavark" not in ruleset
     assert "chain forward_podman" in ruleset
@@ -172,7 +174,7 @@ def test_exposed_port(pod: Online) -> None:
     CAPABILITY, "Container traffic uses the transparent proxy", "Container reaches a proxied target"
 )
 def test_container_reaches_a_proxied_target(pod: Online) -> None:
-    assert hooks(pod.router, "podman0") == DAE
+    assert hooks(pod.router, "podman0") == PROXY_HOOKS_L2
     assert _from_container(pod, PROXIED_TARGET[0])["address"] == PROXY[0]
     assert _from_container(pod, DIRECT_TARGET[0])["address"] == pod.wan_address
 
@@ -240,7 +242,7 @@ def test_the_network_s_dns_outlives_a_service_s_container(pod: Online) -> None:
     router.run(f"podman pod start {app.POD} >/dev/null", timeout=120)
     app.wait_running(router)
     # The network's DNS answers the Pod: its own name resolves inside it.
-    answer = router.run(f"podman exec {app.CONTAINER} nslookup {app.POD} 10.88.0.1")
+    answer = router.run(f"podman exec {app.CONTAINER} nslookup {app.POD} {app.GATEWAY}")
     assert app.ADDRESS in answer, answer
 
 

@@ -1,0 +1,8 @@
+# honk's service options. Its configuration is /etc/honk/config.dae, pushed from
+# the private config repository or edited in LuCI; honk starts at boot while
+# its init script is enabled (LuCI's Start at boot).
+config honk 'config'
+	option config_file '/etc/honk/config.dae'
+	# Pin honk to the big cores, those of the highest capacity; off, so the
+	# scheduler places it.
+	option cpu_pinning '0'

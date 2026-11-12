@@ -1,6 +1,6 @@
 """network/nat: einat's full-cone NAT44 and what falls back to masquerade.
 
-dae stays off in this module: every flow goes direct, so what the internet sees
+honk stays off in this module: every flow goes direct, so what the internet sees
 is einat's work (or masquerade's) alone.
 """
 

@@ -6,7 +6,7 @@
 # as --ip for a fixed address (docs/services.md). A declaration that changed since
 # it was last applied is played again (podman kube play --replace); an unchanged
 # one only has its Pod started. Every Pod joins podman's own network, podman
-# (bridge podman0: the fw4 zone podman, which dae serves), not the network kube
+# (bridge podman0: the fw4 zone podman, which honk serves), not the network kube
 # play would make for Pods. A Pod that does not come up keeps no other from
 # coming up; apply fails at the end, naming each such Pod (device-integrity D4).
 set -eu

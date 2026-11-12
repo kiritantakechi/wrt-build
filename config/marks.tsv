@@ -1,5 +1,7 @@
 mask	owner	purpose	source
-0x00000100	dae	dae's own sockets (internal)	common/utils.go:357
-0x08000000	dae	dae0peer to table 2023 (internal)	netns_utils.go
-0x20000000	einat	inbound packets translated back (our patch)	r4s-ebpf-datapath D2
+0x00000100	honk	bypass: honk's own sockets, direct on WAN (so_mark_from_dae)	doc/en/design/datapath.md (v0.1.0-beta.6)
 0x00ff0000	tailscale	0x40000 subnet route (masquerade), 0x80000 bypass	tsconst/linuxfw.go:58-69 (1.102.3)
+0x08000000	honk	tproxy: dae0peer to honk's routing in daens	doc/en/design/datapath.md (v0.1.0-beta.6)
+0x20000000	einat	inbound packets translated back (our patch)	r4s-ebpf-datapath D2
+0x40000000	honk	classified: final direct packets	doc/en/design/datapath.md (v0.1.0-beta.6)
+0x80000000	honk	NFQUEUE pending: UDP held for userspace	doc/en/design/nfqueue.md (v0.1.0-beta.6)

@@ -1,6 +1,6 @@
 # upstream.lock
 
-`upstream.lock` pins the three upstream repositories the build uses. Each line is one repository, with four whitespace-separated columns:
+`upstream.lock` pins the four upstream repositories the build uses: openwrt, packages, luci, and daeuniverse's OpenWrt feed (`daeuniverse`), which provides honk's LuCI pages. Each line is one repository, with four whitespace-separated columns:
 
 ```
 <name> <git-url> <commit-sha> <commit-epoch>
@@ -28,7 +28,7 @@ Why feeds are not fetched by `scripts/feeds update`: if a feed directory already
 
 ## Updating
 
-`upstream.lock` itself is the record of what is pinned. It changes through the weekly bump (`.github/workflows/bump.yml`, `scripts/upstream-bump.sh`): every Monday the heads of the three default branches are compared with the lock, and when any moved, a pull request from `bump/<date>` updates the SHA and commit time of each and lists the commits in between. It merges once its candidate has passed the upgrade drill (docs/release-flow.md). To bump by hand, run the same script and build before committing:
+`upstream.lock` itself is the record of what is pinned. It changes through the weekly bump (`.github/workflows/bump.yml`, `scripts/upstream-bump.sh`): every Monday the heads of the repositories' default branches are compared with the lock, and when any moved, a pull request from `bump/<date>` updates the SHA and commit time of each and lists the commits in between. It merges once its candidate has passed the upgrade drill (docs/release-flow.md). To bump by hand, run the same script and build before committing:
 
 ```sh
 just upstream-bump /tmp/pull-request.md

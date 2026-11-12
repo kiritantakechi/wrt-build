@@ -3,12 +3,12 @@
 # Usage: scripts/config-init.sh <directory>
 # The repository config-push reads ($WRT_CONFIG_DIR), made from config-init.d:
 # .sops.yaml naming the age recipient, secrets/secrets.enc.yaml (credentials,
-# encrypted), dae/*.dae.enc (dae's configuration, encrypted: its nodes and
-# subscriptions are secrets), uci/*.uci.tmpl (uci batches, filled in from the
-# secrets at push time) and pods/ (Pod declarations). The age key comes from
-# $SOPS_AGE_KEY_FILE (~/.config/sops/age/keys.txt by default) and is created
-# there if missing: back it up offline (docs/ops.md), as nothing decrypts the
-# secrets without it. Nothing is committed in plain text.
+# encrypted), honk/*.dae.enc (honk's configuration, encrypted: its nodes,
+# subscriptions and native API token are secrets), uci/*.uci.tmpl (uci batches,
+# filled in from the secrets at push time) and pods/ (Pod declarations). The age
+# key comes from $SOPS_AGE_KEY_FILE (~/.config/sops/age/keys.txt by default) and
+# is created there if missing: back it up offline (docs/ops.md), as nothing
+# decrypts the secrets without it. Nothing is committed in plain text.
 set -eu
 # shellcheck source=scripts/lib/core.sh
 . "$(dirname -- "$0")/lib/core.sh"
@@ -26,7 +26,7 @@ fi
 recipient=$(age-keygen -y "${key}")
 
 mkdir -p "${repo}/pods"
-cp -R "${skeleton}/secrets" "${skeleton}/dae" "${skeleton}/uci" "${repo}/"
+cp -R "${skeleton}/secrets" "${skeleton}/honk" "${skeleton}/uci" "${repo}/"
 cp "${skeleton}/gitignore" "${repo}/.gitignore"
 sed "s/@recipient@/${recipient}/" "${skeleton}/sops.yaml" >"${repo}/.sops.yaml"
 touch "${repo}/pods/.keep"
@@ -38,7 +38,7 @@ encrypt() {
 	rm "${repo}/$1"
 }
 encrypt secrets/secrets.yaml secrets/secrets.enc.yaml
-encrypt dae/config.dae dae/config.dae.enc
+encrypt honk/config.dae honk/config.dae.enc
 
 git -C "${repo}" init -q
 git -C "${repo}" add -A

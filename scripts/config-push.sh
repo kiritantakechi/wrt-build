@@ -5,15 +5,16 @@
 # with sops into a temporary directory, which goes when the push ends; the uci
 # templates are filled in from them. Each service's new files:
 #   network, ... (one per uci/<config>.uci.tmpl)   uci batches
-#   dae        dae/*.dae.enc, without lan_interface or wan_interface (the
-#              firmware sets them)
+#   honk       honk/*.dae.enc, without lan_interface or wan_interface (the
+#              firmware sets them), its native API in token mode alone and
+#              never writing the configuration (honk-datapath D8)
 #   tailscale  the auth key and the login's options (secrets: tailscale.auth_key,
 #              tailscale.login_server)
 #   smb        the share users (secrets: smb.users)
 #   pods       pods/*.yaml and their .options
-# Everything is validated before the router changes: dae's configuration by dae
-# itself, in a scratch directory on the router, and every uci batch on a copy of
-# its configuration. Then each service whose files changed since its last push
+# Everything is validated before the router changes: honk's configuration by
+# honk's own check of the entry its service would run, on the router, and every
+# uci batch on a copy of its configuration. Then each service whose files changed since its last push
 # (a hash on the router) is written, reloaded and checked, and put back as it
 # was if it does not come back, which fails the push. SSH authenticates with a
 # key only (--identity, or the agent's); a password is never tried. The files are
@@ -62,16 +63,41 @@ mkdir -p "${new}"
 sops decrypt --output-type json "${config}/secrets/secrets.enc.yaml" >"${work}/secrets.json" ||
 	die "cannot decrypt the secrets (is the age key in \$SOPS_AGE_KEY_FILE?)"
 
-for encrypted in "${config}"/dae/*.dae.enc; do
+for encrypted in "${config}"/honk/*.dae.enc; do
 	[ -e "${encrypted}" ] || continue
-	mkdir -p "${new}/dae"
+	mkdir -p "${new}/honk"
 	name=${encrypted##*/}
-	sops decrypt --input-type binary --output-type binary "${encrypted}" >"${new}/dae/${name%.enc}" ||
+	sops decrypt --input-type binary --output-type binary "${encrypted}" >"${new}/honk/${name%.enc}" ||
 		die "cannot decrypt ${name}"
 done
-if [ -d "${new}/dae" ] &&
-	grep -n -E '^[[:space:]]*(lan_interface|wan_interface)[[:space:]]*:' "${new}"/dae/*.dae >&2; then
-	die "dae's lan_interface and wan_interface are the firmware's (r4s-ebpf-datapath D5): remove them"
+if [ -d "${new}/honk" ]; then
+	if grep -n -E '^[[:space:]]*(lan_interface|wan_interface)[[:space:]]*:' "${new}"/honk/*.dae >&2; then
+		die "honk's lan_interface and wan_interface are the firmware's (honk-datapath D4): remove them"
+	fi
+	# The native API's settings, key=value, across the files: its blocks are the
+	# ones named native_api, comments go and quotes come off the values. Whichever
+	# file honk would take a setting from, a forbidden value anywhere is refused.
+	awk '
+		{ sub(/(^|[[:space:]])#.*/, "") }
+		/^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\{[[:space:]]*$/ {
+			name = $0; gsub(/[[:space:]{]/, "", name); stack[++depth] = name; next
+		}
+		/^[[:space:]]*}[[:space:]]*$/ { if (depth) depth--; next }
+		depth && stack[depth] == "native_api" && match($0, /^[[:space:]]*[A-Za-z_]+[[:space:]]*:/) {
+			key = $0; sub(/:.*/, "", key); gsub(/[[:space:]]/, "", key)
+			value = $0; sub(/^[^:]*:[[:space:]]*/, "", value); sub(/[[:space:]]+$/, "", value)
+			gsub(/^["\047]|["\047]$/, "", value)
+			print key "=" value
+		}
+	' "${new}"/honk/*.dae >"${work}/native-api"
+	for key in password_auth allow_anonymous_loopback; do
+		! grep -qx "${key}=true" "${work}/native-api" ||
+			die "honk's native API needs a token (secret), not ${key}: password login lets its first visitor create the administrator"
+	done
+	! grep -qx 'config_write=true' "${work}/native-api" ||
+		die "honk's native API keeps configuration writes off: the configuration's canonical copy is this repository (honk-datapath D8)"
+	! grep -qx 'enabled=true' "${work}/native-api" || grep -q '^secret=.' "${work}/native-api" ||
+		die "honk's native API needs a token: set its secret"
 fi
 
 # The uci templates: comments and blank lines go, and @path@ is the secret at

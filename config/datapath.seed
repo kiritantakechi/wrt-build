@@ -1,12 +1,17 @@
-# The eBPF datapath (r4s-ebpf-datapath): dae on the LAN side, einat on the WAN,
-# with the tc classifier and the veth pair dae attaches through; qosify shapes
-# WAN egress with cake. bpftool-minimal, which the health checks read tcx with,
-# is in system.seed.
+# The eBPF datapath (r4s-ebpf-datapath, honk-datapath): honk on the LAN side,
+# einat on the WAN, with the tc classifier, the veth pair honk falls back to
+# without netkit, and the NFQUEUE honk holds ambiguous UDP in; qosify shapes WAN
+# egress with cake. bpftool-minimal, which the health checks read tcx with, is
+# in system.seed. honk ships disabled until a configuration is pushed
+# (openwrt 0046).
 CONFIG_PACKAGE_kmod-sched-core=y
 CONFIG_PACKAGE_kmod-sched-bpf=y
 CONFIG_PACKAGE_kmod-sched-cake=y
 CONFIG_PACKAGE_kmod-veth=y
-CONFIG_PACKAGE_dae=y
-CONFIG_PACKAGE_luci-app-dae=y
+CONFIG_PACKAGE_kmod-nft-queue=y
+CONFIG_PACKAGE_kmod-nfnetlink-queue=y
+CONFIG_PACKAGE_honk=y
+CONFIG_PACKAGE_luci-app-honk=y
 CONFIG_PACKAGE_einat=y
 CONFIG_PACKAGE_qosify=y
+CONFIG_TARGET_DISABLED_SERVICES="honk"

@@ -11,7 +11,7 @@
 #    new flow from WAN into LAN but those einat translated back: OpenWrt's
 #    default accept of all ESP and ISAKMP towards the LAN goes (a LAN client's
 #    own IPsec still works, as masquerade tracks it);
-#  - dnsmasq asks dae (127.0.0.1#5353) first, then the resolvers WAN brings;
+#  - dnsmasq asks honk (127.0.0.1#5353) first, then the resolvers WAN brings;
 #  - qosify shapes WAN egress only, framed as fiber with PPPoE over Ethernet
 #    (38 bytes of Ethernet and 8 of PPPoE); the config push sets the rate.
 [ -e /etc/wrt-datapath ] && exit 0

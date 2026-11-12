@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 POD = "web"
 CONTAINER = f"{POD}-httpd"
 ADDRESS = "10.88.0.10"
+# The router's address on podman's network, where the network's resolver
+# (aardvark-dns) answers.
+GATEWAY = "10.88.0.1"
 PODS = f"{MOUNT}/containers/pods"
 WWW = f"{MOUNT}/containers/www"
 START_TIMEOUT = 180

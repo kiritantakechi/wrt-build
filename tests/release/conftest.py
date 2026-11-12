@@ -2,18 +2,19 @@
 
 The drill's router is online, resolves and trusts the emulated internet, and
 has a data disk for its local repository. Before the drill it gets the test
-configuration an administrator would push: the ISP account, dae, WireGuard's
+configuration an administrator would push: the ISP account, honk, WireGuard's
 key and a share user, with config-push from a private repository of the test's
 own; the drill checks that it is still there on the upgraded slot.
 """
 
+import hashlib
 from typing import TYPE_CHECKING
 
 import pytest
 
 from wrt_tests.sandbox.isp import LOGIN
 from wrt_tests.services.config import ConfigRepository
-from wrt_tests.services.datapath import DAE_CONFIG
+from wrt_tests.services.datapath import PROXY_CONFIG
 from wrt_tests.services.drill import Drill
 from wrt_tests.services.vpn import key_pair
 
@@ -31,7 +32,7 @@ SHARE_USER = {"name": "drill", "password": "drill-secret-1"}
 def drill_configuration(
     trusted_ca: Online, harness_key: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> dict[str, str]:
-    """Push the drill's configuration; return the uci options it set."""
+    """Push the drill's configuration; return what it set, as the drill records it."""
     repository = ConfigRepository.create(tmp_path_factory.mktemp("drill"))
     user, password = LOGIN
     private, _ = key_pair()
@@ -42,15 +43,18 @@ def drill_configuration(
             "smb": {"users": [SHARE_USER]},
         }
     )
-    repository.write_dae("config", DAE_CONFIG)
+    repository.write_proxy("config", PROXY_CONFIG)
     repository.commit("the drill's configuration")
     pushed = repository.push(trusted_ca.router.address, harness_key)
     assert pushed.returncode == 0, pushed.stderr  # noqa: S101
+    proxy_sha256 = hashlib.sha256(PROXY_CONFIG.encode()).hexdigest()
     return {
-        "network.wan.username": user,
-        "network.wan.password": password,
-        "network.wg0.private_key": private,
-        "dae.config.enabled": "1",
+        "uci get network.wan.username": user,
+        "uci get network.wan.password": password,
+        "uci get network.wg0.private_key": private,
+        "sha256sum </etc/honk/config.dae": f"{proxy_sha256}  -",
+        # honk is on by its init script's links, which keep.d carries.
+        "/etc/init.d/honk enabled && echo enabled": "enabled",
     }
 
 
@@ -65,5 +69,5 @@ def drill(
     """Return the drill of the signed build on the configured router."""
     del data_disk  # the local repository's place
     drill = Drill(trusted_ca, signed_boards, release_keys)
-    drill.remember(**drill_configuration)
+    drill.remember(drill_configuration)
     return drill

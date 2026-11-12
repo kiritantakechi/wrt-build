@@ -7,7 +7,7 @@
 // (board-model D10): its signed manifest and package repository, named after the
 // device (<device>-manifest.json, ...), and the upgrade image the manifest names;
 // never the factory image, which only a first flash needs. Every request is
-// tried a few times: the first may leave before dae holds the bridge.
+// tried a few times: the first may leave before honk holds the bridge.
 'use strict';
 
 import { glob, mkdir, open, popen, stat } from 'fs';

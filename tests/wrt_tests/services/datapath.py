@@ -3,13 +3,15 @@
 ``Online`` is the router with its dial-up credentials pushed: its PPP session at
 the ISP, its WAN address, the LAN clients with their addresses, and a redial.
 The rest reads the datapath's state on the router: which programs sit on which
-tc hook of a device (``hooks``), and the configuration dae runs with in the tests.
+tc hook of a device (``hooks``), and the configuration the transparent proxy, honk,
+runs with in the tests.
 """
 
 import ipaddress
 import json
 import re
 import shlex
+import subprocess
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -20,7 +22,8 @@ from wrt_tests.device.router import REACHABLE_TIMEOUT
 from wrt_tests.model.poll import until
 from wrt_tests.sandbox.internet import RELEASES
 from wrt_tests.sandbox.isp import DELEGATED_PREFIX, LOGIN
-from wrt_tests.sandbox.net import PROXIED_TARGET, PROXY, PROXY_PORT
+from wrt_tests.sandbox.net import DIRECT_TARGET, PROXIED_TARGET, PROXY, PROXY_PORT
+from wrt_tests.sandbox.netprobe import HTTP_PORT
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -30,7 +33,7 @@ if TYPE_CHECKING:
     from wrt_tests.sandbox.net import Netns, Network
 
 ONLINE_TIMEOUT = 180
-DAE_TIMEOUT = 120
+PROXY_TIMEOUT = 120
 # The programs of each component, as bpftool names them.
 EINAT = {"tcx/ingress": ["ingress_rev_snat"], "tcx/egress": ["egress_snat"]}
 QOSIFY = {"tcx/ingress": ["qosify_classify"], "tcx/egress": ["qosify_classify"]}
@@ -39,8 +42,12 @@ QOSIFY = {"tcx/ingress": ["qosify_classify"], "tcx/egress": ["qosify_classify"]}
 QOSIFY_CLSACT = {"clsact/ingress": ["qosify_ingress_ip"], "clsact/egress": ["qosify_egress_ip"]}
 # pppoe-wan's programs in run order: einat's first, then qosify's.
 WAN = {hook: [*EINAT[hook], *QOSIFY[hook]] for hook in EINAT}
-# dae on a bridge (br-lan, podman0) runs the L2 variants of its LAN programs.
-DAE = {"tcx/ingress": ["tproxy_lan_ingress_l2"], "tcx/egress": ["tproxy_lan_egress_l2"]}
+# honk's LAN programs on a bridge (br-lan, podman0), and on a device without
+# Ethernet headers (tailscale0).
+PROXY_HOOKS_L2 = {"tcx/ingress": ["lan_ingress_l2"], "tcx/egress": ["lan_egress_l2"]}
+PROXY_HOOKS_L3 = {"tcx/ingress": ["lan_ingress_l3"], "tcx/egress": ["lan_egress_l3"]}
+# honk's own nftables table: the NFQUEUE hook of ambiguous LAN UDP.
+PROXY_NFQUEUE_TABLE = "inet honk_nfqueue"
 # The fw4 rules einat's instance brings (feed/net/einat/files/init): its nat rule
 # (no masquerade) and its rule (accept what it translated back). They come with a
 # firewall reload, after its programs are attached; fw4 names them after the
@@ -48,12 +55,14 @@ DAE = {"tcx/ingress": ["tproxy_lan_ingress_l2"], "tcx/egress": ["tproxy_lan_egre
 EINAT_RULE = re.compile(r"ubus:einat\[\w+\] (nat|rule) \d+")
 LAN_CLIENTS = ("client-a", "client-b")
 # What a failure's report shows of the datapath (failure-diagnostics D3): each LAN
-# client's addresses and routes, the router's WAN and its log, the ISP's log.
+# client's addresses and routes, the router's WAN and its log, honk's log, the
+# ISP's log.
 CLIENT_STATE = (("ip", "addr", "show", "dev", "eth0"), ("ip", "-4", "route"), ("ip", "-6", "route"))
 ROUTER_STATE = (
     "ifstatus wan",
     "ifstatus wan6",
     "logread | grep -e pppd -e odhcp6c -e odhcpd -e netifd | tail -n 40",
+    "logread -e honk | tail -n 40",
 )
 ISP_LOG_LINES = 40
 # What a wait for the datapath on pppoe-wan reports when it times out: which device
@@ -70,24 +79,27 @@ WAN_STATE = (
 # answer would never see one through if asked more often.
 RENEW_INTERVAL = 30.0
 
-# dae in the tests: the socks5 exit on the emulated internet is the only node;
+# honk in the tests: the socks5 exit on the emulated internet is the only node;
 # PROXIED_TARGET goes through it, and so does the Releases stand-in, as GitHub
 # does for an administrator whose ISP reaches it badly (r4s-release-pipeline
 # D4); everything else goes direct. DNS goes to the resolver the ISP hands out.
-# Debug logging shows every DNS query. dae would first wait (up to 5 minutes)
-# until public test URLs answer, which the emulated internet does not serve.
+# Debug logging leaves the most for a failed test's report. honk drops new flows
+# to a node its health check finds dead, so the check asks the emulated
+# internet's HTTP server through the node rather than a public URL it does not
+# serve.
 PROXIED = (*PROXIED_TARGET, RELEASES[1])
 
 
-def dae_config(proxied: Sequence[str] = PROXIED) -> str:
-    """Return dae's test configuration, with ``proxied`` (addresses) through the proxy."""
+def proxy_config(proxied: Sequence[str] = PROXIED) -> str:
+    """Return honk's test configuration, with ``proxied`` (addresses) through the proxy."""
     addresses = ", ".join(f"'{address}'" if ":" in address else address for address in proxied)
     rule = f"dip({addresses}) -> proxy\n    " if proxied else ""
     return f"""\
 global {{
     log_level: debug
-    disable_waiting_network: true
     check_interval: 600s
+    tcp_check_url: 'http://{DIRECT_TARGET[0]}:{HTTP_PORT}/'
+    tcp_check_http_method: GET
 }}
 
 node {{
@@ -96,7 +108,7 @@ node {{
 
 group {{
     proxy {{
-        policy: fixed(0)
+        policy: select
     }}
 }}
 
@@ -117,7 +129,46 @@ routing {{
 """
 
 
-DAE_CONFIG = dae_config()
+PROXY_CONFIG = proxy_config()
+
+# honk's native API in the tests: token mode, as config-push lets it be, on every
+# address of the router; the zones' input policies leave it to the LAN.
+NATIVE_API_PORT = 9527
+NATIVE_API_TOKEN = "wrt-test-native-api-token-0123456789"  # noqa: S105 (the tests' own)
+NATIVE_API = f"""
+experimental {{
+    native_api {{
+        enabled: true
+        listen: '0.0.0.0:{NATIVE_API_PORT}'
+        secret: '{NATIVE_API_TOKEN}'
+        ui: 'embedded'
+    }}
+}}
+"""
+
+
+def native_api(
+    source: Netns, address: str, path: str, *, token: str | None = NATIVE_API_TOKEN
+) -> tuple[int, str]:
+    """Ask honk's native API at the router's ``address`` from ``source``.
+
+    Return the HTTP status and the body; the status is 0 when no answer came at all.
+    """
+    header = () if token is None else ("-H", f"Authorization: Bearer {token}")
+    # curl fails without an answer, and prints the status 000 then. It takes the
+    # encodings a browser takes: honk stores its web UI compressed.
+    result = subprocess.run(
+        source.argv(
+            "curl",
+            *("-s", "--compressed", "-m", "10", "-w", "\\n%{http_code}", *header),
+            f"http://{address}:{NATIVE_API_PORT}{path}",
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    body, _, status = result.stdout.rpartition("\n")
+    return int(status), body
 
 
 def tc_programs(router: Router, device: str) -> list[dict[str, Any]]:
@@ -365,14 +416,14 @@ def _part(title: str, read: Callable[[], str | None]) -> str:
     return f"--- {title}\n{'(no answer)' if shown is None else shown}"
 
 
-def dae_start(router: Router, config: str = DAE_CONFIG) -> None:
-    """Install ``config`` as the user configuration, enable dae and wait for it on br-lan."""
+def proxy_start(router: Router, config: str = PROXY_CONFIG) -> None:
+    """Install ``config`` as honk's configuration, enable honk and wait for it on br-lan."""
     router.run(
-        f"umask 077 && printf %s {shlex.quote(config)} >/etc/dae/config.dae"
-        " && uci set dae.config.enabled=1 && uci commit dae && /etc/init.d/dae restart"
+        f"umask 077 && printf %s {shlex.quote(config)} >/etc/honk/config.dae"
+        " && /etc/init.d/honk enable && /etc/init.d/honk restart"
     )
     until(
-        lambda: hooks(router, "br-lan") == DAE,
-        timeout=DAE_TIMEOUT,
-        what="dae on br-lan",
+        lambda: hooks(router, "br-lan") == PROXY_HOOKS_L2,
+        timeout=PROXY_TIMEOUT,
+        what="honk on br-lan",
     )

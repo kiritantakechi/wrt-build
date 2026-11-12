@@ -127,6 +127,11 @@
           # The compiler cache of Rust packages (CONFIG_RUST_SCCACHE), as ccache is
           # C's and Go's own build cache Go's (build-acceleration D6).
           sccache
+          # doona, honk's web UI, built from source (honk-datapath D3): Node runs
+          # the pnpm its package fetches, hash-verified, and brotli precompresses
+          # its assets as doona's own packaging does.
+          nodejs_24
+          brotli
         ]
         ++ gccLtoTools;
 

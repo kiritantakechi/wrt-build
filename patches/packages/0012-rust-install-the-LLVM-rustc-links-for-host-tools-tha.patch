@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Fri, 13 Nov 2026 00:03:28 +0800
+Subject: [PATCH 12/12] rust: install the LLVM rustc links, for host tools that
+ link it
+
+A tool that works on rustc's LLVM bitcode must link the same LLVM, or a
+newer one. bpf-linker, which links Rust's eBPF programs, is such a tool:
+rustc emits the bitcode, and bpf-linker optimizes it and generates the
+BPF object with its own LLVM. The rust/host build already builds that
+LLVM; it only keeps it to itself.
+
+Add Rust's rust-dev component, its LLVM with llvm-config, libraries and
+headers, to the dist rust/host builds, and install it under a prefix of
+its own, RUST_LLVM_PREFIX (rust-values.mk), so that llvm-config stays off
+the PATH of other packages, which would otherwise find it and link LLVM.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ lang/rust/Makefile       | 6 ++++--
+ lang/rust/rust-values.mk | 5 +++++
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/lang/rust/Makefile b/lang/rust/Makefile
+index cef7b719..73ee0cf3 100644
+--- a/lang/rust/Makefile
++++ b/lang/rust/Makefile
+@@ -112,7 +112,7 @@ define Host/Compile
+ 	$(if $(RUSTC_TARGET_RUSTFLAGS),$(RUSTC_TARGET_CARGO_RUSTFLAGS)="$(RUSTC_TARGET_RUSTFLAGS)") \
+ 	$(PYTHON) $(HOST_BUILD_DIR)/x.py \
+ 		--build-dir $(HOST_BUILD_DIR)/build \
+-		dist build-manifest rustc rust-std cargo llvm-tools rust-src
++		dist build-manifest rustc rust-std cargo llvm-tools rust-src rust-dev
+ endef
+ 
+ define Host/Install
+@@ -121,8 +121,10 @@ define Host/Install
+ 		for targz in *.tar.gz; do \
+ 			$(STAGING_DIR_HOST)/bin/libdeflate-gzip -dc "$$$$targz" | tar -xf - ; \
+ 		done ; \
+-		find . -mindepth 2 -maxdepth 2 -type f -name install.sh \
++		find . -mindepth 2 -maxdepth 2 -type f -name install.sh ! -path './rust-dev-*' \
+ 			-execdir bash '{}' --prefix=$(STAGING_DIR_HOSTPKG) --disable-ldconfig \; ; \
++		rm -rf $(RUST_LLVM_PREFIX) ; \
++		bash rust-dev-*/install.sh --prefix=$(RUST_LLVM_PREFIX) --disable-ldconfig ; \
+ 	)
+ endef
+ 
+diff --git a/lang/rust/rust-values.mk b/lang/rust/rust-values.mk
+index dab77daf..a2ef733f 100644
+--- a/lang/rust/rust-values.mk
++++ b/lang/rust/rust-values.mk
+@@ -13,6 +13,11 @@ RUSTC_HOST_SUFFIX:=$(word 4, $(subst -, ,$(GNU_HOST_NAME)))
+ RUSTC_HOST_ARCH:=$(HOST_ARCH)-unknown-linux-$(RUSTC_HOST_SUFFIX)
+ CARGO_HOME:=$(DL_DIR)/cargo
+ 
++# The LLVM that rustc links, with llvm-config, its libraries and headers (the
++# rust-dev component), for host tools that must use the same LLVM as rustc,
++# such as bpf-linker. A prefix of its own keeps llvm-config off the PATH.
++RUST_LLVM_PREFIX:=$(STAGING_DIR_HOSTPKG)/lib/llvm-rust
++
+ ifeq ($(CONFIG_USE_MUSL),y)
+   # Force linking of the SSP library for musl
+   ifdef CONFIG_PKG_CC_STACKPROTECTOR_REGULAR

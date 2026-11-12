@@ -1,0 +1,15 @@
+#!/bin/sh
+# honk's check for wrt-healthcheck (honk-datapath design D6): while honk starts
+# at boot, it runs, and its LAN programs sit on every LAN-side interface that
+# exists. There is nothing to check while it is disabled, as it stays until a
+# configuration is pushed.
+/etc/init.d/honk enabled || exit 0
+pidof honk-core >/dev/null || exit 1
+for interface in br-lan podman0 tailscale0; do
+	[ -e "/sys/class/net/${interface}" ] || continue
+	programs=$(bpftool net show dev "${interface}")
+	for direction in ingress egress; do
+		# lan_<direction>_l2 on a bridge, _l3 on a device without link layer
+		echo "${programs}" | grep -q -E " tcx/${direction} lan_${direction}_l[23] " || exit 1
+	done
+done
