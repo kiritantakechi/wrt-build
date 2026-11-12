@@ -733,3 +733,15 @@ Why it matters here: honk must not run before a configuration is pushed (its bui
 What the patch does: `TARGET_DISABLED_SERVICES` in "Target Images", passed to `prepare_rootfs` wherever a build from source prepares a root filesystem (`package/Makefile`, `include/image.mk`). The rootfs cache key reads `.config`, so a changed list builds the root filesystem anew.
 
 Verification log: pending.
+
+### luci-lib-daeuniverse: BusyBox's timeout
+
+Patch: `patches/daeuniverse/0003-luci-lib-daeuniverse-BusyBox-s-timeout-is-enough.patch`, for daeuniverse/openwrt-packages.
+
+Problem: the library's package check bounds `apk update` with `timeout --signal=TERM --kill-after=5 20`, and the library depends on `coreutils-timeout` for those long options. That builds coreutils and puts it in every image with the LuCI pages, for one call.
+
+Why it matters here: coreutils came into the image with luci-app-honk, and with it 22 warnings of the reviewed-warnings register's kinds (quality/undefined-behavior) across coreutils, of which the image installs only timeout.
+
+What the patch does: the short options `-s TERM -k 5`, which coreutils' timeout and BusyBox's (on by default in OpenWrt's BusyBox, 1.38 here) both take, and no dependency on coreutils-timeout.
+
+Verification log: pending.

@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Fri, 13 Nov 2026 15:00:00 +0800
+Subject: [PATCH] luci-lib-daeuniverse: BusyBox's timeout is enough
+
+The package check bounds `apk update` with coreutils' timeout, and the
+library depends on coreutils-timeout for that one call. It builds and
+installs coreutils for an option BusyBox's timeout applet, on by default
+in OpenWrt's BusyBox, also takes in its short form: `-s TERM -k 5`. Use
+the short options, which both accept, and drop the dependency.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ luci-lib-daeuniverse/Makefile                         | 2 +-
+ luci-lib-daeuniverse/root/usr/libexec/daeuniverse-pkg | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/luci-lib-daeuniverse/Makefile b/luci-lib-daeuniverse/Makefile
+index df4caa4..756ad5a 100644
+--- a/luci-lib-daeuniverse/Makefile
++++ b/luci-lib-daeuniverse/Makefile
+@@ -15,7 +15,7 @@ include $(TOPDIR)/rules.mk
+ PKG_LICENSE:=GPL-3.0-or-later
+ 
+ LUCI_TITLE:=Shared LuCI page for dae and honk
+-LUCI_DEPENDS:=+luci-base +jshn +flock +coreutils-timeout
++LUCI_DEPENDS:=+luci-base +jshn +flock
+ LUCI_PKGARCH:=all
+ 
+ include $(TOPDIR)/feeds/luci/luci.mk
+diff --git a/luci-lib-daeuniverse/root/usr/libexec/daeuniverse-pkg b/luci-lib-daeuniverse/root/usr/libexec/daeuniverse-pkg
+index 1f57639..c3eae84 100755
+--- a/luci-lib-daeuniverse/root/usr/libexec/daeuniverse-pkg
++++ b/luci-lib-daeuniverse/root/usr/libexec/daeuniverse-pkg
+@@ -51,7 +51,7 @@ check_updates() {
+ 	# A bad repository must not hide upgrades from the indexes that did refresh.
+ 	# OpenWrt 25.12 configures rpcd's execution timeout to 30 seconds.
+ 	warning=
+-	update_output=$(/usr/bin/timeout --signal=TERM --kill-after=5 20 \
++	update_output=$(/usr/bin/timeout -s TERM -k 5 20 \
+ 		/usr/bin/apk --interactive=no --progress=no update 2>&1)
+ 	update_code=$?
+ 	if [ "$update_code" -ne 0 ]; then
