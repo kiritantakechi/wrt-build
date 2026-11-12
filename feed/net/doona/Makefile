@@ -51,13 +51,16 @@ endef
 DOONA_DIR:=$(STAGING_DIR_HOSTPKG)/share/doona
 PNPM_DIR:=$(HOST_BUILD_DIR)/.pnpm
 # pnpm's package store sits with the other downloads, so that a rebuild fetches
-# nothing the lockfile already pinned; its cache and state stay in the build.
+# no package the lockfile already pinned; its cache and state stay in the build.
+# pnpm 11 reads its settings from pnpm_config_* (npm_config_* no longer). It
+# still asks the registry for each package's metadata, to hold back releases
+# younger than a day (minimum-release-age).
 PNPM_ENV:= \
 	PATH="$(PNPM_DIR)/bin:$(PATH)" \
 	CI=true \
-	npm_config_store_dir=$(DL_DIR)/pnpm-store \
-	npm_config_cache=$(HOST_BUILD_DIR)/.pnpm-cache \
-	npm_config_update_notifier=false \
+	pnpm_config_store_dir=$(DL_DIR)/pnpm-store \
+	pnpm_config_cache_dir=$(HOST_BUILD_DIR)/.pnpm-cache \
+	pnpm_config_update_notifier=false \
 	XDG_CACHE_HOME=$(HOST_BUILD_DIR)/.cache \
 	XDG_DATA_HOME=$(HOST_BUILD_DIR)/.local/share \
 	XDG_STATE_HOME=$(HOST_BUILD_DIR)/.local/state \
@@ -74,9 +77,12 @@ endef
 define Host/Configure
 endef
 
+# The lite edition is a workspace of its own, with its own lockfile: installed
+# on its own, as doona's release does.
 define Host/Compile
 	cd $(HOST_BUILD_DIR) && $(PNPM_ENV) pnpm install --frozen-lockfile
 	cd $(HOST_BUILD_DIR) && $(PNPM_ENV) pnpm build
+	cd $(HOST_BUILD_DIR) && $(PNPM_ENV) pnpm -C apps/lite install --frozen-lockfile
 	cd $(HOST_BUILD_DIR) && $(PNPM_ENV) pnpm -C apps/lite build
 	rm -rf $(HOST_BUILD_DIR)/release
 	cd $(HOST_BUILD_DIR) && $(PNPM_ENV) sh tools/package.sh

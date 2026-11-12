@@ -62,7 +62,7 @@
 
 ## 7. The LuCI pages from daeuniverse's feed (design D1, D8)
 
-- [ ] 7.1 Pin daeuniverse/openwrt-packages in `upstream.lock` as `daeuniverse`; `docs/upstream-lock.md`; the build/upstream-pinning and release/upstream-bump tests for four repositories.
+- [x] 7.1 Pin daeuniverse/openwrt-packages in `upstream.lock` as `daeuniverse`; `docs/upstream-lock.md`; the build/upstream-pinning and release/upstream-bump tests for four repositories.
 
   Verify: `just fetch` and `just patch` set up the feed at the pinned commit; the upstream-pinning and upstream-bump tests pass.
 - [ ] 7.2 `patches/daeuniverse/`: the doona switch writes a token-mode block with a random token shown once, and the "store db" switch goes (D8). Remove `feed/luci/luci-app-dae`.
@@ -80,7 +80,7 @@
 
 ## 9. Supply chain (design D12)
 
-- [ ] 9.1 `docs/supply-chain/honk.md`: the boring-sys and quinn forks, the crates, doona's dependencies and bpf-linker's, with conditions and the re-check on upgrade; remove `docs/supply-chain/dae.md`.
+- [x] 9.1 `docs/supply-chain/honk.md`: the boring-sys and quinn forks, the crates, doona's dependencies and bpf-linker's, with conditions and the re-check on upgrade; remove `docs/supply-chain/dae.md`.
 
   Verify: every pin the document names matches `feed/net/honk/Makefile`, honk's Cargo.lock and doona's lockfile at the pinned versions.
 
