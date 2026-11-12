@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kiritantakechi <kiritantakechi@gmail.com>
 Date: Fri, 13 Nov 2026 00:03:28 +0800
-Subject: [PATCH 12/12] rust: install the LLVM rustc links, for host tools that
+Subject: [PATCH] rust: install the LLVM rustc links, for host tools that
  link it
 
 A tool that works on rustc's LLVM bitcode must link the same LLVM, or a

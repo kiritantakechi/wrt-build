@@ -59,12 +59,14 @@ EBPF_OBJECT:=$(PKG_BUILD_DIR)/target-ebpf/bpfel-unknown-none/release/honk-ebpf
 
 # The eBPF object, apart from the target build: none of rust-package.mk's
 # variables (the target, RUSTFLAGS, the release profile) may reach it, or they
-# would override crates/honk-ebpf's own (.cargo/config.toml, Cargo.toml). Its
-# crate uses no unstable feature; RUSTC_BOOTSTRAP only admits build-std.
+# would override crates/honk-ebpf's own (.cargo/config.toml, Cargo.toml); it
+# takes the host builds' instead (sccache, the host linker for its build
+# scripts). Its crate uses no unstable feature; RUSTC_BOOTSTRAP only admits
+# build-std.
 define Build/Compile/Ebpf
 	cd $(PKG_BUILD_DIR)/crates/honk-ebpf && \
 	env -u RUSTFLAGS -u CARGO_BUILD_TARGET -u CARGO_ENCODED_RUSTFLAGS \
-		CARGO_HOME=$(CARGO_HOME) \
+		$(CARGO_HOST_CONFIG_VARS) \
 		CARGO_TARGET_DIR=$(PKG_BUILD_DIR)/target-ebpf \
 		RUSTC_BOOTSTRAP=1 \
 		cargo build -v --locked --release \

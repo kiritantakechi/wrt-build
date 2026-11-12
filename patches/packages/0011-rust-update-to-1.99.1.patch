@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kiritantakechi <kiritantakechi@gmail.com>
 Date: Fri, 13 Nov 2026 00:03:28 +0800
-Subject: [PATCH 11/12] rust: update to 1.99.1
+Subject: [PATCH] rust: update to 1.99.1
 
 Release notes:
 https://github.com/rust-lang/rust/releases/tag/1.99.0

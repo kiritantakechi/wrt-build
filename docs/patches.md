@@ -686,6 +686,18 @@ What the patch does: rust/host's dist adds Rust's `rust-dev` component, its LLVM
 
 Verification log: pending.
 
+### rust: host artifacts linked with the host compiler
+
+Patch: `patches/packages/0013-rust-link-host-artifacts-with-the-host-compiler.patch`, for openwrt/packages.
+
+Problem: `rust-values.mk` names the linker of the target triple (`CARGO_TARGET_<TRIPLE>_LINKER`) but none for the host's, so host artifacts (host packages, build scripts and procedural macros) link with rustc's default `cc`, or with whatever a crate's own `.cargo/config.toml` names for its development.
+
+Why it matters here: bpf-linker's `.cargo/config.toml` asks for `clang` on Linux; the build environment's clang does not know the host GCC, finds neither `crtbeginS.o` nor `libgcc`, and bpf-linker/host fails to link its first build script.
+
+What the patch does: `CARGO_HOST_LINKER`, the host triple's linker set to `HOSTCC_NOCACHE`, in the variables of host builds (`CARGO_HOST_CONFIG_VARS`) and of target builds (`CARGO_PKG_CONFIG_VARS`), before the target's own. A setting named for the triple takes precedence over one a crate sets for a `cfg()`.
+
+Verification log: pending.
+
 ### honk: a prebuilt eBPF object
 
 Patch: `feed/net/honk/patches/001-build-take-a-prebuilt-eBPF-object.patch`, for daeuniverse/honk.

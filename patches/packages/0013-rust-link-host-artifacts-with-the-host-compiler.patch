@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Fri, 13 Nov 2026 15:00:00 +0800
+Subject: [PATCH] rust: link host artifacts with the host compiler
+
+Target artifacts link with the target's compiler, which rust-values.mk
+names for the target triple (CARGO_TARGET_<TRIPLE>_LINKER). Host
+artifacts, host packages and the build scripts and procedural macros of
+target packages, get no linker: rustc's default, cc, unless a crate's
+own .cargo/config.toml names another for its development. bpf-linker's
+asks for clang on Linux, so that clang adds the system's search paths;
+a clang that does not know the host's GCC then finds neither
+crtbeginS.o nor libgcc, and the build fails.
+
+Name the host compiler (HOSTCC_NOCACHE) as the linker of the host
+triple, in the variables of host builds and of target builds alike. A
+setting named for the triple takes precedence over one a crate sets for
+a cfg(), so every host artifact links as OpenWrt's host tools do.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ lang/rust/rust-values.mk | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/lang/rust/rust-values.mk b/lang/rust/rust-values.mk
+index a2ef733f..0e1acb4b 100644
+--- a/lang/rust/rust-values.mk
++++ b/lang/rust/rust-values.mk
+@@ -116,9 +116,18 @@ ifneq ($(CONFIG_RUST_SCCACHE),)
+ 	SCCACHE_DIR=$(RUST_SCCACHE_DIR)
+ endif
+ 
++# Host artifacts, host packages and the build scripts and procedural macros of
++# target packages alike, link with the host compiler, as target artifacts link
++# with the target's. Named for the host triple, it takes precedence over a
++# linker a crate's .cargo/config.toml sets for its own development (bpf-linker
++# asks for clang). Deferred, because the Darwin block rewrites RUSTC_HOST_ARCH.
++RUSTC_HOST_UPPER = $(subst -,_,$(call toupper,$(RUSTC_HOST_ARCH)))
++CARGO_HOST_LINKER = CARGO_TARGET_$(RUSTC_HOST_UPPER)_LINKER=$(HOSTCC_NOCACHE)
++
+ CARGO_HOST_CONFIG_VARS= \
+ 	$(RUST_SCCACHE_VARS) \
+-	CARGO_HOME=$(CARGO_HOME)
++	CARGO_HOME=$(CARGO_HOME) \
++	$(CARGO_HOST_LINKER)
+ 
+ CARGO_HOST_PROFILE:=release
+ 
+@@ -126,6 +135,7 @@ CARGO_PKG_CONFIG_VARS= \
+ 	$(RUST_SCCACHE_VARS) \
+ 	CARGO_BUILD_TARGET=$(RUSTC_TARGET_ARCH) \
+ 	CARGO_HOME=$(CARGO_HOME) \
++	$(CARGO_HOST_LINKER) \
+ 	CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+ 	CARGO_PROFILE_RELEASE_DEBUG=false \
+ 	CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=false \

@@ -8,7 +8,7 @@
 
 ## 2. The toolchain (design D2, D3)
 
-- [ ] 2.1 Build `crates/honk-ebpf` of the pinned honk release with OpenWrt's host rustc (`RUSTC_BOOTSTRAP=1`, `-Zbuild-std=core`, `bpfel-unknown-none`) and a bpf-linker 0.11.0 built from source against the flake LLVM of rustc's LLVM major (D2).
+- [x] 2.1 Build `crates/honk-ebpf` of the pinned honk release with OpenWrt's host rustc (`RUSTC_BOOTSTRAP=1`, `-Zbuild-std=core`, `bpfel-unknown-none`) and a bpf-linker 0.11.0 built from source against the flake LLVM of rustc's LLVM major (D2).
 
   Verify: the object has a `.BTF` section and the program sections honk loads (`llvm-objdump -h`), from a clean build on the VM.
 - [ ] 2.2 Raise OpenWrt's `lang/rust` to the version honk pins if honk's workspace does not build with 1.96.1: a packages patch with its write-up in `docs/patches.md`.
