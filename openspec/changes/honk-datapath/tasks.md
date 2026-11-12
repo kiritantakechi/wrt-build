@@ -29,7 +29,7 @@
 - [ ] 3.2 The init script with the entry of D4 (the configuration's directory copied as the entry's, root-only; the firmware's settings included last, so they win), procd with respawn and `term_timeout` 30 s, CPU pinning, reload after honk's check (D5); uci `honk` with `config_file` and `cpu_pinning`; the template `/etc/honk/config.dae` with the native API off; the health check (D6); `keep.d` for `/etc/honk`; the service disabled in the image. Remove `feed/net/dae`.
 
   Verify: the transparent-proxy tests of binding, cgroup programs, health check, CPU pinning, turning off, falling back and the image's template pass on the R4S.
-- [ ] 3.3 `honk-core check -c <file>`: parse and admit a configuration as a start would, touching nothing, exit nonzero with the reason; a patch meant for upstream with its write-up (D7). The init script checks before it starts or reloads.
+- [ ] 3.3 `honk-core -c <file> check`: parse and admit a configuration as a start would, touching nothing, exit nonzero with the reason; a patch meant for upstream with its write-up (D7). The init script checks before it starts or reloads.
 
   Verify: a unit test of the patch in honk's own test style passes in the package build; on the router, `honk-core check` rejects a configuration routing to a missing group and accepts the test configuration.
 - [ ] 3.4 Seeds and packages: `config/datapath.seed` (honk, luci-app-honk, `kmod-nft-queue`, `kmod-nfnetlink-queue`), `scripts/image-audit.sh`; honk's marks in `config/marks.tsv` (D9, D10).

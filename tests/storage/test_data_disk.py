@@ -61,8 +61,9 @@ HEALTHCHECK = (
     " && uci commit wrt-ab && wrt-healthcheck"
 )
 HEALTH = "/var/run/wrt-healthcheck.json"
-# honk's state database, in its data directory on the data disk or in RAM.
-PROXY_STATE = {"data disk": f"{MOUNT}/honk/honk.db", "RAM": "/var/lib/honk/honk.db"}
+# honk's state database, in its data directory on the data disk or in RAM
+# (/var/lib/honk, which the kernel names by /var's target, /tmp).
+PROXY_STATE = {"data disk": f"{MOUNT}/honk/state/honk.db", "RAM": "/tmp/lib/honk/state/honk.db"}
 
 
 @pytest.fixture(scope="module")

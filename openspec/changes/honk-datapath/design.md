@@ -91,7 +91,7 @@ Each fix is a patch in `feed/net/honk/patches`, `Upstream-Status: Pending`, with
 
 - **#456**: reproduce LAN-to-router IPv4 TCP on br-lan (SSH, LuCI, SMB) with honk on the LAN; find why the accepted child carries no published proof and fix the proof path.
 - **#476**: reproduce a reload on the emulator; find why the NFQUEUE listener reads a message of type 2 (`NLMSG_ERROR`) across the reload and fix its handling so that a reload never ends the process.
-- **Offline check**: `honk-core check -c <file>` parses and admits a configuration as a start would, without touching the system or binding anything, and exits nonzero naming the reason; config-push (on the router, where honk's own build is) and the init script use it. A start, like a reload, runs without a required geodata file it does not find (its rules match nothing until the file is fetched), where the native API refuses a candidate for it; the check admits as a start does, with a warning, or the init would refuse every boot that comes before the first geodata update.
+- **Offline check**: `honk-core -c <file> check` parses and admits a configuration as a start would, without touching the system or binding anything, and exits nonzero naming the reason; config-push (on the router, where honk's own build is) and the init script use it. A start, like a reload, runs without a required geodata file it does not find (its rules match nothing until the file is fetched), where the native API refuses a candidate for it; the check admits as a start does, with a warning, or the init would refuse every boot that comes before the first geodata update.
 - **build.rs**: the prebuilt object through an environment variable (D2).
 
 ### D8. The native API: token mode, LAN only, no writes

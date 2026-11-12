@@ -122,7 +122,7 @@ prepare() {
 		flock 9
 		rm -rf "${RUN}.new" "${RUN}.old"
 		write_entry "${config_file}" "${RUN}.new" &&
-			"${PROG}" check --config "${RUN}.new/${ENTRY_NAME}" || exit 1
+			"${PROG}" --config "${RUN}.new/${ENTRY_NAME}" check || exit 1
 		if [ -e "${RUN}" ]; then
 			mv "${RUN}" "${RUN}.old" || exit 1
 		fi
@@ -137,7 +137,7 @@ extra_command "check" "<file>: check a configuration as the service would run it
 check() {
 	file=${1:?usage: /etc/init.d/honk check <configuration file>}
 	run=$(mktemp -d /tmp/honk-check.XXXXXX) || return 1
-	write_entry "${file}" "${run}" && "${PROG}" check --config "${run}/${ENTRY_NAME}"
+	write_entry "${file}" "${run}" && "${PROG}" --config "${run}/${ENTRY_NAME}" check
 	status=$?
 	rm -rf "${run}"
 	return "${status}"
