@@ -1,0 +1,277 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Fri, 13 Nov 2026 12:00:00 +0800
+Subject: [PATCH] cli: add check, offline admission of a configuration
+
+A distribution that writes honk's configuration for it (a router's
+configuration push, an init script that wraps the operator's file in an
+entry of its own) needs to know before it starts or reloads honk whether
+honk would take the configuration. honk-core has no such command: the
+only way to find out is to start it, which binds listeners, attaches
+programs and may take the instance lock from the running one. A reload
+is no answer either, as SIGHUP keeps the old configuration on refusal
+and reports only to the log.
+
+Add `honk-core check`. It admits the -c entry offline through the
+admission the native API validates candidates with: the entry and its
+includes are parsed, validated and assembled, and routing and DNS are
+compiled against the data directory's assets, with the candidate as its
+own active configuration, as a start would run it. Nothing is bound,
+attached, created or written. Every finding goes to standard error as
+`<file>[:line[:column]]: <severity>[<code>]: <setting>: <message>`,
+without values, which may be secrets; the command exits nonzero when a
+start would refuse the configuration.
+
+The admission is the native API's, so the command needs the native-api
+feature and a .dae entry, and is refused with --store db.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ crates/honk-core/src/check.rs | 155 ++++++++++++++++++++++++++++++++++
+ crates/honk-core/src/lib.rs   |  30 +++++++
+ doc/en/reference/cli.md       |   1 +
+ doc/zh/reference/cli.md       |   1 +
+ 4 files changed, 187 insertions(+)
+ create mode 100644 crates/honk-core/src/check.rs
+
+diff --git a/crates/honk-core/src/check.rs b/crates/honk-core/src/check.rs
+new file mode 100644
+index 0000000..df8ea70
+--- /dev/null
++++ b/crates/honk-core/src/check.rs
+@@ -0,0 +1,155 @@
++//! `honk-core check`: admit a configuration offline, as a start would.
++
++use std::collections::HashMap;
++use std::path::{Path, PathBuf};
++
++use honk_config::Config;
++use honk_config::diagnostic::{DetailedDiagnostic, Severity};
++use honk_config::error::DetailedConfigError;
++use honk_config::parser::SourceLimits;
++
++use crate::native_api::offline;
++
++/// Admits the configuration entry at `path` as a start would: parses it with
++/// its includes, validates it, and compiles its routing and DNS against the
++/// assets of its data directory, through the admission the native API
++/// validates candidates with. Nothing is bound, attached, created or written.
++///
++/// Returns whether honk would start with the configuration. Every finding,
++/// the one that refuses it included, is left in `diagnostics`.
++pub(crate) fn check(path: &Path, diagnostics: &mut Vec<DetailedDiagnostic>) -> bool {
++    admit(path, diagnostics).is_ok()
++        && !diagnostics
++            .iter()
++            .any(|diagnostic| diagnostic.severity == Severity::Error)
++}
++
++fn admit(
++    path: &Path,
++    diagnostics: &mut Vec<DetailedDiagnostic>,
++) -> Result<(), DetailedConfigError> {
++    let loaded = Config::from_dae_file_with_sources(
++        path,
++        &HashMap::new(),
++        SourceLimits::default(),
++        diagnostics,
++    )?;
++    // A start runs the candidate as its own active configuration.
++    let active = loaded.config.clone();
++    let data_dir = PathBuf::from(&active.global.data_dir);
++    offline::validate_for_coordinator(
++        loaded,
++        path.parent(),
++        &active,
++        &data_dir,
++        SourceLimits::default(),
++        diagnostics,
++        &[],
++        None,
++        &[],
++    )?;
++    Ok(())
++}
++
++/// One line for a finding: the file and position it names, its severity and
++/// code, the setting and the message. Values stay out, as they may be secret.
++pub(crate) fn render(diagnostic: &DetailedDiagnostic) -> String {
++    let file = diagnostic
++        .source
++        .sources()
++        .metadata()
++        .get(diagnostic.source.index())
++        .and_then(|source| source.path.clone());
++    let mut location =
++        file.map_or_else(|| "<config>".to_owned(), |file| file.display().to_string());
++    if let Some(line) = diagnostic.line {
++        location.push_str(&format!(":{line}"));
++        if let Some(column) = diagnostic.byte_column {
++            location.push_str(&format!(":{column}"));
++        }
++    }
++    let severity = match diagnostic.severity {
++        Severity::Info => "info",
++        Severity::Warning => "warning",
++        Severity::Error => "error",
++    };
++    format!(
++        "{location}: {severity}[{}]: {}: {}",
++        diagnostic.code, diagnostic.setting, diagnostic.message
++    )
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::fs;
++
++    fn entry(directory: &Path, text: &str) -> PathBuf {
++        let path = directory.join("config.dae");
++        fs::write(
++            &path,
++            format!(
++                "global {{\n data_dir: '{}'\n nfqueue_enable: false\n dial_mode: ip\n}}\n{text}",
++                directory.join("state").display(),
++            ),
++        )
++        .unwrap();
++        path
++    }
++
++    #[test]
++    fn admits_a_configuration_a_start_would_and_creates_nothing() {
++        let temp = tempfile::tempdir().unwrap();
++        let path = entry(
++            temp.path(),
++            "node {\n exit: 'socks5://192.0.2.1:1080'\n}\ngroup {\n proxy {\n  policy: select\n }\n}\nrouting {\n dip(geoip: private) -> direct\n fallback: proxy\n}\n",
++        );
++        let mut diagnostics = Vec::new();
++        assert!(check(&path, &mut diagnostics), "{diagnostics:?}");
++        assert!(!temp.path().join("state").exists());
++    }
++
++    #[test]
++    fn refuses_a_routing_target_no_group_declares() {
++        let temp = tempfile::tempdir().unwrap();
++        let path = entry(temp.path(), "routing {\n fallback: missing\n}\n");
++        let mut diagnostics = Vec::new();
++        assert!(!check(&path, &mut diagnostics));
++        let refusal = diagnostics.last().unwrap();
++        assert_eq!(refusal.code, "unknown-routing-target");
++        let line = render(refusal);
++        assert!(line.starts_with(&path.display().to_string()), "{line}");
++        assert!(
++            line.contains("error[unknown-routing-target]: routing.fallback:"),
++            "{line}"
++        );
++    }
++
++    #[test]
++    fn refuses_a_syntax_error() {
++        let temp = tempfile::tempdir().unwrap();
++        let path = entry(temp.path(), "routing {{\n fallback: direct\n}\n");
++        let mut diagnostics = Vec::new();
++        assert!(!check(&path, &mut diagnostics));
++        assert!(
++            diagnostics
++                .iter()
++                .any(|diagnostic| diagnostic.severity == Severity::Error)
++        );
++    }
++
++    #[test]
++    fn refuses_an_include_outside_the_entry_s_directory() {
++        let temp = tempfile::tempdir().unwrap();
++        let entry_dir = temp.path().join("entry");
++        fs::create_dir(&entry_dir).unwrap();
++        fs::write(
++            temp.path().join("outside.dae"),
++            "routing {\n fallback: direct\n}\n",
++        )
++        .unwrap();
++        let path = entry(&entry_dir, "include {\n ../outside.dae\n}\n");
++        let mut diagnostics = Vec::new();
++        assert!(!check(&path, &mut diagnostics));
++    }
++}
+diff --git a/crates/honk-core/src/lib.rs b/crates/honk-core/src/lib.rs
+index 146372c..67e1879 100644
+--- a/crates/honk-core/src/lib.rs
++++ b/crates/honk-core/src/lib.rs
+@@ -14,6 +14,8 @@ mod audit;
+ #[cfg(all(test, not(feature = "dns-syslog")))]
+ #[path = "audit/inert_tests.rs"]
+ mod audit_feature_tests;
++#[cfg(feature = "native-api")]
++mod check;
+ #[cfg(feature = "clash-api")]
+ pub mod clash_api;
+ pub mod config_diagnostics;
+@@ -189,6 +191,8 @@ pub enum ClashCommand {
+     },
+     /// Ask the running instance to reload its configured file
+     Reload,
++    /// Check the configuration as a start would admit it, starting and changing nothing
++    Check,
+     /// Read the configuration db
+     Config {
+         #[command(subcommand)]
+@@ -324,6 +328,32 @@ pub async fn handle_clash_command(cli: &Cli) -> anyhow::Result<()> {
+                 println!("No administrator was set up");
+             }
+         }
++        #[cfg(feature = "native-api")]
++        ClashCommand::Check => {
++            anyhow::ensure!(
++                cli.store == ConfigStore::File,
++                "check reads the -c file; with --store db, validate through the native API"
++            );
++            anyhow::ensure!(
++                cli.config
++                    .extension()
++                    .is_some_and(|extension| extension.eq_ignore_ascii_case("dae")),
++                "check admits a .dae entry, as the native API does"
++            );
++            let mut diagnostics = Vec::new();
++            let admitted = check::check(&cli.config, &mut diagnostics);
++            for diagnostic in &diagnostics {
++                eprintln!("{}", check::render(diagnostic));
++            }
++            anyhow::ensure!(
++                admitted,
++                "{}: honk would not start with it",
++                cli.config.display()
++            );
++            println!("{}: honk would start with it", cli.config.display());
++        }
++        #[cfg(not(feature = "native-api"))]
++        ClashCommand::Check => anyhow::bail!("check needs the native-api feature"),
+         ClashCommand::Reload => {
+             let pid = request_reload(std::path::Path::new(INSTANCE_LOCK_PATH))?;
+             println!("Reload requested for honk-core process {pid}");
+diff --git a/doc/en/reference/cli.md b/doc/en/reference/cli.md
+index 53a8259..204eb88 100644
+--- a/doc/en/reference/cli.md
++++ b/doc/en/reference/cli.md
+@@ -56,6 +56,7 @@ Levels carry fixed meanings, so the default `info` stays low-rate:
+ 
+ | Command | Current behavior | Persistence / runtime effect |
+ | --- | --- | --- |
++| `check` | Admits the `-c` entry, a `.dae` file, offline as a start would: parses it with its includes, validates it and compiles its routing and DNS against the data directory's assets, through the native API's candidate admission. Prints each finding to standard error as `<file>[:line[:column]]: <severity>[<code>]: <setting>: <message>`, without values, and exits nonzero when a start would refuse the configuration. Needs `native-api`; refused with `--store db`. | Nothing is bound, attached, created or written, and no running engine is contacted. |
+ | `reload` | Reads the PID from the locked `/run/honk-core.lock` and sends `SIGHUP`. | Reports successful signal delivery only. The running process later logs `applied` or `rejected`. Mock instances do not own the lock. |
+ | `mode <rule\|global\|direct>` | Loads `--config`, assigns the supplied string to `experimental.clash_api.default_mode`, and validates before rewriting structured-format files. `.dae` files are rejected unchanged because the writer cannot preserve dae syntax, comments, or includes; edit those sources directly or use `.toml`, `.yaml`, or `.json`. | File-only; it does not contact the running engine or change dial mode. The accepted strings differ from the normal dial-mode values `ip`, `domain`, `domain+`, and `domain++`. |
+ | `proxy <group> <node>` | Checks that the group and node names each exist, then prints the requested selection. It does not check membership. | Nothing is written and no running engine is contacted. |
+diff --git a/doc/zh/reference/cli.md b/doc/zh/reference/cli.md
+index 4f630a6..467666e 100644
+--- a/doc/zh/reference/cli.md
++++ b/doc/zh/reference/cli.md
+@@ -56,6 +56,7 @@ CLI 与 Clash API 共用构建时版本号：发布构建使用 GitHub 标签名
+ 
+ | 命令 | 当前行为 | 持久化 / 运行时影响 |
+ | --- | --- | --- |
++| `check` | 像启动时那样离线接纳 `-c` 入口（`.dae` 文件）：连同其 include 解析、校验，并以数据目录中的资源编译路由与 DNS，所用的是原生 API 校验候选配置的同一接纳流程。每条发现以 `<文件>[:行[:列]]: <级别>[<代码>]: <设置项>: <说明>` 输出到标准错误，不含取值；启动会拒绝该配置时以非零状态退出。需要 `native-api`；`--store db` 时拒绝执行。 | 不绑定、不挂载、不创建也不写入任何内容，不联系正在运行的引擎。 |
+ | `reload` | 从已加锁的 `/run/honk-core.lock` 读取 PID 并发送 `SIGHUP`。 | 只报告信号成功送达；运行中进程随后记录 `applied` 或 `rejected`。mock 实例不持有该锁。 |
+ | `mode <rule\|global\|direct>` | 加载 `--config`，将参数字符串赋给 `experimental.clash_api.default_mode`，并在重写结构化格式文件前完成校验。`.dae` 文件会被拒绝且保持不变，因为 writer 无法保留 dae 语法、注释或 include；请直接编辑这些源文件，或使用 `.toml`、`.yaml`、`.json`。 | 仅修改文件；不联系运行中的引擎，也不更改 dial mode。接受的字符串不同于正常 dial mode 值 `ip`、`domain`、`domain+`、`domain++`。 |
+ | `proxy <group> <node>` | 检查组名和节点名各自存在，然后打印请求的选择；不检查节点是否属于该组。 | 不写入任何内容，也不联系运行中的引擎。 |

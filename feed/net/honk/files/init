@@ -153,6 +153,12 @@ start_service() {
 	procd_set_param term_timeout 30
 	procd_set_param stdout 1
 	procd_set_param stderr 1
+	# honk keeps the time zone (its geodata update schedule) TZ names, and
+	# OpenWrt keeps it in /etc/TZ only. A change takes a restart.
+	if [ -s /etc/TZ ]; then
+		zone=$(cat /etc/TZ)
+		procd_set_param env TZ="${zone}"
+	fi
 	procd_close_instance
 }
 

@@ -231,7 +231,8 @@ def test_a_configuration_honk_refuses_changes_nothing(pushed: Pushed) -> None:
     # It parses, and names a group no group block declares.
     result = _refused(pushed, PROXY_CONFIG.replace("-> proxy", f"-> {MISSING_GROUP}"))
     assert "honk does not accept the configuration" in result.stderr
-    assert MISSING_GROUP in result.stderr
+    # honk's reason, by its code: its check names no value.
+    assert "error[unknown-routing-target]" in result.stderr
 
 
 @spec(CAPABILITY, "Repeatable push results", "Repeated push")

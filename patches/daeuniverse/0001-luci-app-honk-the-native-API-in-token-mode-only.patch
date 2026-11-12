@@ -1,0 +1,162 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Fri, 13 Nov 2026 13:00:00 +0800
+Subject: [PATCH] luci-app-honk: the native API in token mode only
+
+The doona switch writes a native_api block that logs in with a password,
+whose first visitor creates the administrator, and that lets the API
+write the configuration. On this firmware the native API runs in token
+mode only and never writes the configuration, whose canonical copy is
+the private configuration repository (honk-datapath D8); config-push
+refuses anything else.
+
+The switch now writes a block in token mode with a new random token (32
+bytes, hex), which the operator reads in the editor, and gives a block it
+turns on a token when the block has none. The "store db" switch goes: the
+configuration database needs configuration writes.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Inappropriate [policy: token-only native API]
+---
+ .../luci-static/resources/honk/nativeapi.js   | 71 ++++++++-----------
+ .../luci-static/resources/view/honk/main.js   |  6 --
+ 2 files changed, 31 insertions(+), 46 deletions(-)
+
+diff --git a/luci-app-honk/htdocs/luci-static/resources/honk/nativeapi.js b/luci-app-honk/htdocs/luci-static/resources/honk/nativeapi.js
+index 202ca1f..0c7fea3 100644
+--- a/luci-app-honk/htdocs/luci-static/resources/honk/nativeapi.js
++++ b/luci-app-honk/htdocs/luci-static/resources/honk/nativeapi.js
+@@ -4,7 +4,9 @@
+ /*
+  * The native_api block of honk's configuration is the only switch of the
+  * doona web UI: honk-core has no command-line option for it. These functions
+- * find that block and flip its `enabled` key without touching any other byte.
++ * find that block and flip its `enabled` key without touching any other byte,
++ * but for the static token a block needs to be turned on: the native API runs
++ * in token mode only, and never writes the configuration.
+  */
+ 
+ /* Same length as the text, so offsets carry over to the original: comments
+@@ -64,19 +66,40 @@ function lineIndent(text, pos) {
+ 	return /^[ \t]*/.exec(text.slice(start))[0];
+ }
+ 
+-/* What honk/files/config.dae ships */
++/* A new static token: 32 random bytes in hex */
++function token() {
++	const bytes = new Uint8Array(32);
++	crypto.getRandomValues(bytes);
++	return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
++}
++
++/* A block in token mode, with a new token */
+ function defaultBlock(indent, eol) {
+ 	return [
+ 		'native_api {',
+ 		'    enabled: true',
+ 		'    listen: \'0.0.0.0:9527\'',
+-		'    password_auth: true',
+-		'    config_write: true',
++		'    secret: \'' + token() + '\'',
+ 		'    ui: \'embedded\'',
+ 		'}'
+ 	].map(line => indent + line).join(eol);
+ }
+ 
++/* The text with a new token after the `enabled` key of its native_api block,
++   when the block has no token */
++function withSecret(text, eol) {
++	const code = mask(text);
++	const api = findBlock(code, 'native_api');
++	if (!api || /(?:^|[\s;,])secret\s*:\s*(?:'[^']+'|"[^"]+"|[^\s;,'"]+)/.test(mask(text, true).slice(api.open + 1, api.close)))
++		return text;
++	const inner = code.slice(api.open + 1, api.close);
++	const key = /(^|[\s;,])enabled\s*:\s*('[^']*'|"[^"]*"|[^\s;,]+)/.exec(inner);
++	if (!key)
++		return text;
++	const end = api.open + 1 + key.index + key[0].length;
++	return text.slice(0, end) + eol + lineIndent(text, end) + 'secret: \'' + token() + '\'' + text.slice(end);
++}
++
+ return baseclass.extend({
+ 	/* The inside of the first `name` block with comments blanked, or null */
+ 	section(text, name) {
+@@ -89,39 +112,6 @@ return baseclass.extend({
+ 		return this.section(text, 'native_api');
+ 	},
+ 
+-	/* The value of `key` in the first `name` block of the files: '' when the
+-	   key is missing or empty, null when no file has the block */
+-	value(files, name, key) {
+-		for (const file of files) {
+-			const body = this.section(file.text ?? '', name);
+-			if (body == null)
+-				continue;
+-			const match = new RegExp('(?:^|[\\s;,])' + key + '\\s*:\\s*(?:\'([^\']*)\'|"([^"]*)"|([^\\s;,]+))').exec(body);
+-			return match ? (match[1] ?? match[2] ?? match[3]) : '';
+-		}
+-		return null;
+-	},
+-
+-	/* What stops `--store db` from starting with these files, one sentence
+-	   per key to change; honk checks the same when it imports them */
+-	storeProblems(files, dataDir) {
+-		const value = (name, key) => this.value(files, name, key) ?? '';
+-		const slashless = path => path.replace(/\/+$/, '');
+-		const problems = [];
+-
+-		if (value('native_api', 'enabled') !== 'true')
+-			problems.push(_('Set experimental.native_api.enabled to true.'));
+-		if (value('native_api', 'config_write') !== 'true')
+-			problems.push(_('Set experimental.native_api.config_write to true.'));
+-		if (value('native_api', 'password_auth') !== 'true' && !value('native_api', 'secret'))
+-			problems.push(_('Set experimental.native_api.password_auth to true or set experimental.native_api.secret.'));
+-		if (slashless(value('global', 'data_dir')) !== slashless(dataDir))
+-			problems.push(_('Set global.data_dir to %s.').format(dataDir));
+-		if (value('clash_api', 'external_controller'))
+-			problems.push(_('Remove experimental.clash_api.external_controller.'));
+-		return problems;
+-	},
+-
+ 	/* Whether the files enable the native API */
+ 	isEnabled(files) {
+ 		for (const file of files) {
+@@ -152,17 +142,18 @@ return baseclass.extend({
+ 			if (key) {
+ 				const start = api.open + 1 + key.index + key[1].length + key[2].length;
+ 				const end = start + key[3].length;
+-				return text.slice(start, end) === value ? text : text.slice(0, start) + value + text.slice(end);
++				const flipped = text.slice(start, end) === value ? text : text.slice(0, start) + value + text.slice(end);
++				return on ? withSecret(flipped, eol) : flipped;
+ 			}
+ 			if (!on)
+ 				return text;
+ 			const rest = text.slice(api.open + 1);
+ 			if (/^[ \t]*\r?\n/.test(inner)) {
+ 				const first = /\n([ \t]*)\S/.exec(inner);
+-				return text.slice(0, api.open + 1) + eol + (first ? first[1] : lineIndent(text, api.open) + '    ') + 'enabled: true' + rest;
++				return withSecret(text.slice(0, api.open + 1) + eol + (first ? first[1] : lineIndent(text, api.open) + '    ') + 'enabled: true' + rest, eol);
+ 			}
+ 			const indent = lineIndent(text, api.open) + '    ';
+-			return text.slice(0, api.open + 1) + eol + indent + 'enabled: true' + eol + indent + rest.replace(/^[ \t]+/, '');
++			return withSecret(text.slice(0, api.open + 1) + eol + indent + 'enabled: true' + eol + indent + rest.replace(/^[ \t]+/, ''), eol);
+ 		}
+ 
+ 		if (!on)
+diff --git a/luci-app-honk/htdocs/luci-static/resources/view/honk/main.js b/luci-app-honk/htdocs/luci-static/resources/view/honk/main.js
+index 2db8787..ed81cfc 100644
+--- a/luci-app-honk/htdocs/luci-static/resources/view/honk/main.js
++++ b/luci-app-honk/htdocs/luci-static/resources/view/honk/main.js
+@@ -87,12 +87,6 @@ return service.View.extend({
+ 			path: files => nativeApi.targetPath(files),
+ 			write: (text, on) => nativeApi.apply(text, on)
+ 		},
+-		// honk-core takes the store as a command-line flag, so it is a UCI option
+-		// of the init script, not a line of the configuration.
+-		storeFlag: {
+-			dataDir: '/etc/honk/data',
+-			problems: (files, dataDir) => nativeApi.storeProblems(files, dataDir)
+-		},
+ 		// procd forwards stdout as "honk-core[pid]:", the init script logs as "honk:".
+ 		logIdent: /^honk(-core)?(\[\d+\])?: /
+ 	}

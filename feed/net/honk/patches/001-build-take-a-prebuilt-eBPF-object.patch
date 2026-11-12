@@ -17,9 +17,11 @@ is, skipping the lookup and the build. Without it, nothing changes.
 Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
 Upstream-Status: Pending
 ---
- crates/honk-core/build.rs | 35 ++++++++++++++++++++++++++++++-----
- 1 file changed, 30 insertions(+), 5 deletions(-)
+ crates/honk-core/build.rs | 38 ++++++++++++++++++++++++++++++++------
+ 1 file changed, 32 insertions(+), 6 deletions(-)
 
+diff --git a/crates/honk-core/build.rs b/crates/honk-core/build.rs
+index 64e41d3..260b555 100644
 --- a/crates/honk-core/build.rs
 +++ b/crates/honk-core/build.rs
 @@ -5,7 +5,8 @@
@@ -32,12 +34,10 @@ Upstream-Status: Pending
  
  fn main() {
      emit_version();
-@@ -310,6 +311,26 @@
-             .iter()
-             .filter_map(|d| newest_mtime(d))
+@@ -312,6 +313,26 @@ fn embed_ebpf_object() {
              .any(|src_mtime| src_mtime > obj_mtime)
-+    }
-+
+     }
+ 
 +    // A distribution that builds the object in a step of its own, with the
 +    // toolchain it builds everything else with, hands it over here; it is
 +    // embedded as it is, once it is known to carry BTF.
@@ -56,10 +56,12 @@ Upstream-Status: Pending
 +        println!("cargo:rerun-if-changed={}", prebuilt.display());
 +        embed_object(&prebuilt);
 +        return;
-     }
- 
++    }
++
      let candidates = [
-@@ -411,11 +432,6 @@
+         ebpf_target.clone(),
+         manifest_dir.join("../../target/honk-core.o"),
+@@ -411,11 +432,6 @@ fn embed_ebpf_object() {
          }
      };
  
@@ -71,7 +73,7 @@ Upstream-Status: Pending
      println!(
          "cargo:rerun-if-changed={}",
          ebpf_crate.join("src").display()
-@@ -424,6 +440,16 @@
+@@ -424,6 +440,16 @@ fn embed_ebpf_object() {
          "cargo:rerun-if-changed={}",
          ebpf_common_crate.join("src").display()
      );

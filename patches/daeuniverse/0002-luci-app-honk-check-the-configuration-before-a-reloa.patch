@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Fri, 13 Nov 2026 13:30:00 +0800
+Subject: [PATCH] luci-app-honk: check the configuration before a reload
+
+A save reloads a running honk without a check: honk-core had no offline
+one, and a configuration honk refuses was reported only in the log while
+the page said the service was reloading.
+
+On this firmware the init script checks a configuration as the service
+would run it (`/etc/init.d/honk check <file>`: honk-core check of the
+entry it writes around the file, honk-datapath D4, D7). The page runs it
+before the reload and shows honk's findings when it fails; the ACL lets
+it run that command alone.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Inappropriate [firmware-specific: the init script's check of the entry it writes]
+---
+ luci-app-honk/htdocs/luci-static/resources/view/honk/main.js | 5 +++--
+ luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json   | 3 ++-
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/luci-app-honk/htdocs/luci-static/resources/view/honk/main.js b/luci-app-honk/htdocs/luci-static/resources/view/honk/main.js
+index ed81cfc..cfb6d9d 100644
+--- a/luci-app-honk/htdocs/luci-static/resources/view/honk/main.js
++++ b/luci-app-honk/htdocs/luci-static/resources/view/honk/main.js
+@@ -78,8 +78,9 @@ return service.View.extend({
+ 		// Both create dae0/daens and hook the same interfaces: only one may run.
+ 		other: 'dae',
+ 		defaultConfig: '/etc/honk/config.dae',
+-		// honk-core has no offline check; a broken file is reported in the log.
+-		validate: null,
++		// The init script's check: honk-core check of the entry the service
++		// would run around the file.
++		validate: [ '/etc/init.d/honk', [ 'check' ] ],
+ 		// honk-core has no switch for the native API either: its block in the
+ 		// configuration is the single source of truth.
+ 		webUiFlag: {
+diff --git a/luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json b/luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
+index 35b9ec1..1a2a7b7 100644
+--- a/luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
++++ b/luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
+@@ -7,7 +7,8 @@
+ 				"/etc/honk/*": [ "list", "read" ],
+ 				"/usr/libexec/daeuniverse-pkg installed *": [ "exec" ],
+ 				"/usr/libexec/daeuniverse-pkg check *": [ "exec" ],
+-				"/usr/libexec/daeuniverse-pkg status": [ "exec" ]
++				"/usr/libexec/daeuniverse-pkg status": [ "exec" ],
++				"/etc/init.d/honk check *": [ "exec" ]
+ 			},
+ 			"ubus": {
+ 				"file": [ "list", "read", "exec" ],

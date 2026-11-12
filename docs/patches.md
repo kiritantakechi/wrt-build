@@ -698,6 +698,18 @@ What the patch does: `HONK_PREBUILT_EBPF_OBJECT`, the absolute path of an object
 
 Verification log: pending.
 
+### honk: check, offline admission of a configuration
+
+Patch: `feed/net/honk/patches/002-cli-add-check-offline-admission-of-a-configuration.patch`, for daeuniverse/honk.
+
+Problem: honk-core cannot say whether it would take a configuration without starting, which binds its listeners and attaches its programs. A reload is no answer: SIGHUP keeps the old configuration on refusal and says so only in the log.
+
+Why it matters here: the firmware wraps the operator's configuration in an entry of its own (honk-datapath D4), and config-push must refuse a configuration honk would refuse before the router changes (ops/config-push), as the init script must before it starts or reloads honk (D5).
+
+What the patch does: `honk-core check` admits the `-c` entry offline through the admission honk's native API validates candidates with: the entry and its includes parsed, validated and assembled, routing and DNS compiled against the data directory's assets, with the candidate as its own active configuration. Nothing is bound, attached, created or written. Each finding goes to standard error as `<file>[:line[:column]]: <severity>[<code>]: <setting>: <message>`, without values, which may be secrets, and the command exits nonzero when a start would refuse the configuration. It needs the `native-api` feature, as that admission does, and a `.dae` entry. Unit tests beside it: a configuration a start takes, admitted without creating its data directory; a routing target no group declares, a syntax error and an include outside the entry's directory, refused. The CLI reference, in both languages, has the command.
+
+Verification log: pending.
+
 ### build: services disabled in the image
 
 Patch: `patches/openwrt/0046-build-disable-the-services-TARGET_DISABLED_SERVICES-.patch`, for openwrt/openwrt.
