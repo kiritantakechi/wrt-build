@@ -37,7 +37,7 @@ define Package/honk
   SUBMENU:=Web Servers/Proxies
   TITLE:=Transparent proxy in eBPF, bound to the LAN side
   URL:=https://github.com/daeuniverse/honk
-  DEPENDS:=@(aarch64||x86_64) $(RUST_ARCH_DEPENDS) +libstdcpp \
+  DEPENDS:=@(aarch64||x86_64) $(RUST_ARCH_DEPENDS) +libstdcpp +wrt-data \
     +kmod-veth +kmod-sched-core +kmod-sched-bpf \
     +kmod-nft-core +kmod-nft-queue +kmod-nfnetlink-queue +kmod-nf-conntrack \
     +@KERNEL_DEBUG_INFO_BTF +@KERNEL_CGROUP_BPF

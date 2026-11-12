@@ -55,16 +55,21 @@ Alternatives: doona's release tarballs, hash-pinned (not built from source); pnp
 
 ### D4. The firmware's part of the configuration is an entry around the user's
 
-The init script writes `/var/run/honk/main.dae` and copies the regular `.dae` files of the configuration's directory beside it, readable by root alone, so the user's includes resolve inside the entry's directory as honk requires (dae's symbolic links would resolve outside it). The entry holds:
+The init script copies the configuration's directory to `/var/run/honk`, readable by root alone, and writes two files of its own there: the entry `wrt-entry.dae` and the firmware's settings `wrt-settings.dae` (a configuration that has either name is refused). honk resolves includes from the entry's directory and takes one only from inside it, so the configuration's own includes resolve as they do in its directory (copies, since links would resolve outside it). The entry holds:
 
 ```
-global { lan_interface: br-lan, podman0, tailscale0 }
-dns { bind: '127.0.0.1:5353' }
 routing { dip(geoip: private) && dport(53) -> direct(must) }
-include { config.dae }
+include { config.dae; wrt-settings.dae }
 ```
 
-honk merges sections entry first, so the firmware's DNS rule precedes every user rule and its interfaces cannot be overridden (config-push rejects `lan_interface` and `wan_interface` anyway). Listing podman0 and tailscale0 up front replaces dae's hotplug rebind, since honk binds them when they appear.
+and the settings:
+
+```
+global { lan_interface: br-lan, podman0, tailscale0; wan_interface: ''; data_dir: <D5> }
+dns { bind: '127.0.0.1:5353' }
+```
+
+honk merges the entry's sections first, then the included files in order, and takes a scalar setting from the last file that has it (`raw_fields`, shown by a probe of honk's parser: an entry, a user file and a last file each setting `lan_interface`, `wan_interface` and `data_dir` give the last file's values, and `wan_interface: ''` an empty list). So the firmware's routing rule precedes every user rule, and its settings, included last, win over the configuration's, whichever way it was written: config-push also rejects `lan_interface`, `wan_interface` and `data_dir` explicitly, a LuCI edit is overridden. (The first layout put the settings in the entry, on the premise that the entry's would win; they would have lost to the configuration's.) Listing podman0 and tailscale0 up front replaces dae's hotplug rebind, since honk binds them when they appear.
 
 DNS to any private address stays native: dnsmasq keeps answering the LAN (local names, DHCP names, rebind protection, the fallback when honk stops), podman's aardvark-dns answers containers on podman0's gateway, and dnsmasq forwards external names to honk's listener. Public resolvers a client addresses directly are still intercepted by honk.
 
@@ -73,6 +78,8 @@ Alternatives: honk answering all LAN DNS, with `.lan` routed back to dnsmasq (lo
 ### D5. Service control as the official LuCI page expects it
 
 There is no uci `enabled` option: honk runs while its init script is enabled, as the start-at-boot switch sets it. The image ships the service disabled through a build option the image builder already has and a build from source lacks, `TARGET_DISABLED_SERVICES` (openwrt 0046, meant for upstream); an upgrade keeps honk's rc.d links (`keep.d`), so a new router starts without honk and an upgraded one as it was. daeuniverse's uci-defaults, which disables honk on every first boot of an image, would turn it off on every firmware upgrade. config-push writes the configuration, enables and restarts honk. procd runs honk with respawn and `term_timeout` 30 s (honk's graceful shutdown; its unit uses `TimeoutStopSec=30s`). The entry's directory is made anew beside the running one, checked with honk's check (D7) and only then put in its place, so a configuration honk refuses never reaches the running entry. `reload_service` does that, then signals honk (SIGHUP). A LuCI save reloads; config-push restarts, so changes to restart-only fields take effect. The uci configuration `honk` keeps `config_file` and `cpu_pinning`. The pinning is the cpuset of honk's service cgroup on the big cores rather than dae's `taskset` prefix: it moves a running honk at once, so a reload takes it, and the command line stays the same.
+
+honk's data directory holds its state database (cached DNS answers and delay samples, written all the time, the cached subscriptions, the geodata schedule) and the geodata its update fetches (decided: the update stays on, as honk ships it). Its default, `/var/lib/honk`, is RAM on OpenWrt: every boot would start without geodata, and honk's first update waits five minutes and up to an hour of jitter, so rules on geosite or geoip codes would match nothing for that long. The boot disk takes no such writes (r4s-services D1), so the directory follows the data disk (user's choice): `/mnt/data/honk` while the data disk is mounted and writable, RAM otherwise. The data directory is fixed for a running honk, so the data disk's mount and unmount restart honk (procd's mount triggers, as for the other services on the disk); without the disk honk proxies as before, its state in RAM.
 
 ### D6. Health check: the process and its programs
 
@@ -84,7 +91,7 @@ Each fix is a patch in `feed/net/honk/patches`, `Upstream-Status: Pending`, with
 
 - **#456**: reproduce LAN-to-router IPv4 TCP on br-lan (SSH, LuCI, SMB) with honk on the LAN; find why the accepted child carries no published proof and fix the proof path.
 - **#476**: reproduce a reload on the emulator; find why the NFQUEUE listener reads a message of type 2 (`NLMSG_ERROR`) across the reload and fix its handling so that a reload never ends the process.
-- **Offline check**: `honk-core check -c <file>` parses and admits a configuration as a start would, without touching the system or binding anything, and exits nonzero naming the reason; config-push (on the router, where honk's own build is) and the init script use it.
+- **Offline check**: `honk-core check -c <file>` parses and admits a configuration as a start would, without touching the system or binding anything, and exits nonzero naming the reason; config-push (on the router, where honk's own build is) and the init script use it. A start, like a reload, runs without a required geodata file it does not find (its rules match nothing until the file is fetched), where the native API refuses a candidate for it; the check admits as a start does, with a warning, or the init would refuse every boot that comes before the first geodata update.
 - **build.rs**: the prebuilt object through an environment variable (D2).
 
 ### D8. The native API: token mode, LAN only, no writes

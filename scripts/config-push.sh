@@ -5,9 +5,9 @@
 # with sops into a temporary directory, which goes when the push ends; the uci
 # templates are filled in from them. Each service's new files:
 #   network, ... (one per uci/<config>.uci.tmpl)   uci batches
-#   honk       honk/*.dae.enc, without lan_interface or wan_interface (the
-#              firmware sets them), its native API in token mode alone and
-#              never writing the configuration (honk-datapath D8)
+#   honk       honk/*.dae.enc, without lan_interface, wan_interface or data_dir
+#              (the firmware's), its native API in token mode alone and never
+#              writing the configuration (honk-datapath D8)
 #   tailscale  the auth key and the login's options (secrets: tailscale.auth_key,
 #              tailscale.login_server)
 #   smb        the share users (secrets: smb.users)
@@ -71,8 +71,8 @@ for encrypted in "${config}"/honk/*.dae.enc; do
 		die "cannot decrypt ${name}"
 done
 if [ -d "${new}/honk" ]; then
-	if grep -n -E '^[[:space:]]*(lan_interface|wan_interface)[[:space:]]*:' "${new}"/honk/*.dae >&2; then
-		die "honk's lan_interface and wan_interface are the firmware's (honk-datapath D4): remove them"
+	if grep -n -E '^[[:space:]]*(lan_interface|wan_interface|data_dir)[[:space:]]*:' "${new}"/honk/*.dae >&2; then
+		die "honk's lan_interface, wan_interface and data_dir are the firmware's (honk-datapath D4): remove them"
 	fi
 	# The native API's settings, key=value, across the files: its blocks are the
 	# ones named native_api, comments go and quotes come off the values. Whichever

@@ -15,7 +15,7 @@ export WRT_CONFIG_DIR=~/wrt-config
 |---|---|
 | `.sops.yaml` | the age recipient every file is encrypted for |
 | `secrets/secrets.enc.yaml` | the credentials, encrypted: `pppoe.username`, `pppoe.password`, `wireguard.private_key`, `tailscale.auth_key`, `tailscale.login_server`, `smb.users` (a list of `name` and `password`) |
-| `honk/*.dae.enc` | honk's configuration, encrypted, since its nodes, subscriptions and native API token are secrets: `config.dae.enc`, and any file it includes. Never `lan_interface` or `wan_interface`: the firmware sets them. The native API only in token mode, and never writing the configuration (below) |
+| `honk/*.dae.enc` | honk's configuration, encrypted, since its nodes, subscriptions and native API token are secrets: `config.dae.enc`, and any file it includes. Never `lan_interface`, `wan_interface` or `data_dir`: the firmware sets them, and its values win. The native API only in token mode, and never writing the configuration (below) |
 | `uci/<config>.uci.tmpl` | uci batches; `@path@` is the secret at that path, e.g. `set network.wan.password='@pppoe.password@'` |
 | `pods/*.yaml` | Pod declarations, and a `<pod>.options` beside one where it needs them |
 

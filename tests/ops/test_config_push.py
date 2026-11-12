@@ -44,6 +44,9 @@ CAPABILITY = "ops/config-push"
 SHARE_USER = {"name": "pushed", "password": "pushed-secret-1"}
 # An address the LAN cannot come up with (netifd: INVALID_ADDRESS).
 BAD_LAN_ADDRESS = "10.0.0.300/24"
+# The requirement on honk's settings that the firmware sets, and config-push's refusal.
+FIRMWARE_SETTINGS = "Proxy user config cannot set the firmware's settings"
+FIRMWARE_SETTINGS_REFUSAL = "lan_interface, wan_interface and data_dir are the firmware's"
 SERVICES = ("honk", "network", "smb", "tailscale")
 # The processes the services' reloads restart: honk's, the WAN's pppd, the SMB
 # server's and tailscaled.
@@ -345,12 +348,20 @@ def test_a_service_that_stops_is_put_back(pushed: Pushed) -> None:
     )
 
 
-@spec(CAPABILITY, "Proxy user config cannot set bind interfaces", "User config sets lan_interface")
+@spec(CAPABILITY, FIRMWARE_SETTINGS, "User config sets lan_interface")
 def test_lan_interface_is_the_firmware_s(pushed: Pushed) -> None:
     result = _refused(
         pushed, PROXY_CONFIG.replace("global {\n", "global {\n    lan_interface: br-lan\n", 1)
     )
-    assert "lan_interface and wan_interface are the firmware's" in result.stderr
+    assert FIRMWARE_SETTINGS_REFUSAL in result.stderr
+
+
+@spec(CAPABILITY, FIRMWARE_SETTINGS, "User config sets data_dir")
+def test_data_dir_is_the_firmware_s(pushed: Pushed) -> None:
+    result = _refused(
+        pushed, PROXY_CONFIG.replace("global {\n", "global {\n    data_dir: '/etc/honk'\n", 1)
+    )
+    assert FIRMWARE_SETTINGS_REFUSAL in result.stderr
 
 
 @spec(CAPABILITY, "The proxy's native API only with a token", "Native API with password login")

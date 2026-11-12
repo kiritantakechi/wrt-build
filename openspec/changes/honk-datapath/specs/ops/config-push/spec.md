@@ -1,7 +1,7 @@
 ## RENAMED Requirements
 
 - FROM: `### Requirement: dae user config cannot set bind interfaces`
-- TO: `### Requirement: Proxy user config cannot set bind interfaces`
+- TO: `### Requirement: Proxy user config cannot set the firmware's settings`
 
 ## MODIFIED Requirements
 
@@ -49,11 +49,15 @@ Configuration and secrets pushed to the device SHALL be included in the configur
 - **WHEN** a config-preserving upgrade is performed after a configuration push
 - **THEN** the PPPoE, honk, WireGuard, Tailscale, and SMB configuration is all still present in the new slot
 
-### Requirement: Proxy user config cannot set bind interfaces
-The push tool MUST reject honk user configuration that contains `lan_interface` or `wan_interface`, because the firmware generates these two settings automatically.
+### Requirement: Proxy user config cannot set the firmware's settings
+The push tool MUST reject honk user configuration that contains `lan_interface`, `wan_interface` or `data_dir`, because the firmware sets them: the interfaces honk binds, and the directory of honk's state, which follows the data disk.
 
 #### Scenario: User config sets lan_interface
 - **WHEN** a honk configuration whose user config sets `lan_interface` is pushed
+- **THEN** the push fails during validation and reports that this field is managed by the firmware
+
+#### Scenario: User config sets data_dir
+- **WHEN** a honk configuration whose user config sets `data_dir` is pushed
 - **THEN** the push fails during validation and reports that this field is managed by the firmware
 
 ## ADDED Requirements

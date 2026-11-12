@@ -194,7 +194,7 @@ Three commits on the base, 2 files, +217/−0:
 
 ## honk's own downloads at run time
 
-Not part of the forks, but inputs to the running firmware: honk-core fetches subscriptions from their configured URLs (reqwest with rustls and AWS-LC, the platform verifier). With the native API enabled, it updates geodata automatically by default (every 24 hours, from `raw.githubusercontent.com/MetaCubeX/meta-rules-dat` with `fastly.jsdelivr.net` as fallback), checking each file against a sha256 published beside it on the same host: that detects corruption, not a compromised source. The default connectivity check is `https://www.gstatic.com/generate_204`.
+Not part of the forks, but inputs to the running firmware: honk-core fetches subscriptions from their configured URLs (reqwest with rustls and AWS-LC, the platform verifier). With the native API enabled, it updates geodata automatically by default (every 24 hours, from `raw.githubusercontent.com/MetaCubeX/meta-rules-dat` with `fastly.jsdelivr.net` as fallback), checking each file against a sha256 published beside it on the same host: that detects corruption, not a compromised source. The files land in honk's data directory, which the firmware keeps on the data disk while it is mounted and in RAM otherwise (honk-datapath D5). The default connectivity check is `https://www.gstatic.com/generate_204`.
 
 ## Conclusion
 
@@ -206,9 +206,9 @@ Conditions:
 3. **Track quinn by hand:** compare every quinn-rs/quinn advisory and 0.11.x release with the fork's branch, since scanners match only the version the fork claims; at this review 11 upstream commits are missing.
 4. **Trust the QUIC peers:** Hysteria2, TUIC and Juicity nodes and DoQ or DoH3 servers can make honk hold far more buffered data than upstream quinn allows; use only nodes and servers you trust.
 5. **Treat BBRv3 as experimental:** if Hysteria2 nodes without an upload rate, or nodes set to `bbr`, misbehave, set `HONK_QUIC_BBR=v1` in honk's environment or choose `cubic` on the node.
-6. **Fix the doona recipe's pnpm settings:** pass the store as `pnpm_config_store_dir` (or `--store-dir`), since pnpm 11 ignores `npm_config_store_dir`; run `pnpm -C apps/lite install --frozen-lockfile` explicitly, as doona's release does; keep `PNPM_VERSION` equal to doona's `packageManager`. The build needs registry.npmjs.org for metadata either way.
+6. **Keep the doona recipe's pnpm settings:** the store passed as `pnpm_config_store_dir`, since pnpm 11 ignores `npm_config_store_dir`; the lite edition installed explicitly with `pnpm -C apps/lite install --frozen-lockfile`, as doona's release does; `PNPM_VERSION` equal to doona's `packageManager`. The build needs registry.npmjs.org for metadata either way.
 7. **Watch BoringSSL and boring releases** for security fixes; one that matters means rebasing the fork, or patching the vendored BoringSSL here.
-8. **Decide on honk's geodata auto-update** when the configuration enables the native API: keep it, point it at sources you trust, or turn it off.
+8. **honk's geodata auto-update stays as honk ships it** (decided 2026-11-13): with the native API enabled, honk replaces `geoip.dat` and `geosite.dat` every 24 hours from MetaCubeX/meta-rules-dat, jsDelivr as fallback, through its own routing. Rules that use them rest on those sources, whose published sha256 detects corruption only; other sources, or none, would be a new decision.
 9. **Re-review on every honk upgrade,** and on every doona, pnpm or bpf-linker bump (below).
 
 ## Re-check on upgrade

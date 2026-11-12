@@ -36,6 +36,7 @@ from wrt_tests.device.storage import (
 from wrt_tests.model.poll import until
 from wrt_tests.sandbox.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
 from wrt_tests.services import app
+from wrt_tests.services.datapath import PROXY_HOOKS_L2, PROXY_TIMEOUT, hooks
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -60,6 +61,8 @@ HEALTHCHECK = (
     " && uci commit wrt-ab && wrt-healthcheck"
 )
 HEALTH = "/var/run/wrt-healthcheck.json"
+# honk's state database, in its data directory on the data disk or in RAM.
+PROXY_STATE = {"data disk": f"{MOUNT}/honk/honk.db", "RAM": "/var/lib/honk/honk.db"}
 
 
 @pytest.fixture(scope="module")
@@ -102,6 +105,21 @@ def _services(router: Router) -> dict[str, bool]:
         "file sharing": router.returncode("pidof ksmbd.mountd >/dev/null") == 0,
         "persistent log": router.returncode(f"test -e {LOG}") == 0,
     }
+
+
+def _proxy_state(router: Router) -> str | None:
+    """Return where the running honk keeps its state, by the database it holds open."""
+    files = router.run('pid=$(pidof honk-core) && ls -l "/proc/${pid}/fd" || true')
+    return next((place for place, path in PROXY_STATE.items() if f"-> {path}" in files), None)
+
+
+def _proxy_on(router: Router, place: str) -> None:
+    """Wait until honk runs on br-lan with its state in ``place``."""
+    until(
+        lambda: _proxy_state(router) == place and hooks(router, "br-lan") == PROXY_HOOKS_L2,
+        timeout=PROXY_TIMEOUT,
+        what=f"honk on br-lan with its state in {place}",
+    )
 
 
 def _kept(router: Router) -> dict[str, list[str]]:
@@ -264,6 +282,14 @@ def test_boot_without_the_data_disk(without_disk: Online) -> None:
     assert json.loads(router.run(f"cat {HEALTH}"))["result"] == "pass"
 
 
+@spec(CAPABILITY, "The proxy's state follows the data disk", "Boot without the data disk")
+def test_the_proxy_keeps_its_state_in_ram_without_the_data_disk(without_disk: Online) -> None:
+    router = without_disk.router
+    _proxy_on(router, "RAM")
+    assert without_disk.client().probe("tcp", PROXIED_TARGET[0])["address"] == PROXY[0]
+    assert boot_disk_entries(router) == []
+
+
 @spec(CAPABILITY, "Data disk identified by UUID", "Insert another disk")
 def test_other_disk_is_not_mounted(without_disk: Online, spare: Disk) -> None:
     router = without_disk.router
@@ -294,6 +320,27 @@ def test_data_disk_mounts_late(without_disk: Online, data_disk: Disk) -> None:
         what="every service on the data disk",
     )
     assert boot_disk_entries(router) == []
+
+
+@spec(CAPABILITY, "The proxy's state follows the data disk", "Data disk mounted and unmounted")
+def test_the_proxy_s_state_follows_the_data_disk(without_disk: Online, data_disk: Disk) -> None:
+    router = without_disk.router
+    if data_disk.port is None:
+        data_disk.plug(1)
+    wait_mounted(router)
+    _proxy_on(router, "data disk")
+    announce(router, data_disk, "remove")
+    try:
+        until(
+            lambda: mount_options(router) is None, timeout=PLUG_TIMEOUT, what=f"{MOUNT} unmounted"
+        )
+        _proxy_on(router, "RAM")
+        assert boot_disk_entries(router) == []
+    finally:
+        announce(router, data_disk, "add")
+        wait_mounted(router)
+    _proxy_on(router, "data disk")
+    assert without_disk.client().probe("tcp", PROXIED_TARGET[0])["address"] == PROXY[0]
 
 
 @spec(CAPABILITY, "Periodic read-only snapshots", "Snapshots after a long time off")

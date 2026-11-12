@@ -26,7 +26,7 @@
 - [ ] 3.1 `feed/net/honk/Makefile`: honk's tag archive and doona's source archive, hash-verified; doona built with pnpm (frozen lockfile) and vite; the eBPF object from 2.1's recipe; honk-core with features `ebpf`, `native-ui`, `jemalloc`, `rprx` and the object through the `build.rs` patch (D2), meant for upstream, with its write-up.
 
   Verify: the package builds for both boards from a clean build directory; the image's `honk-core --version` names the pinned release; the reviewed-warnings register check passes on both boards' `warnings.json`.
-- [ ] 3.2 The init script with the entry of D4 (files copied beside it, root-only), procd with respawn and `term_timeout` 30 s, CPU pinning, reload after honk's check (D5); uci `honk` with `config_file` and `cpu_pinning`; the template `/etc/honk/config.dae` with the native API off; the health check (D6); `keep.d` for `/etc/honk`; the service disabled in the image. Remove `feed/net/dae`.
+- [ ] 3.2 The init script with the entry of D4 (the configuration's directory copied as the entry's, root-only; the firmware's settings included last, so they win), procd with respawn and `term_timeout` 30 s, CPU pinning, reload after honk's check (D5); uci `honk` with `config_file` and `cpu_pinning`; the template `/etc/honk/config.dae` with the native API off; the health check (D6); `keep.d` for `/etc/honk`; the service disabled in the image. Remove `feed/net/dae`.
 
   Verify: the transparent-proxy tests of binding, cgroup programs, health check, CPU pinning, turning off, falling back and the image's template pass on the R4S.
 - [ ] 3.3 `honk-core check -c <file>`: parse and admit a configuration as a start would, touching nothing, exit nonzero with the reason; a patch meant for upstream with its write-up (D7). The init script checks before it starts or reloads.
@@ -35,6 +35,9 @@
 - [ ] 3.4 Seeds and packages: `config/datapath.seed` (honk, luci-app-honk, `kmod-nft-queue`, `kmod-nfnetlink-queue`), `scripts/image-audit.sh`; honk's marks in `config/marks.tsv` (D9, D10).
 
   Verify: `just check` (marks check) passes; `scripts/image-audit.sh` passes on the R4S image; the tc-hook-order tests, the NFQUEUE table's survival of `fw4 reload` and its removal after honk stops, and the listener test pass on the R4S.
+- [ ] 3.5 honk's data directory on the data disk while it is mounted and writable, in RAM otherwise, never on the boot disk; the disk's mount and unmount restart honk onto it and off it (D5). `honk-core check` admits a configuration whose geodata is not there yet, as a start does (D7).
+
+  Verify: the storage/data-disk tests of the proxy's state pass on the R4S; the check's unit test of missing geodata fails without the fix and passes with it.
 
 ## 4. LAN DNS (design D4)
 
@@ -71,7 +74,7 @@
 
 ## 8. config-push and the tools (design D5, D8, D11)
 
-- [ ] 8.1 `scripts/config-push.sh` and `device.uc`: `honk/*.dae.enc`, the interface and native API rejections, honk's check in a scratch directory set up as the service runs it, `/etc/honk` written root-only, honk enabled and restarted, its health check. `scripts/config-init.sh` and its skeleton.
+- [ ] 8.1 `scripts/config-push.sh` and `device.uc`: `honk/*.dae.enc`, the rejections of the firmware's settings and of the native API's, honk's check in a scratch directory set up as the service runs it, `/etc/honk` written root-only, honk enabled and restarted, its health check. `scripts/config-init.sh` and its skeleton.
 
   Verify: the ops/config-push tests pass on the R4S, the new native API rejections among them.
 - [ ] 8.2 The rest that names dae: `wrt-sync`, `wrt-containers`, `files/etc/uci-defaults/91-wrt-datapath`, the release tests' drill configuration, `tests/wrt_tests/services/datapath.py`; `docs/ops.md`, `docs/services.md`, `docs/release-flow.md` with the moving of the private configuration and D11's dialect list.
