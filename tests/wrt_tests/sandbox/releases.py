@@ -181,7 +181,13 @@ def serve(root: Path, address: str, name: str, certificate: Path, key: Path) -> 
     context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     context.load_cert_chain(certificate, key)
     with ThreadingHTTPServer((address, PORT), handler) as server:
-        server.socket = context.wrap_socket(server.socket, server_side=True)
+        # Each handshake runs in its request's thread, on the first read
+        # (OpenSSL negotiates there), not in accept: a client that connects
+        # ahead and sends nothing yet, as a proxy's connection pool does,
+        # would otherwise hold up every client behind it.
+        server.socket = context.wrap_socket(
+            server.socket, server_side=True, do_handshake_on_connect=False
+        )
         server.serve_forever()
 
 

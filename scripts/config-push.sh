@@ -95,7 +95,7 @@ if [ -d "${new}/honk" ]; then
 			die "honk's native API needs a token (secret), not ${key}: password login lets its first visitor create the administrator"
 	done
 	! grep -qx 'config_write=true' "${work}/native-api" ||
-		die "honk's native API keeps configuration writes off: the configuration's canonical copy is this repository (honk-datapath D8)"
+		die "honk's native API: configuration writes stay off, as the configuration's canonical copy is this repository (honk-datapath D8)"
 	! grep -qx 'enabled=true' "${work}/native-api" || grep -q '^secret=.' "${work}/native-api" ||
 		die "honk's native API needs a token: set its secret"
 fi

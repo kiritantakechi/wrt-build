@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -18,6 +19,14 @@ if TYPE_CHECKING:
 
 REPOSITORY = "owner/repository"
 API = f"https://{RELEASES[0]}/repos/{REPOSITORY}"
+# A client that connects and sends nothing yet, as a proxy's connection pool
+# connects ahead of the request it will carry.
+SILENT = """
+import socket, sys, time
+with socket.create_connection((sys.argv[1], 443)):
+    print("connected", flush=True)
+    time.sleep(60)
+"""
 
 
 def _release(directory: Path, tag: str, *, prerelease: bool) -> Path:
@@ -71,3 +80,20 @@ def test_assets_download_whole_or_cut(network: Network, published: Path) -> None
         assert len(cut.stdout) == 1000  # noqa: PLR2004
     finally:
         releases.cut(published, REPOSITORY, "r1", None)
+
+
+def test_a_silent_client_holds_up_no_one(network: Network, published: Path) -> None:
+    del published
+    silent = subprocess.Popen(
+        network["inet"].argv(sys.executable, "-c", SILENT, RELEASES[1]),
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert silent.stdout is not None
+        assert silent.stdout.readline() == "connected\n"
+        answered = _curl(network, f"{API}/releases/latest", "--max-time", "10")
+        assert answered.returncode == 0, answered.stderr
+    finally:
+        silent.kill()
+        silent.wait()
