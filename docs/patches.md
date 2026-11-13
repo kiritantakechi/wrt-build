@@ -780,4 +780,4 @@ Why it matters here: coreutils came into the image with luci-app-honk, and with 
 
 What the patch does: the short options `-s TERM -k 5`, which coreutils' timeout and BusyBox's (on by default in OpenWrt's BusyBox, 1.38 here) both take, and no dependency on coreutils-timeout.
 
-Verification log: 2026-11-13, the R4S image has no coreutils, and the reviewed-warnings register check passes with 40 warnings of its kinds (22 fewer). The page's package check on the router: pending.
+Verification log: 2026-11-13, the R4S image has no coreutils, and the reviewed-warnings register check passes with 40 warnings of its kinds (22 fewer). On the emulated R4S, `/usr/bin/timeout` is BusyBox's and ends a command on time with these options (`-s TERM -k 5 2 sleep 10` exits 143 after two seconds), and the page's check, `daeuniverse-pkg check honk`, answers `{ "packages": [ ], "warning": "" }`.
