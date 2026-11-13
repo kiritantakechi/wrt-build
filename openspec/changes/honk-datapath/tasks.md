@@ -38,6 +38,9 @@
 - [ ] 3.5 honk's data directory on the data disk while it is mounted and writable, in RAM otherwise, never on the boot disk; the disk's mount and unmount restart honk onto it and off it (D5). `honk-core check` admits a configuration whose geodata is not there yet, as a start does (D7).
 
   Verify: the storage/data-disk tests of the proxy's state pass on the R4S; the check's unit test of missing geodata fails without the fix and passes with it.
+- [ ] 3.6 honk leaves the network-namespace registry `/run/netns` to the other tools that share it: made a mountpoint as iproute2 and podman make it, never unmounted; a patch meant for upstream with its write-up (D7).
+
+  Verify: honk's root-only unit test of the registry fails without the fix and passes with it; the services/containers test of honk's restart beside the Pods fails on the unpatched honk, and it and the storage/data-disk test of the late mount pass on the R4S.
 
 ## 4. LAN DNS (design D4)
 

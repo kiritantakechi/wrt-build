@@ -722,6 +722,18 @@ What the patch does: `honk-core check` admits the `-c` entry offline as a start 
 
 Verification log: 2026-11-13, honk-core's unit tests on the VM (aarch64 Linux, the tree's host Rust, `--no-default-features --features native-api`): `check::`, `routing::geo::`, `native_api::offline` and `native_api::config`, 185 passed; the test of geodata not there yet failed before the split, refused with `missing-offline-dependency`. On the router: pending.
 
+### honk: the namespace registry, shared
+
+Patch: `feed/net/honk/patches/003-daens-keep-the-namespace-registry-as-other-tools-share-it.patch`, for daeuniverse/honk.
+
+Problem: honk binds its `daens` namespace into `/run/netns`, the registry of named network namespaces that `ip netns` keeps and podman shares for its containers' namespaces. Where the registry was no mountpoint, honk mounted a tmpfs over it, and it unmounted that tmpfs on stop, taking along every namespace registered there while it ran. It judged whether the registry was a mountpoint by comparing the unresolved path with `/proc/mounts`, which lists resolved paths: where `/run` or `/var/run` is a symlink the comparison never matches, so every start mounted another tmpfs over the registry, hiding the namespaces registered before it, and a stale `daens` mount of a run that did not clean up was never detached.
+
+Why it matters here: on OpenWrt `/run` and `/var/run` lead to `/tmp/run`, and honk runs beside the containers on the data disk (honk-datapath D5). On the emulator, honk started after the app Pod stacked a tmpfs on podman's registry (`/proc/self/mountinfo`: podman's `/tmp/run/netns` with the Pod's two nsfs mounts, honk's tmpfs on it), `ls /run/netns` showed `daens` alone, and `podman pod restart` warned `container netns not found: open /run/netns/netns-…: No such file or directory`. Started the other way round, as the data disk's late mount does (honk at boot, then the Pods and honk's restart onto the disk at once), the Pods' namespaces went with honk's tmpfs and the Pod failed to start (`netavark: invalid namespace path`).
+
+What the patch does: the registry is made a mountpoint as iproute2 and podman make it: shared, and where that fails with `EINVAL` because it is none, bound onto itself first, recursively, so that every namespace registered there stays in view. Nothing undoes it. The kernel resolves both the registry's path and the stale `daens` mount's, which is now detached by its path at start whatever it resolves to, so `is_mountpoint()` and its `/proc/mounts` comparison go. A root-only unit test in a private mount and network namespace registers a namespace before the setup, while the registry is no mountpoint, and one during it, and checks that both still name a namespace after the cleanup.
+
+Verification log: 2026-11-13, honk-core's unit tests on the VM (aarch64 Linux, the tree's host Rust, `--no-default-features --features ebpf,native-api`, the build's eBPF object), as root: the registry test failed on the unpatched `daens.rs` (`ENOENT`: the namespace registered before the setup was hidden by the tmpfs) and passes with the patch, as do `daens::`'s other tests. On the router: pending.
+
 ### build: services disabled in the image
 
 Patch: `patches/openwrt/0046-build-disable-the-services-TARGET_DISABLED_SERVICES-.patch`, for openwrt/openwrt.

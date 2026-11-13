@@ -19,7 +19,13 @@ from wrt_tests.model.poll import until
 from wrt_tests.sandbox.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
 from wrt_tests.sandbox.netprobe import HTTP_PORT, PORT
 from wrt_tests.services import app
-from wrt_tests.services.datapath import PROXY_HOOKS_L2, PROXY_NFQUEUE_TABLE, hooks
+from wrt_tests.services.datapath import (
+    PROXY_HOOKS_L2,
+    PROXY_NFQUEUE_TABLE,
+    hooks,
+    proxy_pid,
+    wait_proxy,
+)
 
 if TYPE_CHECKING:
     from wrt_tests.device.router import Router
@@ -88,6 +94,20 @@ def _from_container(pod: Online, host: str, port: int = PORT) -> Seen:
     """Ask a probe server what it sees of a connection from the app container."""
     output = pod.router.run(f"podman exec {app.CONTAINER} nc {host} {port} </dev/null")
     return cast("Seen", json.loads(output))
+
+
+def _netns(router: Router) -> str:
+    """Return where podman registered the app container's network namespace."""
+    return router.run(
+        f"podman inspect --format '{{{{.NetworkSettings.SandboxKey}}}}' {app.CONTAINER}"
+    )
+
+
+def _restart_proxy(router: Router) -> None:
+    """Restart honk; return once the new one serves."""
+    running = proxy_pid(router)
+    router.run("/etc/init.d/honk restart")
+    wait_proxy(router, replacing=running)
 
 
 def _fetch(client: Netns, url: str) -> str | None:
@@ -177,6 +197,22 @@ def test_container_reaches_a_proxied_target(pod: Online) -> None:
     assert hooks(pod.router, "podman0") == PROXY_HOOKS_L2
     assert _from_container(pod, PROXIED_TARGET[0])["address"] == PROXY[0]
     assert _from_container(pod, DIRECT_TARGET[0])["address"] == pod.wan_address
+
+
+@spec(CAPABILITY, "Container traffic uses the transparent proxy", "honk restarts beside the Pods")
+def test_honk_restarts_beside_the_pods(pod: Online) -> None:
+    router = pod.router
+    app.wait_running(router)
+    # Registered before honk started (the module's fixtures start it second).
+    before = _netns(router)
+    _restart_proxy(router)
+    assert router.returncode(f"test -e {before}") == 0, router.run("ls -la /run/netns")
+    # A restarted Pod registers its next one while honk runs.
+    router.run(f"podman pod restart {app.POD}", timeout=app.START_TIMEOUT)
+    app.wait_running(router)
+    during = _netns(router)
+    _restart_proxy(router)
+    assert router.returncode(f"test -e {during}") == 0, router.run("ls -la /run/netns")
 
 
 @spec(CAPABILITY, "Declarative definition and autostart on boot", "Declaration unchanged")
