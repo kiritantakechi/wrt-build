@@ -734,6 +734,18 @@ What the patch does: `TARGET_DISABLED_SERVICES` in "Target Images", passed to `p
 
 Verification log: pending.
 
+### procd: the cgroup of an instance that runs again
+
+Patch: `patches/openwrt/0047-procd-keep-the-cgroup-of-an-instance-that-runs-again.patch`, for openwrt/procd.
+
+Problem: once an instance's process has exited, `instance_exit_done` removes the instance's cgroup and its service's, before it decides whether the instance runs again. A restart (an init script's stop, then a start that comes while the old process is still exiting, which procd turns into a restart of the same instance) and a respawn start the instance again in a cgroup procd creates anew, without what the init script had set on the service's cgroup.
+
+Why it matters here: honk's init pins honk to the big cores through the cpuset of honk's service cgroup and enables the memory controller there for honk's telemetry (honk-datapath D5). On the emulator, after `/etc/init.d/honk restart` with pinning on, `services/honk/cpuset.cpus` read 4-5 while the old honk exited and was empty once the new one ran, on every core (`taskset` 3f).
+
+What the patch does: the cgroups go with the instance only, as `instance_free` already removes them when an instance is deleted. An instance that stopped and stays registered keeps its empty cgroup until it starts again or is deleted, as it already keeps a program attached to it (`instance_set_vrf`).
+
+Verification log: pending.
+
 ### luci-lib-daeuniverse: BusyBox's timeout
 
 Patch: `patches/daeuniverse/0003-luci-lib-daeuniverse-BusyBox-s-timeout-is-enough.patch`, for daeuniverse/openwrt-packages.

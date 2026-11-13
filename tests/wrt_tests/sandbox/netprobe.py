@@ -137,13 +137,16 @@ async def _tcp(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> No
 
 
 async def _http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    while (await reader.readline()).strip():  # the request line and headers
+    method = (await reader.readline()).split(b" ", 1)[0]  # the request line
+    while (await reader.readline()).strip():  # the headers
         pass
     body = _peer(writer)
     head = (
         f"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nContent-Length: {len(body)}\r\n\r\n"
     )
-    writer.write(head.encode() + body)
+    # A HEAD response has the GET's head and no body (RFC 9110, 9.3.2): a health
+    # check that sends HEAD, then GET on the same connection, reads the GET's.
+    writer.write(head.encode() + (b"" if method == b"HEAD" else body))
     await writer.drain()
     writer.close()
     await writer.wait_closed()

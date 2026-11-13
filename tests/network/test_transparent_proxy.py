@@ -31,7 +31,9 @@ from wrt_tests.services.datapath import (
     hooks,
     native_api,
     proxy_config,
+    proxy_pid,
     proxy_start,
+    wait_proxy,
 )
 
 if TYPE_CHECKING:
@@ -49,6 +51,17 @@ BIND_TIMEOUT = 60
 ROUTER_CONNECTIONS = 60
 # A request of the native API that needs a credential.
 NATIVE_API_REQUEST = "/api/v1/dns/cache?name=example.net"
+# honk's programs on the cgroup2 root, by attach type: its sock_ops program,
+# which acts in its own network namespace only, and its socket-identity capture,
+# which records a socket's process and allows every operation.
+CGROUP_PROGRAMS = {
+    ("cgroup_sock_ops", "honk_tcp_passive"),
+    ("cgroup_inet_sock_create", "tproxy_wan_cg_sock_create"),
+    ("cgroup_inet4_connect", "tproxy_wan_cg_connect4"),
+    ("cgroup_inet6_connect", "tproxy_wan_cg_connect6"),
+    ("cgroup_udp4_sendmsg", "tproxy_wan_cg_sendmsg4"),
+    ("cgroup_udp6_sendmsg", "tproxy_wan_cg_sendmsg6"),
+}
 
 
 @pytest.fixture
@@ -56,11 +69,6 @@ def proxy_restored(proxy: Online) -> Iterator[Online]:
     """Put honk back with the test configuration after a test that changes or stops it."""
     yield proxy
     proxy_start(proxy.router)
-
-
-def _pid(router: Router) -> str:
-    """Return the pid of the running honk, or an empty string."""
-    return router.run("pidof honk-core || true")
 
 
 def _luci_session(router: Router) -> str:
@@ -105,17 +113,18 @@ def test_honk_binds_only_the_lan(proxy: Online) -> None:
 
 
 @spec(CAPABILITY, "Bind LAN-side interfaces only", "Check the cgroup programs")
-def test_honk_attaches_only_its_sock_ops_to_the_cgroup(proxy: Online) -> None:
+def test_honk_s_cgroup_programs_leave_the_router_s_sockets_alone(proxy: Online) -> None:
     tree = proxy.router.run("bpftool cgroup tree /sys/fs/cgroup")
-    # bpftool shows a program's name to 15 characters.
-    assert re.search(r"\bsock_ops\b.*\bhonk_tcp_passiv", tree), tree
-    assert "tproxy_wan_cg" not in tree, tree
+    attached = set(re.findall(r"^\d+\s+(\S+)\s+\S+\s+(\S+)\s*$", tree, flags=re.MULTILINE))
+    assert attached == CGROUP_PROGRAMS, tree
+    body = proxy.router.run(f"uclient-fetch -qO- http://{PROXIED_TARGET[0]}:{HTTP_PORT}/")
+    assert json.loads(body)["address"] == proxy.wan_address
 
 
 @spec(CAPABILITY, "Bind LAN-side interfaces only", "Container bridge appears after the proxy")
 def test_container_bridge_is_bound_when_it_appears(proxy: Online) -> None:
     router = proxy.router
-    pid = _pid(router)
+    pid = proxy_pid(router)
     router.run("ip link add podman0 type bridge && ip link set podman0 up")
     try:
         until(
@@ -126,7 +135,7 @@ def test_container_bridge_is_bound_when_it_appears(proxy: Online) -> None:
     finally:
         router.run("ip link del podman0")
     # The bridge going away leaves honk running, on br-lan as before.
-    assert _pid(router) == pid
+    assert proxy_pid(router) == pid
     assert hooks(router, "br-lan") == PROXY_HOOKS_L2
 
 
@@ -203,7 +212,7 @@ def test_luci_save_hot_reloads(proxy_restored: Online) -> None:
     online = proxy_restored
     router = online.router
     session = _luci_session(router)
-    pid = _pid(router)
+    pid = proxy_pid(router)
     # A direct flow runs through the reload: pings every 0.1 s, none may be lost,
     # from before the write until the saved configuration is in effect. nsenter
     # runs ping in its own process: the interrupt reaches ping, which then prints
@@ -235,7 +244,7 @@ def test_luci_save_hot_reloads(proxy_restored: Online) -> None:
         pings.send_signal(signal.SIGINT)
         output, _ = pings.communicate(timeout=60)
     assert " 0% packet loss" in output, output
-    assert _pid(router) == pid
+    assert proxy_pid(router) == pid
     assert hooks(router, "br-lan") == PROXY_HOOKS_L2
 
 
@@ -260,7 +269,7 @@ def test_turning_honk_off_stops_it(proxy_restored: Online) -> None:
     # LuCI's Stop button, then its Start at boot switch.
     _init(router, session, "stop")
     _init(router, session, "disable")
-    until(lambda: not _pid(router), timeout=PROXY_TIMEOUT, what="honk stopped")
+    until(lambda: not proxy_pid(router), timeout=PROXY_TIMEOUT, what="honk stopped")
     until(lambda: not hooks(router, "br-lan"), timeout=PROXY_TIMEOUT, what="honk's programs gone")
     assert router.returncode("/etc/init.d/honk enabled") != 0
 
@@ -285,7 +294,7 @@ def test_health_check_fails_without_honk(proxy_restored: Online) -> None:
     # honk running, but a program missing from a bound interface.
     link = re.findall(r"link_id (\d+)", router.run("bpftool net show dev br-lan"))[0]
     router.run(f"bpftool link detach id {link}")
-    assert _pid(router)
+    assert proxy_pid(router)
     assert router.returncode(HEALTHCHECK) != 0
     router.run("/etc/init.d/honk stop")
     assert router.returncode(HEALTHCHECK) != 0
@@ -306,7 +315,7 @@ def test_the_nfqueue_table_goes_with_honk(proxy_restored: Online) -> None:
     router = proxy_restored.router
     router.run("fw4 -q reload")
     router.run("/etc/init.d/honk stop")
-    until(lambda: not _pid(router), timeout=PROXY_TIMEOUT, what="honk stopped")
+    until(lambda: not proxy_pid(router), timeout=PROXY_TIMEOUT, what="honk stopped")
     assert router.returncode(f"nft list table {PROXY_NFQUEUE_TABLE}") != 0
 
 
@@ -334,13 +343,10 @@ def test_cpu_pinning_takes_the_big_cores(proxy_restored: Online, board: Board) -
     assert cores == list(board.big_cores)
     assert len(cores) < len(capacities)
     big = sum(1 << cpu for cpu in cores)
+    running = proxy_pid(router)
     router.run("uci set honk.config.cpu_pinning=1 && uci commit honk && /etc/init.d/honk restart")
     try:
-        until(
-            lambda: hooks(router, "br-lan") == PROXY_HOOKS_L2,
-            timeout=PROXY_TIMEOUT,
-            what="honk on br-lan",
-        )
+        wait_proxy(router, replacing=running)
         assert int(router.run("taskset -p $(pidof honk-core)").split()[-1], 16) == big
     finally:
         router.run("uci set honk.config.cpu_pinning=0 && uci commit honk")

@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Bind LAN-side interfaces only
-honk SHALL bind only br-lan, plus podman0 and tailscale0 when they exist. honk MUST NOT attach programs to any WAN interface. Its only cgroup program SHALL be its required `sock_ops` program on the cgroup2 root, which acts only on sockets in honk's own network namespace; honk MUST NOT attach cgroup programs that act on the router's own sockets. A bound interface that appears after honk starts SHALL be bound within 60 seconds of appearing, also while honk is still starting or reloading.
+honk SHALL bind only br-lan, plus podman0 and tailscale0 when they exist. honk MUST NOT attach programs to any WAN interface. On the cgroup2 root honk SHALL attach only its `sock_ops` program, which acts only on sockets in honk's own network namespace, and its socket-identity programs, which record the process that owns a socket and allow every socket operation; honk MUST NOT redirect, mark or refuse the router's own sockets. A bound interface that appears after honk starts SHALL be bound within 60 seconds of appearing, also while honk is still starting or reloading.
 
 #### Scenario: Check programs on each interface
 - **WHEN** honk is running and the BPF programs attached to br-lan and pppoe-wan are inspected
@@ -9,7 +9,7 @@ honk SHALL bind only br-lan, plus podman0 and tailscale0 when they exist. honk M
 
 #### Scenario: Check the cgroup programs
 - **WHEN** honk is running and the BPF programs attached to the cgroup2 root are inspected
-- **THEN** honk's only program there is its `sock_ops` program, and none of its `sock_create`, `connect` or `sendmsg` programs is attached
+- **THEN** honk's programs there are its `sock_ops` program and its socket-identity programs on socket creation, `connect` and `sendmsg`, and nothing else; the router's own connections go out direct
 
 #### Scenario: Container bridge appears after the proxy
 - **WHEN** honk is already running and only then podman0 is created

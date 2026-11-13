@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Fri, 13 Nov 2026 17:00:00 +0800
+Subject: [PATCH] procd: keep the cgroup of an instance that runs again
+
+procd removed an instance's cgroup, and its service's, as soon as the
+instance's process had exited, before it started the instance again for
+a restart or a respawn. What the init script had set on the service's
+cgroup went with it: honk's init pins honk to the big cores through the
+cpuset of honk's service cgroup, and after `/etc/init.d/honk restart`
+honk ran on every core, in a services/honk procd had just created
+(seen on the emulator: cpuset.cpus 4-5 while the old honk exited, empty
+once the new one ran).
+
+Carry the procd patch that removes the cgroups only with the instance,
+as instance_free already does. It is meant for procd upstream.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ package/system/procd/Makefile                 |  2 +-
+ ...group-of-an-instance-that-runs-again.patch | 35 +++++++++++++++++++
+ 2 files changed, 36 insertions(+), 1 deletion(-)
+ create mode 100644 package/system/procd/patches/102-instance-keep-the-cgroup-of-an-instance-that-runs-again.patch
+
+diff --git a/package/system/procd/Makefile b/package/system/procd/Makefile
+index 8e383114..9a66dd56 100644
+--- a/package/system/procd/Makefile
++++ b/package/system/procd/Makefile
+@@ -8,7 +8,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=procd
+-PKG_RELEASE:=5
++PKG_RELEASE:=6
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/procd.git
+diff --git a/package/system/procd/patches/102-instance-keep-the-cgroup-of-an-instance-that-runs-again.patch b/package/system/procd/patches/102-instance-keep-the-cgroup-of-an-instance-that-runs-again.patch
+new file mode 100644
+index 00000000..3862c8b3
+--- /dev/null
++++ b/package/system/procd/patches/102-instance-keep-the-cgroup-of-an-instance-that-runs-again.patch
+@@ -0,0 +1,35 @@
++From: kiritantakechi <kiritantakechi@gmail.com>
++Subject: [PATCH] instance: keep the cgroup of an instance that runs again
++
++When an instance's process has exited, instance_exit_done removed the
++instance's cgroup and then its service's, before it decided whether the
++instance runs again. A restart (an init script's stop, then a start
++that comes while the old process is still exiting) and a respawn start
++the instance again in a cgroup procd creates anew, and what the init
++script set on its service's cgroup is gone: a cpuset that pins the
++service, the controllers enabled for its instances.
++
++Remove the cgroups only with the instance, as instance_free already
++does when an instance is deleted. An instance that stopped and stays
++registered keeps its empty cgroup, as it keeps a program attached to
++it (instance_set_vrf), until it starts again or is deleted.
++
++Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
++---
++ service/instance.c | 3 ---
++ 1 file changed, 3 deletions(-)
++
++diff --git a/service/instance.c b/service/instance.c
++index 9c64406..0847c32 100644
++--- a/service/instance.c
+++++ b/service/instance.c
++@@ -1423,9 +1423,6 @@ instance_exit_done(struct service_instance *in)
++ 	if (in->proc.pending)
++ 		return;
++ 
++-	if (in->has_cgroup)
++-		instance_rmdir_cgroup(in->srv->name, in->name);
++-
++ 	runtime = in->stop.tv_sec - in->start.tv_sec;
++ 
++ 	if (in->halt) {

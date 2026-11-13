@@ -28,8 +28,7 @@ from wrt_tests.services.datapath import (
     NATIVE_API,
     NATIVE_API_TOKEN,
     PROXY_CONFIG,
-    PROXY_HOOKS_L2,
-    hooks,
+    wait_proxy,
 )
 from wrt_tests.services.vpn import HEADSCALE_URL, clear, key_pair, preauth_key
 
@@ -423,7 +422,7 @@ def test_the_configuration_survives_an_upgrade(pushed: Pushed, upgrade_image: Pa
     assert router.run("uci get network.wg0.private_key") == pushed.wireguard_key
     assert _proxy_sha256(router) == hashlib.sha256(PROXY_CONFIG.encode()).hexdigest()
     assert router.returncode("/etc/init.d/honk enabled") == 0
-    until(lambda: hooks(router, "br-lan") == PROXY_HOOKS_L2, timeout=120, what="honk on br-lan")
+    wait_proxy(router)
     until(lambda: _tailscale_running(router), timeout=TAILSCALE_TIMEOUT, what="tailscale up")
     assert router.run("tailscale ip -4") == tailnet_address
     assert router.returncode(f"grep -q '^{SHARE_USER['name']}:' /etc/ksmbd/ksmbdpwd.db") == 0

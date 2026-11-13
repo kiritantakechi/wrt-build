@@ -27,9 +27,14 @@ lock_sha256() (
 	echo "${sum%% *}"
 )
 
+# lock_names: every source's name, in lock order.
+lock_names() (
+	awk '/^[[:space:]]*(#|$)/ { next } { print $1 }' "${LOCK_FILE}"
+)
+
 # lock_feeds: feed names in lock order (everything except openwrt itself).
 lock_feeds() (
-	awk '/^[[:space:]]*(#|$)/ { next } $1 != "openwrt" { print $1 }' "${LOCK_FILE}"
+	lock_names | awk '$1 != "openwrt"'
 )
 
 # fetch_locked <name> <dir>: make the pinned commit of <name> available in <dir>,

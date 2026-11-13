@@ -36,7 +36,7 @@ from wrt_tests.device.storage import (
 from wrt_tests.model.poll import until
 from wrt_tests.sandbox.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
 from wrt_tests.services import app
-from wrt_tests.services.datapath import PROXY_HOOKS_L2, PROXY_TIMEOUT, hooks
+from wrt_tests.services.datapath import PROXY_TIMEOUT, wait_proxy
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -63,7 +63,10 @@ HEALTHCHECK = (
 HEALTH = "/var/run/wrt-healthcheck.json"
 # honk's state database, in its data directory on the data disk or in RAM
 # (/var/lib/honk, which the kernel names by /var's target, /tmp).
-PROXY_STATE = {"data disk": f"{MOUNT}/honk/state/honk.db", "RAM": "/tmp/lib/honk/state/honk.db"}
+PROXY_STATE = {
+    "data disk": f"{MOUNT}/honk/state/honk.db",
+    "RAM": "/tmp/lib/honk/state/honk.db",  # noqa: S108 (a path on the router)
+}
 
 
 @pytest.fixture(scope="module")
@@ -115,12 +118,13 @@ def _proxy_state(router: Router) -> str | None:
 
 
 def _proxy_on(router: Router, place: str) -> None:
-    """Wait until honk runs on br-lan with its state in ``place``."""
+    """Wait until a honk with its state in ``place`` has set up its datapath."""
     until(
-        lambda: _proxy_state(router) == place and hooks(router, "br-lan") == PROXY_HOOKS_L2,
+        lambda: _proxy_state(router) == place,
         timeout=PROXY_TIMEOUT,
-        what=f"honk on br-lan with its state in {place}",
+        what=f"honk with its state in {place}",
     )
+    wait_proxy(router)
 
 
 def _kept(router: Router) -> dict[str, list[str]]:

@@ -18,7 +18,7 @@
 // commands it runs report on standard error: standard output is the hashes'.
 'use strict';
 
-import { glob, lsdir, lstat, mkdir, open, popen, readfile, stat } from 'fs';
+import { glob, lsdir, lstat, mkdir, open, popen, readfile, stat, writefile } from 'fs';
 import * as ubus from 'ubus';
 import { cursor } from 'uci';
 

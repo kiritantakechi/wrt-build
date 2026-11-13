@@ -11,7 +11,7 @@ Two open honk bugs would break the router as it stands: with `lan_interface` set
 - **BREAKING**: dae, its uci configuration `dae`, `/etc/dae` and `luci-app-dae` are removed; honk takes their place as `honk`, `/etc/honk/config.dae` (dae syntax) and the LuCI page `luci-app-honk`. Nothing migrates: after the upgrade, config-push writes honk's configuration.
 - **BREAKING**: the private config repository holds honk's configuration as `honk/*.dae.enc` instead of `dae/*.dae.enc`.
 - honk is built from source: its userspace crates with the Rust of the build tree, raised to the version honk requires; its eBPF object for `bpfel-unknown-none` with the same rustc and a bpf-linker built from source against the same LLVM; doona, its web UI, from source with the Node that `flake.nix` pins, embedded through honk's `native-ui` feature.
-- honk binds the LAN side only: br-lan, podman0 and tailscale0 are listed up front and bound when they appear, as honk binds interfaces lazily; no hotplug rebind is needed. honk attaches nothing to a WAN interface and no cgroup hook that steers the router's own traffic; it does attach its required `sock_ops` program to the cgroup2 root, which acts only on sockets in its own namespace.
+- honk binds the LAN side only: br-lan, podman0 and tailscale0 are listed up front and bound when they appear, as honk binds interfaces lazily; no hotplug rebind is needed. honk attaches nothing to a WAN interface and no cgroup hook that steers the router's own traffic; on the cgroup2 root it attaches its `sock_ops` program, which acts only on sockets in its own namespace, and its socket-identity capture, which only records a socket's process.
 - LAN DNS keeps dnsmasq: the firmware's part of honk's configuration sends DNS addressed to private addresses natively, so dnsmasq (and podman's aardvark-dns) answer it, and dnsmasq forwards external names to honk's DNS listener on 127.0.0.1:5353.
 - Fixes in honk, as patches meant for upstream: LAN connections to the router's own addresses are delivered (#456); a reload does not end the process over NFQUEUE (#476); a `check` subcommand validates a configuration without applying it.
 - The LuCI page comes from daeuniverse's OpenWrt feed (`luci-app-honk` on `luci-lib-daeuniverse`), pinned in `upstream.lock` as a fourth upstream with its own patch series; honk's package itself is ours, as dae's was.
@@ -27,7 +27,7 @@ None.
 
 ### Modified Capabilities
 
-- `network/transparent-proxy`: honk instead of dae; its required cgroup `sock_ops` program is allowed, nothing that steers the router's own traffic; the router's own services stay reachable from bound interfaces; configuration through the official LuCI page with its start-at-boot switch; doona through the native API in token mode; the health check.
+- `network/transparent-proxy`: honk instead of dae; its cgroup `sock_ops` program and socket-identity capture are allowed, nothing that steers the router's own traffic; the router's own services stay reachable from bound interfaces; configuration through the official LuCI page with its start-at-boot switch; doona through the native API in token mode; the health check.
 - `network/dns`: honk's DNS listener; DNS to private addresses, the router's included, is answered natively.
 - `network/tc-hook-order`: only honk's programs on the LAN-side interfaces and their bridge ports; honk's marks and nftables table registered.
 - `ops/config-push`: honk's configuration, validated with honk's own check; honk's user configuration cannot set its interfaces.

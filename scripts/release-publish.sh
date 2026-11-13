@@ -112,8 +112,6 @@ built_lock=$(jq -r .upstream_lock_sha256 "${signed}/${first}/manifest.json")
 [ "${checkout_lock}" = "${built_lock}" ] ||
 	die "the checkout's upstream.lock is not the one the builds were made from"
 openwrt=$(lock_field openwrt sha)
-packages=$(lock_field packages sha)
-luci=$(lock_field luci sha)
 today=$(date -u +%Y%m%d)
 short=$(printf %.7s "${openwrt}")
 tag="r${today}-${short}-${run}"
@@ -135,12 +133,17 @@ mv "${work}/sums" "${release}/SHA256SUMS"
 notes="${work}/notes.md"
 patches_sha256=$(jq -r .patches_sha256 "${signed}/${first}/manifest.json")
 kernel=$(jq -r .kernel_version "${signed}/${first}/manifest.json")
+# Every source the lock pins, in its order.
+sources=$(
+	lock_names | while read -r name; do
+		sha=$(lock_field "${name}" sha)
+		printf -- "- %s \`%s\`\n" "${name}" "${sha}"
+	done
+)
 cat >"${notes}" <<NOTES
 Built from these upstream commits (upstream.lock):
 
-- openwrt \`${openwrt}\`
-- packages \`${packages}\`
-- luci \`${luci}\`
+${sources}
 
 Patch queue: \`${patches_sha256}\` (sha256 of patches/)
 Kernel: \`${kernel}\`

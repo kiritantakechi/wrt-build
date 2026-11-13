@@ -416,14 +416,36 @@ def _part(title: str, read: Callable[[], str | None]) -> str:
     return f"--- {title}\n{'(no answer)' if shown is None else shown}"
 
 
+def proxy_pid(router: Router) -> str:
+    """Return the pid of the running honk, or an empty string."""
+    return router.run("pidof honk-core || true")
+
+
+def wait_proxy(router: Router, *, replacing: str = "") -> None:
+    """Wait until one honk, not the process ``replacing``, has set up its datapath.
+
+    That is its programs on br-lan and, the last of its start, its NFQUEUE table:
+    a honk that is stopping keeps its programs on br-lan for a while, and a new
+    one installs its table a moment after its programs.
+    """
+
+    def up() -> bool:
+        pid = proxy_pid(router)
+        return (
+            pid not in {"", replacing}
+            and " " not in pid
+            and hooks(router, "br-lan") == PROXY_HOOKS_L2
+            and router.returncode(f"nft list table {PROXY_NFQUEUE_TABLE} >/dev/null") == 0
+        )
+
+    until(up, timeout=PROXY_TIMEOUT, what="honk's datapath on br-lan")
+
+
 def proxy_start(router: Router, config: str = PROXY_CONFIG) -> None:
-    """Install ``config`` as honk's configuration, enable honk and wait for it on br-lan."""
+    """Install ``config`` as honk's configuration, enable honk and restart it; wait for it."""
+    running = proxy_pid(router)
     router.run(
         f"umask 077 && printf %s {shlex.quote(config)} >/etc/honk/config.dae"
         " && /etc/init.d/honk enable && /etc/init.d/honk restart"
     )
-    until(
-        lambda: hooks(router, "br-lan") == PROXY_HOOKS_L2,
-        timeout=PROXY_TIMEOUT,
-        what="honk on br-lan",
-    )
+    wait_proxy(router, replacing=running)
