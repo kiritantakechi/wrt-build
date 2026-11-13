@@ -9,6 +9,7 @@ import json
 import re
 import signal
 import subprocess
+import sys
 import time
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, cast
@@ -49,6 +50,15 @@ BIND_TIMEOUT = 60
 # The LAN connections to the router that must all be accepted: one a second for
 # a minute (honk #456 refused some of them).
 ROUTER_CONNECTIONS = 60
+# A domain the rules send through the proxy: it keeps every new direct UDP
+# flow's route open until honk has seen the flow's first packet, which waits in
+# honk's queue meanwhile, as with any configuration that routes by domain.
+PROXIED_DOMAIN = "example.org"
+# New UDP flows a second while the firewall reloads, and the reloads: a reload
+# drops the packets waiting in honk's queue (any netfilter hook unregistered
+# flushes every queue), and a verdict for one of them ended honk (honk #476).
+NEW_FLOWS = 200
+FIREWALL_RELOADS = 15
 # A request of the native API that needs a credential.
 NATIVE_API_REQUEST = "/api/v1/dns/cache?name=example.net"
 # honk's programs on the cgroup2 root, by attach type: its sock_ops program,
@@ -306,6 +316,45 @@ def test_the_nfqueue_table_outlives_a_firewall_reload(proxy: Online) -> None:
     before = router.run(f"nft list table {PROXY_NFQUEUE_TABLE}")
     router.run("fw4 -q reload")
     assert router.run(f"nft list table {PROXY_NFQUEUE_TABLE}") == before
+
+
+def _queued(router: Router) -> int:
+    """Return how many packets honk's queue has taken (its id sequence)."""
+    return int(router.run("awk '$1 == 320 { print $8 }' /proc/net/netfilter/nfnetlink_queue"))
+
+
+@spec(
+    CAPABILITY,
+    "honk's netfilter hook outlives firewall reloads",
+    "Reload the firewall while flows wait for honk",
+)
+def test_honk_decides_on_through_firewall_reloads(proxy_restored: Online) -> None:
+    online = proxy_restored
+    router = online.router
+    proxy_start(router, proxy_config(domains=(PROXIED_DOMAIN,)))
+    running = proxy_pid(router)
+    queued = _queued(router)
+    seconds = str(FIREWALL_RELOADS * 10)
+    flows = subprocess.Popen(
+        online.client().argv(
+            sys.executable,
+            "-m",
+            "wrt_tests.sandbox.netprobe",
+            "flows",
+            DIRECT_TARGET[0],
+            *("--rate", str(NEW_FLOWS), "--seconds", seconds),
+        ),
+        stdout=subprocess.DEVNULL,
+    )
+    try:
+        for _ in range(FIREWALL_RELOADS):
+            router.run("fw4 -q reload")
+    finally:
+        flows.terminate()
+        flows.wait()
+    assert _queued(router) > queued, "no flow waited for honk's decision"
+    assert proxy_pid(router) == running
+    assert online.client().probe("udp", DIRECT_TARGET[0])["address"] == online.wan_address
 
 
 @spec(

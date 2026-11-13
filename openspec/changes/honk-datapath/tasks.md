@@ -59,12 +59,12 @@
 
 ## 6. honk #476: a reload keeps honk running (design D7)
 
-- [ ] 6.1 Make the LuCI-save test require the same honk process after the reload, and reproduce #476 on the emulator; pin the mechanism.
+- [ ] 6.1 Make the LuCI-save test require the same honk process after the reload, and reproduce #476 on the emulator; pin the mechanism. The transparent-proxy test of firewall reloads while flows wait for honk's decision (D7: the kernel drops the queued packets, and honk took its answer to their verdicts for a protocol failure).
 
-  Verify: the test fails on the unpatched honk, with the mechanism recorded in the patch's write-up.
+  Verify: the test fails on the unpatched honk, with the mechanism recorded in the patch's write-up; honk-nfqueue's unit test and root-only kernel test of a verdict for a dropped packet fail without the fix.
 - [ ] 6.2 Fix it in honk, a patch meant for upstream with its write-up.
 
-  Verify: the LuCI-save test passes on both boards, ten reloads in a row keeping the process.
+  Verify: the LuCI-save test and the test of firewall reloads while flows wait pass on both boards, ten reloads in a row keeping the process; honk-nfqueue's tests pass.
 
 ## 7. The LuCI pages from daeuniverse's feed (design D1, D8)
 

@@ -90,10 +90,16 @@ RENEW_INTERVAL = 30.0
 PROXIED = (*PROXIED_TARGET, RELEASES[1])
 
 
-def proxy_config(proxied: Sequence[str] = PROXIED) -> str:
-    """Return honk's test configuration, with ``proxied`` (addresses) through the proxy."""
+def proxy_config(proxied: Sequence[str] = PROXIED, domains: Sequence[str] = ()) -> str:
+    """Return honk's test configuration, with ``proxied`` (addresses) through the proxy.
+
+    ``domains`` (and their subdomains) go through the proxy too. A domain rule
+    leaves the route of a new direct UDP flow open until honk has seen its first
+    packet, which waits in honk's queue (NFQUEUE) for honk's decision.
+    """
     addresses = ", ".join(f"'{address}'" if ":" in address else address for address in proxied)
-    rule = f"dip({addresses}) -> proxy\n    " if proxied else ""
+    rule = "".join(f"domain(suffix: {domain}) -> proxy\n    " for domain in domains)
+    rule += f"dip({addresses}) -> proxy\n    " if proxied else ""
     return f"""\
 global {{
     log_level: debug

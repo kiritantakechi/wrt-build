@@ -734,6 +734,18 @@ What the patch does: the registry is made a mountpoint as iproute2 and podman ma
 
 Verification log: 2026-11-13, honk-core's unit tests on the VM (aarch64 Linux, the tree's host Rust, `--no-default-features --features ebpf,native-api`, the build's eBPF object), as root: the registry test failed on the unpatched `daens.rs` (`ENOENT`: the namespace registered before the setup was hidden by the tmpfs) and passes with the patch, as do `daens::`'s other tests. On the router: pending.
 
+### honk: a verdict for a packet no longer queued
+
+Patch: `feed/net/honk/patches/004-nfqueue-a-verdict-for-a-packet-no-longer-queued-ends-nothing.patch`, for daeuniverse/honk.
+
+Problem: honk sends its NFQUEUE verdicts on the queue's socket, where its listener reads, without asking for acknowledgements, and the kernel answers a verdict there only when it fails. The listener took every message but a queued packet for a protocol failure, so the kernel's answer to a verdict whose packet it had already dropped ended the listener and honk with it: `NFQUEUE listener failed: unexpected netfilter netlink message type 2` (honk #476). The kernel drops queued packets on its own: every packet of every queue whenever any netfilter hook of the namespace is unregistered (`nfqnl_nf_hook_drop` flushes them all, Linux 6.18), as a firewall replacing its table does, and those of a device that goes down; a verdict that comes after finds no packet (`ENOENT`).
+
+Why it matters here: fw4 reloads its table on every firewall change and interface event, and honk queues the first packet of every new direct UDP flow whose route a domain rule could still change, as with any configuration that routes by domain. On the emulator, with 200 new UDP flows a second to a direct target and a domain rule, fifteen `fw4 reload`s ended honk four times; procd respawned it until its respawn limit, then left it down. A reload of honk itself (SIGHUP) did not end it there.
+
+What the patch does: the listener reads an answer to a verdict as what it is. `ENOENT` says the packet is gone and nothing is left to decide; any other refusal of a verdict, or an answer to anything else, stays fatal and now names the error (`VerdictRefused`). The verdict message type gets its name, `NFQNL_MSG_VERDICT`, where verdicts are built. A unit test dispatches the kernel's answers (an `ENOENT` for a verdict, then a queued packet; `EPERM`, an acknowledgement and an answer to a configuration message); a root-only kernel test in a network namespace of its own holds a queued packet's verdict, brings the loopback device down, sends the verdict and checks that the listener goes on serving. Both fail without the change.
+
+Verification log: 2026-11-13, honk-nfqueue's tests on the VM (aarch64 Linux, the tree's host Rust): 29 unit tests pass, the new one failing without the change (the answer ended the dispatch); as root, both kernel tests pass, the new one failing on the unpatched listener with `UnexpectedMessage { message_type: 2 }`. On the emulated R4S, with 200 new UDP flows a second waiting for honk's decision (a domain rule): unpatched, fifteen `fw4 reload`s ended honk four times (`NFQUEUE listener failed: unexpected netfilter netlink message type 2`) and procd's respawn limit then left it down through fifteen honk reloads; patched, the same honk process ran through fifteen `fw4 reload`s and fifteen honk reloads, its queue bound after each. The transparent-proxy test of firewall reloads while flows wait for honk: pending.
+
 ### build: services disabled in the image
 
 Patch: `patches/openwrt/0046-build-disable-the-services-TARGET_DISABLED_SERVICES-.patch`, for openwrt/openwrt.

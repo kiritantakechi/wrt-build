@@ -23,7 +23,8 @@ the port it sent one from; ``resolve`` the answers of a DNS server;
 ``solicit-prefix`` what a DHCPv6 server offers for prefix delegation;
 ``solicit-router`` that it asked the routers on a link for an advertisement, as a
 host does when it attaches; ``inject`` the size of the Ethernet frame it put on
-a segment, bypassing routing (a spoofed packet).
+a segment, bypassing routing (a spoofed packet); ``flows`` how many new UDP flows
+it started, one datagram each, at a steady rate.
 """
 
 import argparse
@@ -35,6 +36,7 @@ import os
 import socket
 import struct
 import sys
+import time
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
@@ -272,6 +274,19 @@ def udp(host: str, port: int, *, source_port: int = 0, big: bool = False) -> See
     return _decode(data) | {"size": len(data), "from": source}
 
 
+def flows(host: str, port: int, *, rate: float, seconds: float) -> Seen:
+    """Start ``rate`` new UDP flows a second for ``seconds``: a datagram from a socket each."""
+    family = _family(host)
+    start = time.monotonic()
+    sent = 0
+    while time.monotonic() < start + seconds:
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
+            sock.sendto(b"whoami", (host, port))
+        sent += 1
+        time.sleep(max(0.0, start + sent / rate - time.monotonic()))
+    return {"sent": sent}
+
+
 def esp(host: str, spi: int) -> Seen:
     """Send one ESP packet with ``spi`` and return what the server saw."""
     with socket.socket(_family(host), socket.SOCK_RAW, socket.IPPROTO_ESP) as sock:
@@ -456,6 +471,14 @@ def main() -> None:
         port,
         ("--source-port", {"type": int, "default": 0}),
         ("--big", {"action": "store_true"}),
+    )
+    command(
+        "flows",
+        lambda a: flows(a.host, a.port, rate=a.rate, seconds=a.seconds),
+        host,
+        port,
+        ("--rate", {"type": float, "required": True}),
+        ("--seconds", {"type": float, "required": True}),
     )
     command(
         "esp",

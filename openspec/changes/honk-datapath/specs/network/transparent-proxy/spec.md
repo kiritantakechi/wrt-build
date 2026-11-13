@@ -96,11 +96,15 @@ honk's web UI SHALL be served only through honk's native API, and only in static
 - **THEN** it gets no response
 
 ### Requirement: honk's netfilter hook outlives firewall reloads
-honk's own nftables table SHALL stay in place, unchanged, through every reload of the firewall while honk runs, and SHALL be gone once honk has stopped.
+honk's own nftables table SHALL stay in place, unchanged, through every reload of the firewall while honk runs, and SHALL be gone once honk has stopped. A firewall reload drops the packets waiting in honk's queue for its decision; honk SHALL keep running and deciding through it.
 
 #### Scenario: Reload the firewall
 - **WHEN** honk runs and the firewall reloads
 - **THEN** honk's nftables table is still there with the same rules
+
+#### Scenario: Reload the firewall while flows wait for honk
+- **WHEN** new UDP flows wait in honk's queue for its decision and the firewall reloads again and again
+- **THEN** the same honk process runs on, and a new UDP flow still goes direct
 
 #### Scenario: Stop the proxy after a reload
 - **WHEN** the firewall has reloaded and honk is then stopped

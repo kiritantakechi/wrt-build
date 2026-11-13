@@ -1,0 +1,334 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Fri, 13 Nov 2026 12:00:00 +0800
+Subject: [PATCH] nfqueue: a verdict for a packet no longer queued ends nothing
+
+honk sends its verdicts on the queue's socket, where the listener
+reads, without asking for acknowledgements: the kernel answers a
+verdict there only when it fails. The listener took any message but a
+queued packet for a protocol failure, so the kernel's answer to a
+verdict whose packet it had already dropped ended the listener
+("unexpected netfilter netlink message type 2", the error of #476).
+
+The kernel drops queued packets on its own: those of a device that
+goes down, and every queued packet of the network namespace whenever a
+netfilter hook there is unregistered, as when a firewall replaces its
+table (nfqnl_nf_hook_drop flushes every queue). A verdict that comes
+after such a drop finds no packet, and the kernel answers ENOENT.
+
+Read an answer to a verdict as what it is: ENOENT says that the packet
+is gone and nothing is left to decide. Any other refusal of a verdict,
+or an answer to anything else, stays fatal, now naming the error.
+NFQNL_MSG_VERDICT gets its name where verdicts are built.
+
+A unit test dispatches the kernel's answers; a root-only kernel test
+holds a queued packet's verdict, brings its device down, sends the
+verdict and checks that the listener goes on serving. Both fail without
+the change.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ crates/honk-nfqueue/src/kernel_tests.rs |  87 ++++++++++++++++++-
+ crates/honk-nfqueue/src/lib.rs          |   2 +
+ crates/honk-nfqueue/src/queue.rs        | 108 +++++++++++++++++++++++-
+ crates/honk-nfqueue/src/verdict.rs      |   3 +-
+ 4 files changed, 194 insertions(+), 6 deletions(-)
+
+diff --git a/crates/honk-nfqueue/src/kernel_tests.rs b/crates/honk-nfqueue/src/kernel_tests.rs
+index 1e57042..32fa8b2 100644
+--- a/crates/honk-nfqueue/src/kernel_tests.rs
++++ b/crates/honk-nfqueue/src/kernel_tests.rs
+@@ -79,7 +79,7 @@ fn nfqueue_service_isolated_netns_kernel_contract() {
+                 "unshare(CLONE_NEWNET): {}",
+                 io::Error::last_os_error()
+             );
+-            configure_loopback();
++            set_loopback(true);
+             exercise_kernel_contract(&runtime);
+         })
+         .expect("spawn isolated netns test")
+@@ -87,6 +87,80 @@ fn nfqueue_service_isolated_netns_kernel_contract() {
+         .expect("isolated netns test panicked");
+ }
+ 
++/// The kernel drops the queued packets of a device that goes down, and
++/// answers a verdict for one of them with an error on the queue's socket,
++/// where the listener reads; the listener goes on serving.
++#[test]
++#[ignore = "requires root; run via just test-netns"]
++fn a_verdict_for_a_packet_the_kernel_dropped_leaves_the_listener_serving() {
++    if unsafe { libc::geteuid() } != 0 {
++        eprintln!("skipping: requires root");
++        return;
++    }
++
++    std::thread::Builder::new()
++        .name("honk-nfq-dropped-test".into())
++        .spawn(|| {
++            let result = unsafe { libc::unshare(libc::CLONE_NEWNET) };
++            assert_eq!(
++                result,
++                0,
++                "unshare(CLONE_NEWNET): {}",
++                io::Error::last_os_error()
++            );
++            set_loopback(true);
++            let (guard_tx, guards) = mpsc::channel();
++            let callback: PacketCallback = Arc::new(move |_, guard| {
++                guard_tx.send(guard).expect("held verdict receiver");
++            });
++            let (service, mut fatal) =
++                NfqueueService::start(callback).expect("start production NFQUEUE");
++            let receiver = marked_receiver("127.0.0.1:0".parse().unwrap());
++            let client = marked_client("127.0.0.1:0".parse().unwrap());
++            client
++                .connect(receiver.local_addr().unwrap())
++                .expect("connect IPv4 client");
++
++            client.send(b"dropped").expect("send marked UDP datagram");
++            let mut dropped = guards
++                .recv_timeout(Duration::from_secs(3))
++                .expect("the datagram is queued");
++            set_loopback(false);
++            dropped
++                .accept(FINAL_MARK)
++                .expect("a verdict for a dropped packet still sends");
++            drop(dropped);
++            // The kernel's answer is the listener's next message.
++            std::thread::sleep(Duration::from_millis(250));
++            match fatal.try_recv() {
++                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
++                ended => panic!(
++                    "a verdict for a packet the kernel dropped ended the listener: {ended:?}"
++                ),
++            }
++
++            set_loopback(true);
++            client.send(b"served").expect("send marked UDP datagram");
++            let mut served = guards
++                .recv_timeout(Duration::from_secs(3))
++                .expect("the listener still serves the queue");
++            served.accept(FINAL_MARK).expect("accept the next datagram");
++            receiver
++                .set_read_timeout(Some(Duration::from_secs(2)))
++                .unwrap();
++            let mut received = [0u8; 16];
++            let size = receiver
++                .recv(&mut received)
++                .expect("an accepted datagram is delivered");
++            assert_eq!(&received[..size], b"served");
++            drop(served);
++            service.shutdown().expect("clean NFQUEUE shutdown");
++        })
++        .expect("spawn isolated netns test")
++        .join()
++        .expect("isolated netns test panicked");
++}
++
+ fn exercise_kernel_contract(runtime: &tokio::runtime::Runtime) {
+     assert!(
+         !owned_table_exists(),
+@@ -438,7 +512,7 @@ fn assert_no_delivery(socket: &UdpSocket, timeout: Duration) {
+     );
+ }
+ 
+-fn configure_loopback() {
++fn set_loopback(up: bool) {
+     let interface = unsafe { libc::if_nametoindex(c"lo".as_ptr()) };
+     assert_ne!(
+         interface,
+@@ -456,12 +530,17 @@ fn configure_loopback() {
+     request.extend_from_slice(&[0, 0]);
+     request.extend_from_slice(&0u16.to_ne_bytes());
+     request.extend_from_slice(&(interface as i32).to_ne_bytes());
+-    request.extend_from_slice(&IFF_UP.to_ne_bytes());
++    request.extend_from_slice(&(if up { IFF_UP } else { 0 }).to_ne_bytes());
+     request.extend_from_slice(&IFF_UP.to_ne_bytes());
+     let request_length = request.len() as u32;
+     request[..4].copy_from_slice(&request_length.to_ne_bytes());
+     netlink::send(socket.as_raw_fd(), &request).expect("RTM_NEWLINK request");
+-    expect_ack(socket.as_raw_fd(), 1, "bring loopback up");
++    let operation = if up {
++        "bring loopback up"
++    } else {
++        "bring loopback down"
++    };
++    expect_ack(socket.as_raw_fd(), 1, operation);
+ }
+ 
+ fn expect_ack(fd: RawFd, sequence: u32, operation: &str) {
+diff --git a/crates/honk-nfqueue/src/lib.rs b/crates/honk-nfqueue/src/lib.rs
+index 75f465e..18d0a61 100644
+--- a/crates/honk-nfqueue/src/lib.rs
++++ b/crates/honk-nfqueue/src/lib.rs
+@@ -105,6 +105,8 @@ pub enum FatalError {
+     ListenerPanicked,
+     #[error("NFQUEUE verdict socket failed: {error}")]
+     VerdictSocket { error: String },
++    #[error("the kernel refused an NFQUEUE verdict: {error}")]
++    VerdictRefused { error: String },
+ }
+ 
+ #[derive(Debug, thiserror::Error)]
+diff --git a/crates/honk-nfqueue/src/queue.rs b/crates/honk-nfqueue/src/queue.rs
+index 5954a0e..b30fc03 100644
+--- a/crates/honk-nfqueue/src/queue.rs
++++ b/crates/honk-nfqueue/src/queue.rs
+@@ -9,7 +9,7 @@ use bytes::{Bytes, BytesMut};
+ 
+ use crate::netlink;
+ use crate::packet;
+-use crate::verdict::{GuardTracker, VerdictGuard};
++use crate::verdict::{GuardTracker, NFQNL_MSG_VERDICT, VerdictGuard};
+ use crate::{
+     COPY_RANGE, FatalError, FatalNotifier, MAX_DATAGRAM_SIZE, PacketCallback, QUEUE_MAXLEN,
+     QUEUE_NUM, SO_RCVBUF_SIZE,
+@@ -258,6 +258,10 @@ fn dispatch_datagram(
+         let message = message.map_err(|error| FatalError::MalformedMessage {
+             error: error.to_string(),
+         })?;
++        if message.message_type == netlink::NLMSG_ERROR {
++            verdict_answer(&message)?;
++            continue;
++        }
+         let expected_type = (netlink::NFNL_SUBSYS_QUEUE << 8) | NFQA_MSG_PACKET;
+         if message.message_type != expected_type {
+             return Err(FatalError::UnexpectedMessage {
+@@ -291,6 +295,33 @@ fn dispatch_datagram(
+     Ok(())
+ }
+ 
++/// The kernel answers a verdict on the queue's socket, where the listener
++/// reads, only when it fails: verdicts ask for no acknowledgement. ENOENT
++/// says that the packet is no longer queued: the kernel dropped it before its
++/// verdict came, as it drops the queued packets of a device that goes down,
++/// and nothing is left to decide. Any other answer is fatal.
++fn verdict_answer(message: &netlink::Message) -> Result<(), FatalError> {
++    // struct nlmsgerr: the error, then the header of the request it answers.
++    let Some(answer) = message.body.get(..4 + netlink::NLMSG_HDRLEN) else {
++        return Err(FatalError::MalformedMessage {
++            error: "truncated NLMSG_ERROR".into(),
++        });
++    };
++    let error = i32::from_ne_bytes(answer[..4].try_into().expect("four bytes"));
++    let request_type = u16::from_ne_bytes(answer[8..10].try_into().expect("two bytes"));
++    if request_type != (netlink::NFNL_SUBSYS_QUEUE << 8) | NFQNL_MSG_VERDICT || error == 0 {
++        return Err(FatalError::UnexpectedMessage {
++            message_type: message.message_type,
++        });
++    }
++    match -error {
++        libc::ENOENT => Ok(()),
++        errno => Err(FatalError::VerdictRefused {
++            error: io::Error::from_raw_os_error(errno).to_string(),
++        }),
++    }
++}
++
+ fn receive_exact(fd: RawFd) -> Result<Option<Bytes>, FatalError> {
+     let mut probe = [0u8; 1];
+     let (expected, _) = match recvmsg(
+@@ -505,6 +536,81 @@ mod tests {
+         assert!(receive_exact(peer.as_raw_fd()).unwrap().is_none());
+     }
+ 
++    /// The kernel's answer to a failed request: `struct nlmsgerr`, the error
++    /// and the request's header.
++    fn answer(error: i32, request_type: u16) -> Vec<u8> {
++        fn header(message: &mut Vec<u8>, length: usize, kind: u16, flags: u16) {
++            message.extend_from_slice(&(length as u32).to_ne_bytes());
++            message.extend_from_slice(&kind.to_ne_bytes());
++            message.extend_from_slice(&flags.to_ne_bytes());
++            message.extend_from_slice(&7u32.to_ne_bytes());
++            message.extend_from_slice(&0u32.to_ne_bytes());
++        }
++        let mut message = Vec::new();
++        header(
++            &mut message,
++            2 * netlink::NLMSG_HDRLEN + 4,
++            netlink::NLMSG_ERROR,
++            0,
++        );
++        message.extend_from_slice(&error.to_ne_bytes());
++        header(
++            &mut message,
++            netlink::NLMSG_HDRLEN,
++            request_type,
++            netlink::NLM_F_REQUEST,
++        );
++        message
++    }
++
++    #[test]
++    fn a_verdict_for_a_packet_no_longer_queued_ends_nothing() {
++        let (socket, _peer, mut fatal) = QueueSocket::for_test();
++        let tracker = GuardTracker::new();
++        let (sender, events) = std::sync::mpsc::channel();
++        let callback: PacketCallback = Arc::new(move |event, mut guard| {
++            guard.accept(0x400).unwrap();
++            sender.send(event).unwrap();
++        });
++        let verdict = netlink::NFNL_SUBSYS_QUEUE << 8 | NFQNL_MSG_VERDICT;
++        // The kernel dropped a packet before its verdict came; the next follows.
++        let mut datagram = answer(-libc::ENOENT, verdict);
++        datagram.extend_from_slice(&queued_udp_message(12, 12, 0));
++        dispatch_datagram(
++            Bytes::from(datagram),
++            Instant::now(),
++            &socket,
++            &callback,
++            &tracker,
++        )
++        .expect("a verdict for a packet no longer queued ends nothing");
++        assert!(matches!(events.try_recv(), Ok(PacketEvent::Datagram(_))));
++        assert!(fatal.try_recv().is_err());
++
++        let config = netlink::NFNL_SUBSYS_QUEUE << 8 | NFQA_MSG_CONFIG;
++        for (error, request_type, refused) in [
++            (-libc::EPERM, verdict, true),
++            (0, verdict, false),
++            (-libc::ENOENT, config, false),
++        ] {
++            let error = dispatch_datagram(
++                Bytes::from(answer(error, request_type)),
++                Instant::now(),
++                &socket,
++                &callback,
++                &tracker,
++            )
++            .expect_err("any other answer is fatal");
++            match error {
++                FatalError::VerdictRefused { .. } => assert!(refused, "{error}"),
++                FatalError::UnexpectedMessage { message_type } => {
++                    assert!(!refused && message_type == netlink::NLMSG_ERROR, "{error}");
++                }
++                other => panic!("unexpected fatal error: {other}"),
++            }
++        }
++    }
++
+     #[test]
+     fn malformed_nfqa_is_fatal_even_with_a_known_packet_header() {
+         let (socket, peer, _fatal) = QueueSocket::for_test();
+diff --git a/crates/honk-nfqueue/src/verdict.rs b/crates/honk-nfqueue/src/verdict.rs
+index 76055fd..3b5f595 100644
+--- a/crates/honk-nfqueue/src/verdict.rs
++++ b/crates/honk-nfqueue/src/verdict.rs
+@@ -8,6 +8,7 @@ use crate::queue::QueueSocket;
+ 
+ pub const NF_DROP: u32 = 0;
+ pub const NF_ACCEPT: u32 = 1;
++pub(crate) const NFQNL_MSG_VERDICT: u16 = 1;
+ const NFQA_VERDICT_HDR: u16 = 2;
+ const NFQA_MARK: u16 = 3;
+ 
+@@ -134,7 +135,7 @@ pub(crate) fn build_verdict_message(
+     let mut buffer = Vec::with_capacity(48);
+     let start = netlink::put_message_header(
+         &mut buffer,
+-        (netlink::NFNL_SUBSYS_QUEUE << 8) | 1,
++        (netlink::NFNL_SUBSYS_QUEUE << 8) | NFQNL_MSG_VERDICT,
+         netlink::NLM_F_REQUEST,
+         sequence,
+         0,
