@@ -672,7 +672,7 @@ Why it matters here: honk (honk-datapath) depends on Aya 0.16, whose crates requ
 
 What the patch does: `PKG_VERSION` and `PKG_HASH` of rustc 1.99.1's source, which bundles LLVM 23.1.1. Rust's bootstrap manifest moved, so the xz2 patch (`0001-Update-xz2-and-use-it-static.patch`) is refreshed on it; the AtomicExpand patch applies as it is.
 
-Verification log: pending.
+Verification log: 2026-11-13, the R4S tree builds rust/host 1.99.1 and with it honk-core (Aya 0.16) and its eBPF object, and the network and services suites pass on the image (58 and 42 tests).
 
 ### rust: the LLVM rustc links, installed for host tools
 
@@ -684,7 +684,7 @@ Why it matters here: bpf-linker links honk's eBPF programs, which rustc emits as
 
 What the patch does: rust/host's dist adds Rust's `rust-dev` component, its LLVM with `llvm-config`, libraries and headers, and installs it under a prefix of its own, `RUST_LLVM_PREFIX` (`rust-values.mk`, `$(STAGING_DIR_HOSTPKG)/lib/llvm-rust`), so that `llvm-config` stays off other packages' PATH, where configure scripts would find it and link LLVM.
 
-Verification log: pending.
+Verification log: 2026-11-13, in the R4S tree bpf-linker/host builds against `lib/llvm-rust` and links honk's eBPF object, whose programs the image's honk attaches (the transparent-proxy tests).
 
 ### rust: host artifacts linked with the host compiler
 
@@ -696,7 +696,7 @@ Why it matters here: bpf-linker's `.cargo/config.toml` asks for `clang` on Linux
 
 What the patch does: `CARGO_HOST_LINKER`, the host triple's linker set to `HOSTCC_NOCACHE`, in the variables of host builds (`CARGO_HOST_CONFIG_VARS`) and of target builds (`CARGO_PKG_CONFIG_VARS`), before the target's own. A setting named for the triple takes precedence over one a crate sets for a `cfg()`.
 
-Verification log: pending.
+Verification log: 2026-11-13, bpf-linker/host's build scripts link with the host compiler in the R4S tree, and the image builds.
 
 ### honk: a prebuilt eBPF object
 
@@ -708,7 +708,7 @@ Why it matters here: the firmware builds honk with OpenWrt's own Rust, and its e
 
 What the patch does: `HONK_PREBUILT_EBPF_OBJECT`, the absolute path of an object, makes the build script check that the object carries BTF and embed it as it is. Without it, nothing changes. The copy into `OUT_DIR` both paths share moves into `embed_object`.
 
-Verification log: pending.
+Verification log: 2026-11-13, honk-core's build embeds the package's object (`eBPF object embedded (3292696 bytes)`), in the package build and in honk-core's tests on the VM with `HONK_PREBUILT_EBPF_OBJECT`; on the R4S, honk attaches its programs from it (the transparent-proxy tests).
 
 ### honk: check, offline admission of a configuration
 
@@ -720,7 +720,7 @@ Why it matters here: the firmware wraps the operator's configuration in an entry
 
 What the patch does: `honk-core check` admits the `-c` entry offline as a start would: the entry and its includes parsed, validated and assembled, with the configuration as its own active one, then routing and DNS compiled over the geodata it finds, its data directory's first. It shares the native API's offline admission, which refuses a candidate whose geodata file is missing; a start and a reload run without it instead (its rules match nothing until the file is fetched), so the patch splits that admission's compile from the refusal (`CapturedConfig::compile` under `validate`), lets geodata load from a given data directory (`GeoSourceSet::load_from`, which `load` now calls with the process-wide one), and admits for a start through `offline::validate_for_start`, which reports a missing file as a `geo-asset-missing` warning. Nothing is bound, attached, created or written. Each finding goes to standard error as `<file>[:line[:column]]: <severity>[<code>]: <setting>: <message>`, without values, which may be secrets, and the command exits nonzero when a start would refuse the configuration. It needs the `native-api` feature, as that admission does, and a `.dae` entry. Unit tests beside it: a configuration a start takes, admitted without creating its data directory; one whose geodata is not there yet, admitted with the warning (it fails without the split: `missing-offline-dependency`); a routing target no group declares, a syntax error and an include outside the entry's directory, refused. The CLI reference, in both languages, has the command.
 
-Verification log: 2026-11-13, honk-core's unit tests on the VM (aarch64 Linux, the tree's host Rust, `--no-default-features --features native-api`): `check::`, `routing::geo::`, `native_api::offline` and `native_api::config`, 185 passed; the test of geodata not there yet failed before the split, refused with `missing-offline-dependency`. On the router: pending.
+Verification log: 2026-11-13, honk-core's unit tests on the VM (aarch64 Linux, the tree's host Rust, `--no-default-features --features native-api`): `check::`, `routing::geo::`, `native_api::offline` and `native_api::config`, 185 passed; the test of geodata not there yet failed before the split, refused with `missing-offline-dependency`. On the emulated R4S: the init script checks the entry before every start and reload, and the ops suite's config-push tests pass, among them the refusal of a routing target no group declares and of a syntax error, with the router's configuration unchanged; the storage tests of honk's state find it starting on a router whose geodata is not there yet.
 
 ### honk: the namespace registry, shared
 
@@ -732,7 +732,7 @@ Why it matters here: on OpenWrt `/run` and `/var/run` lead to `/tmp/run`, and ho
 
 What the patch does: the registry is made a mountpoint as iproute2 and podman make it: shared, and where that fails with `EINVAL` because it is none, bound onto itself first, recursively, so that every namespace registered there stays in view. Nothing undoes it. The kernel resolves both the registry's path and the stale `daens` mount's, which is now detached by its path at start whatever it resolves to, so `is_mountpoint()` and its `/proc/mounts` comparison go. A root-only unit test in a private mount and network namespace registers a namespace before the setup, while the registry is no mountpoint, and one during it, and checks that both still name a namespace after the cleanup.
 
-Verification log: 2026-11-13, honk-core's unit tests on the VM (aarch64 Linux, the tree's host Rust, `--no-default-features --features ebpf,native-api`, the build's eBPF object), as root: the registry test failed on the unpatched `daens.rs` (`ENOENT`: the namespace registered before the setup was hidden by the tmpfs) and passes with the patch, as do `daens::`'s other tests. On the router: pending.
+Verification log: 2026-11-13, honk-core's unit tests on the VM (aarch64 Linux, the tree's host Rust, `--no-default-features --features ebpf,native-api`, the build's eBPF object), as root: the registry test failed on the unpatched `daens.rs` (`ENOENT`: the namespace registered before the setup was hidden by the tmpfs) and passes with the patch, as do `daens::`'s other tests. On the emulated R4S, unpatched: honk started beside the app Pod covered podman's registry with its tmpfs, and the storage test of the data disk's late mount failed (`netavark: invalid namespace path`). Patched: the services suite passes, 42 tests, among them the containers test of honk's restart beside the Pods (a namespace registered before honk started and one registered while it ran) and the late mount.
 
 ### honk: a verdict for a packet no longer queued
 
@@ -744,7 +744,7 @@ Why it matters here: fw4 reloads its table on every firewall change and interfac
 
 What the patch does: the listener reads an answer to a verdict as what it is. `ENOENT` says the packet is gone and nothing is left to decide; any other refusal of a verdict, or an answer to anything else, stays fatal and now names the error (`VerdictRefused`). The verdict message type gets its name, `NFQNL_MSG_VERDICT`, where verdicts are built. A unit test dispatches the kernel's answers (an `ENOENT` for a verdict, then a queued packet; `EPERM`, an acknowledgement and an answer to a configuration message); a root-only kernel test in a network namespace of its own holds a queued packet's verdict, brings the loopback device down, sends the verdict and checks that the listener goes on serving. Both fail without the change.
 
-Verification log: 2026-11-13, honk-nfqueue's tests on the VM (aarch64 Linux, the tree's host Rust): 29 unit tests pass, the new one failing without the change (the answer ended the dispatch); as root, both kernel tests pass, the new one failing on the unpatched listener with `UnexpectedMessage { message_type: 2 }`. On the emulated R4S, with 200 new UDP flows a second waiting for honk's decision (a domain rule): unpatched, fifteen `fw4 reload`s ended honk four times (`NFQUEUE listener failed: unexpected netfilter netlink message type 2`) and procd's respawn limit then left it down through fifteen honk reloads; patched, the same honk process ran through fifteen `fw4 reload`s and fifteen honk reloads, its queue bound after each. The transparent-proxy test of firewall reloads while flows wait for honk: pending.
+Verification log: 2026-11-13, honk-nfqueue's tests on the VM (aarch64 Linux, the tree's host Rust): 29 unit tests pass, the new one failing without the change (the answer ended the dispatch); as root, both kernel tests pass, the new one failing on the unpatched listener with `UnexpectedMessage { message_type: 2 }`. On the emulated R4S, with 200 new UDP flows a second waiting for honk's decision (a domain rule): unpatched, fifteen `fw4 reload`s ended honk four times (`NFQUEUE listener failed: unexpected netfilter netlink message type 2`) and procd's respawn limit then left it down through fifteen honk reloads; patched, the same honk process ran through fifteen `fw4 reload`s and fifteen honk reloads, its queue bound after each, and the network suite passes, 58 tests, among them the transparent-proxy test of firewall reloads while flows wait for honk.
 
 ### build: services disabled in the image
 
@@ -756,7 +756,7 @@ Why it matters here: honk must not run before a configuration is pushed (its bui
 
 What the patch does: `TARGET_DISABLED_SERVICES` in "Target Images", passed to `prepare_rootfs` wherever a build from source prepares a root filesystem (`package/Makefile`, `include/image.mk`). The rootfs cache key reads `.config`, so a changed list builds the root filesystem anew.
 
-Verification log: pending.
+Verification log: 2026-11-13, the R4S image has no rc.d link of honk's (`/rom/etc/rc.d`, the transparent-proxy test of the image's template).
 
 ### procd: the cgroup of an instance that runs again
 
@@ -768,7 +768,7 @@ Why it matters here: honk's init pins honk to the big cores through the cpuset o
 
 What the patch does: the cgroups go with the instance only, as `instance_free` already removes them when an instance is deleted. An instance that stopped and stays registered keeps its empty cgroup until it starts again or is deleted, as it already keeps a program attached to it (`instance_set_vrf`).
 
-Verification log: pending.
+Verification log: 2026-11-13, procd 6 in the R4S image: the transparent-proxy test of CPU pinning, which turns pinning on and restarts honk, finds honk on the big cores in two runs of the network suite; without the patch it ran on every core.
 
 ### luci-lib-daeuniverse: BusyBox's timeout
 
@@ -780,4 +780,4 @@ Why it matters here: coreutils came into the image with luci-app-honk, and with 
 
 What the patch does: the short options `-s TERM -k 5`, which coreutils' timeout and BusyBox's (on by default in OpenWrt's BusyBox, 1.38 here) both take, and no dependency on coreutils-timeout.
 
-Verification log: pending.
+Verification log: 2026-11-13, the R4S image has no coreutils, and the reviewed-warnings register check passes with 40 warnings of its kinds (22 fewer). The page's package check on the router: pending.
