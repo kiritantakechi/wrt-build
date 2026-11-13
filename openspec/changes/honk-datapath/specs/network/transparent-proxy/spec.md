@@ -46,6 +46,10 @@ honk SHALL be placed by the scheduler by default. An option SHALL pin it to the 
 - **WHEN** the pinning option is enabled and honk restarts
 - **THEN** honk runs only on the CPUs with the highest capacity, and its programs are on the bound interfaces again
 
+#### Scenario: Restart a pinned honk
+- **WHEN** the pinning option is enabled and honk restarts again and again
+- **THEN** every new honk runs only on the CPUs with the highest capacity
+
 ### Requirement: Configuration management
 honk's configuration SHALL be editable in LuCI, and saving it SHALL hot-reload honk without ending the honk process. The full configuration (subscriptions, node information and the native API token) MUST NOT be preinstalled in the firmware image; its canonical copy lives in the private config repository. honk SHALL start at boot only while its start-at-boot switch is on.
 
@@ -104,11 +108,18 @@ honk's own nftables table SHALL stay in place, unchanged, through every reload o
 
 #### Scenario: Reload the firewall while flows wait for honk
 - **WHEN** new UDP flows wait in honk's queue for its decision and the firewall reloads again and again
-- **THEN** the same honk process runs on, and a new UDP flow still goes direct
+- **THEN** the same honk process runs on, and once the flows that waited are decided, new UDP flows go direct again
 
 #### Scenario: Stop the proxy after a reload
 - **WHEN** the firewall has reloaded and honk is then stopped
 - **THEN** honk's nftables table is gone
+
+### Requirement: honk withstands a stream of new flows
+honk SHALL keep running while new flows wait for its decision faster than it decides them; a flow it cannot decide in time SHALL be dropped, and SHALL NOT end the process.
+
+#### Scenario: New UDP flows faster than honk decides them
+- **WHEN** new UDP flows wait for honk's decision at 200 a second for three minutes
+- **THEN** the same honk process runs on, and once the flows that waited are decided, new UDP flows go direct again
 
 ### Requirement: No other listeners
 In the router's own network namespace, honk SHALL listen on no port other than its DNS listener on the loopback address and, when enabled, the native API.

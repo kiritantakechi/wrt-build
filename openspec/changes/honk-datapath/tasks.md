@@ -66,6 +66,10 @@
 
   Verify: the LuCI-save test and the test of firewall reloads while flows wait pass on both boards, ten reloads in a row keeping the process; honk-nfqueue's tests pass.
 
+- [ ] 6.3 honk withstands a stream of new flows waiting for its decision: a batch's armed direct flows activated under one backend acquisition, and a flow armed only with the time left for its activation; a patch meant for upstream with its write-up (D7).
+
+  Verify: honk's unit tests of batched activation and of a flow without time for its activation fail on the unpatched pump and pass with the patch; the transparent-proxy test of a stream of new flows passes on both boards.
+
 ## 7. The LuCI pages from daeuniverse's feed (design D1, D8)
 
 - [x] 7.1 Pin daeuniverse/openwrt-packages in `upstream.lock` as `daeuniverse`; `docs/upstream-lock.md`; the build/upstream-pinning and release/upstream-bump tests for four repositories.

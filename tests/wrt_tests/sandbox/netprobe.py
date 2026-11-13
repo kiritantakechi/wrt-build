@@ -24,7 +24,8 @@ the port it sent one from; ``resolve`` the answers of a DNS server;
 ``solicit-router`` that it asked the routers on a link for an advertisement, as a
 host does when it attaches; ``inject`` the size of the Ethernet frame it put on
 a segment, bypassing routing (a spoofed packet); ``flows`` how many new UDP flows
-it started, one datagram each, at a steady rate.
+it started, one datagram each, at a steady rate, from fresh source ports or from a
+pool of them in turn.
 """
 
 import argparse
@@ -46,6 +47,9 @@ PORT = 8007
 HTTP_PORT = 80
 BIG = 3000
 TIMEOUT = 5.0
+# The first source port of a pool of them (``flows --sources``), below the kernel's
+# ephemeral ports (32768-60999).
+FLOW_SOURCE_BASE = 20000
 ESP_HEADER = struct.Struct("!II")
 # Linux's TCP_SAVE_SYN and TCP_SAVED_SYN (linux/tcp.h), which the socket module
 # does not name: a listening socket keeps each SYN's headers, which the accepted
@@ -274,14 +278,24 @@ def udp(host: str, port: int, *, source_port: int = 0, big: bool = False) -> See
     return _decode(data) | {"size": len(data), "from": source}
 
 
-def flows(host: str, port: int, *, rate: float, seconds: float) -> Seen:
-    """Start ``rate`` new UDP flows a second for ``seconds``: a datagram from a socket each."""
+def flows(host: str, port: int, *, rate: float, seconds: float, sources: int = 0) -> Seen:
+    """Start ``rate`` new UDP flows a second for ``seconds``: a datagram from a socket each.
+
+    Each flow has a fresh source port, or with ``sources`` one of that many in turn,
+    each time to the next destination port: every flow is still a new five-tuple,
+    and an endpoint-independent NAT maps no more than ``sources`` ports.
+    """
     family = _family(host)
     start = time.monotonic()
     sent = 0
     while time.monotonic() < start + seconds:
         with socket.socket(family, socket.SOCK_DGRAM) as sock:
-            sock.sendto(b"whoami", (host, port))
+            destination = port
+            if sources:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(("", FLOW_SOURCE_BASE + sent % sources))
+                destination = port + sent // sources
+            sock.sendto(b"whoami", (host, destination))
         sent += 1
         time.sleep(max(0.0, start + sent / rate - time.monotonic()))
     return {"sent": sent}
@@ -474,11 +488,12 @@ def main() -> None:
     )
     command(
         "flows",
-        lambda a: flows(a.host, a.port, rate=a.rate, seconds=a.seconds),
+        lambda a: flows(a.host, a.port, rate=a.rate, seconds=a.seconds, sources=a.sources),
         host,
         port,
         ("--rate", {"type": float, "required": True}),
         ("--seconds", {"type": float, "required": True}),
+        ("--sources", {"type": int, "default": 0}),
     )
     command(
         "esp",

@@ -88,8 +88,10 @@ def test_dial_after_pushing_credentials(online: Online) -> None:
 def test_mss_fits_the_path(online: Online) -> None:
     client = online.client()
     # The client offers the MSS of its own link, 1460: only the router's clamp
-    # brings it down to the path's.
-    assert client.run("cat", "/sys/class/net/eth0/mtu").strip() == "1500"
+    # brings it down to the path's. Netlink answers for the namespace; its /sys
+    # would still be the host's.
+    link = client.run("ip", "-o", "link", "show", "dev", "eth0").split()
+    assert link[link.index("mtu") + 1] == "1500"
     seen = client.probe("tcp", DIRECT_TARGET[0])
     assert isinstance(seen["mss"], int)
     assert seen["mss"] <= MSS_MAX

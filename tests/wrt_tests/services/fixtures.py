@@ -30,11 +30,12 @@ def pytest_runtest_makereport(
     """Add the datapath's state to the report of a test that failed with the router online.
 
     ``funcargs`` holds the values of the test's whole fixture closure, so a test
-    on a fixture built on ``online`` has it too (failure-diagnostics D3).
+    on a fixture built on ``online`` has it too (failure-diagnostics D3). A
+    teardown that fails, putting the router back, is such a failure as well.
     """
     del call
     report = yield
-    if report.when == "call" and report.failed:
+    if report.when in {"call", "teardown"} and report.failed:
         funcargs = getattr(item, "funcargs", {})
         online = next((value for value in funcargs.values() if isinstance(value, Online)), None)
         if online is not None:

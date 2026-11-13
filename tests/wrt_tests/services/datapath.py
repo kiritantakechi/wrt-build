@@ -55,14 +55,17 @@ PROXY_NFQUEUE_TABLE = "inet honk_nfqueue"
 EINAT_RULE = re.compile(r"ubus:einat\[\w+\] (nat|rule) \d+")
 LAN_CLIENTS = ("client-a", "client-b")
 # What a failure's report shows of the datapath (failure-diagnostics D3): each LAN
-# client's addresses and routes, the router's WAN and its log, honk's log, the
+# client's addresses and routes, the router's WAN and its log, honk's log without
+# its debug lines (the test configuration turns them on, and they bury the rest),
+# the kernel's storage messages (a full or failing overlay shows there), the
 # ISP's log.
 CLIENT_STATE = (("ip", "addr", "show", "dev", "eth0"), ("ip", "-4", "route"), ("ip", "-6", "route"))
 ROUTER_STATE = (
     "ifstatus wan",
     "ifstatus wan6",
     "logread | grep -e pppd -e odhcp6c -e odhcpd -e netifd | tail -n 40",
-    "logread -e honk | tail -n 40",
+    "logread -e honk | grep -v ' DEBUG ' | tail -n 40",
+    "dmesg | grep -iE 'f2fs|mmc|I/O error|no space' | tail -n 20",
 )
 ISP_LOG_LINES = 40
 # What a wait for the datapath on pppoe-wan reports when it times out: which device

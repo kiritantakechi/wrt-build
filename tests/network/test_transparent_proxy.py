@@ -59,6 +59,19 @@ PROXIED_DOMAIN = "example.org"
 # flushes every queue), and a verdict for one of them ended honk (honk #476).
 NEW_FLOWS = 200
 FIREWALL_RELOADS = 15
+# The source ports the new flows come from in turn: each flow a new five-tuple for
+# honk, while einat (10000 ports, a mapping kept for minutes) keeps room.
+FLOW_SOURCES = 1000
+# How long new flows stream in for honk to withstand them: at NEW_FLOWS a second
+# the emulated router fell behind activating them one by one, and honk exited
+# within minutes (honk 005).
+STREAM_SECONDS = 180
+# Restarts of a pinned honk: the old honk's exit could race the new start and
+# leave one in ten unpinned (procd replaced the cgroup the init had set up).
+PINNED_RESTARTS = 10
+# How soon new UDP flows go direct again once the flows that waited have been
+# decided: honk drops a flow it cannot decide in time, and a client retries.
+DRAIN_TIMEOUT = 15
 # A request of the native API that needs a credential.
 NATIVE_API_REQUEST = "/api/v1/dns/cache?name=example.net"
 # honk's programs on the cgroup2 root, by attach type: its sock_ops program,
@@ -318,9 +331,27 @@ def test_the_nfqueue_table_outlives_a_firewall_reload(proxy: Online) -> None:
     assert router.run(f"nft list table {PROXY_NFQUEUE_TABLE}") == before
 
 
+def _udp_answer(online: Online) -> str | None:
+    """Return the address a new UDP flow to the direct target left from, None without an answer."""
+    try:
+        return str(online.client().probe("udp", DIRECT_TARGET[0])["address"])
+    except subprocess.CalledProcessError:
+        return None
+
+
+def _goes_direct_again(online: Online) -> None:
+    """Retry a new UDP flow, as a client does, until one is answered; it must go direct."""
+    address = until(
+        lambda: _udp_answer(online), timeout=DRAIN_TIMEOUT, what="answer to a new UDP flow"
+    )
+    assert address == online.wan_address
+
+
 def _queued(router: Router) -> int:
     """Return how many packets honk's queue has taken (its id sequence)."""
-    return int(router.run("awk '$1 == 320 { print $8 }' /proc/net/netfilter/nfnetlink_queue"))
+    taken = router.run("awk '$1 == 320 { print $8 }' /proc/net/netfilter/nfnetlink_queue")
+    assert taken, "honk's queue is not bound"
+    return int(taken)
 
 
 @spec(
@@ -342,7 +373,7 @@ def test_honk_decides_on_through_firewall_reloads(proxy_restored: Online) -> Non
             "wrt_tests.sandbox.netprobe",
             "flows",
             DIRECT_TARGET[0],
-            *("--rate", str(NEW_FLOWS), "--seconds", seconds),
+            *("--rate", str(NEW_FLOWS), "--seconds", seconds, "--sources", str(FLOW_SOURCES)),
         ),
         stdout=subprocess.DEVNULL,
     )
@@ -354,7 +385,28 @@ def test_honk_decides_on_through_firewall_reloads(proxy_restored: Online) -> Non
         flows.wait()
     assert _queued(router) > queued, "no flow waited for honk's decision"
     assert proxy_pid(router) == running
-    assert online.client().probe("udp", DIRECT_TARGET[0])["address"] == online.wan_address
+    _goes_direct_again(online)
+
+
+@spec(
+    CAPABILITY,
+    "honk withstands a stream of new flows",
+    "New UDP flows faster than honk decides them",
+)
+def test_honk_withstands_a_stream_of_new_flows(proxy_restored: Online) -> None:
+    online = proxy_restored
+    router = online.router
+    proxy_start(router, proxy_config(domains=(PROXIED_DOMAIN,)))
+    running = proxy_pid(router)
+    queued = _queued(router)
+    online.client().probe(
+        *("flows", DIRECT_TARGET[0], "--rate", str(NEW_FLOWS), "--seconds", str(STREAM_SECONDS)),
+        *("--sources", str(FLOW_SOURCES)),
+        timeout=STREAM_SECONDS + 60,
+    )
+    assert _queued(router) > queued, "no flow waited for honk's decision"
+    assert proxy_pid(router) == running
+    _goes_direct_again(online)
 
 
 @spec(
@@ -396,9 +448,31 @@ def test_cpu_pinning_takes_the_big_cores(proxy_restored: Online, board: Board) -
     router.run("uci set honk.config.cpu_pinning=1 && uci commit honk && /etc/init.d/honk restart")
     try:
         wait_proxy(router, replacing=running)
-        assert int(router.run("taskset -p $(pidof honk-core)").split()[-1], 16) == big
+        assert _affinity(router) == big
     finally:
         router.run("uci set honk.config.cpu_pinning=0 && uci commit honk")
+
+
+@spec(CAPABILITY, "Optional CPU pinning", "Restart a pinned honk")
+def test_every_restart_keeps_honk_pinned(proxy_restored: Online, board: Board) -> None:
+    router = proxy_restored.router
+    big = sum(1 << cpu for cpu in board.big_cores)
+    router.run("uci set honk.config.cpu_pinning=1 && uci commit honk")
+    try:
+        affinities = []
+        for _ in range(PINNED_RESTARTS):
+            running = proxy_pid(router)
+            router.run("/etc/init.d/honk restart")
+            wait_proxy(router, replacing=running)
+            affinities.append(_affinity(router))
+        assert affinities == [big] * PINNED_RESTARTS, [f"{mask:x}" for mask in affinities]
+    finally:
+        router.run("uci set honk.config.cpu_pinning=0 && uci commit honk")
+
+
+def _affinity(router: Router) -> int:
+    """Return honk's CPU affinity mask."""
+    return int(router.run("taskset -p $(pidof honk-core)").split()[-1], 16)
 
 
 @pytest.fixture

@@ -126,6 +126,8 @@ def test_http_reports_the_peer(client: Netns, family: int) -> None:
 def test_flows_start_at_their_rate(client: Netns) -> None:
     sent = client.probe("flows", SERVER[0], "--rate", "50", "--seconds", "1")["sent"]
     assert sent in range(45, 52), sent
+    pooled = client.probe("flows", SERVER[0], "--rate", "50", "--seconds", "1", "--sources", "4")
+    assert pooled["sent"] in range(45, 52), pooled
 
 
 def test_big_reply_arrives_whole(client: Netns) -> None:

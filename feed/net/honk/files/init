@@ -155,6 +155,16 @@ enable_controller() {
 	done
 }
 
+# setup_cgroup: honk's service cgroup made and set up: the controllers honk
+# needs, memory down to its instance, whose files honk's telemetry reads once,
+# at startup, and cpuset for its own cgroup, which pins it.
+setup_cgroup() {
+	mkdir -p "${CGROUP}"
+	enable_controller memory /sys/fs/cgroup /sys/fs/cgroup/services "${CGROUP}"
+	enable_controller cpuset /sys/fs/cgroup /sys/fs/cgroup/services
+	pin
+}
+
 # pin: honk's cgroup on the big cores while cpu_pinning is set, on every CPU
 # otherwise. The cpuset holds every task of the cgroup at once, so a running
 # honk moves without a restart.
@@ -178,13 +188,7 @@ start_service() {
 	# itself. It stays mounted on stop: other tools may share it.
 	grep -qs ' /sys/fs/bpf bpf ' /proc/mounts || mount -t bpf bpf /sys/fs/bpf
 
-	# The controllers honk needs: memory down to its instance, whose files
-	# honk's telemetry reads once, at startup; cpuset for its own cgroup, which
-	# pins it.
-	mkdir -p "${CGROUP}"
-	enable_controller memory /sys/fs/cgroup /sys/fs/cgroup/services "${CGROUP}"
-	enable_controller cpuset /sys/fs/cgroup /sys/fs/cgroup/services
-	pin
+	setup_cgroup
 
 	procd_open_instance "${CONF}"
 	procd_set_param command "${PROG}" --config "${ENTRY}" --disable-timestamp
@@ -202,6 +206,15 @@ start_service() {
 		procd_set_param env TZ="${zone}"
 	fi
 	procd_close_instance
+}
+
+# service_started: the service cgroup set up again once procd has the new
+# instance. A restart stops honk without waiting; when the old honk exits after
+# start_service set the cgroup up but before procd took the new instance, procd
+# deletes the old service and its cgroup, and the new instance gets a fresh one.
+service_started() {
+	config_load "${CONF}"
+	setup_cgroup
 }
 
 # reload_service: a stopped honk stays stopped. A running one is pinned anew and

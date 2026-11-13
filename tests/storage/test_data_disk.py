@@ -262,6 +262,7 @@ def without_disk(pod: Online, data_disk: Disk, proxy: Online) -> Iterator[Online
     """Boot without the data disk, honk on; plug the disk back in at the end, if no test did."""
     del proxy  # enabled, it starts with the boot
     pod.reboot(while_off=data_disk.unplug)
+    wait_proxy(pod.router)
     yield pod
     if data_disk.port is None:
         data_disk.plug(1)

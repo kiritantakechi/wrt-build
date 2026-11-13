@@ -1,0 +1,752 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kiritantakechi <kiritantakechi@gmail.com>
+Date: Sat, 14 Nov 2026 12:00:00 +0800
+Subject: [PATCH] nfqueue: activate a batch's direct flows together, and arm
+ only in time
+
+The commit pump arms a batch of direct flows under one backend
+acquisition, then activated them one at a time: each flow accepted its
+held originals, took the backend write lock again and updated its
+conn state in a blocking section of its own. A batch of N direct flows
+thus waited N times behind whatever held the backend meanwhile (the
+janitor's scans hold it for reading), and the pump took no new commits
+until the last activation. Under a sustained arrival of new direct UDP
+flows, requests aged in the queue, the next batch was armed close to
+its three-second hold, and an armed flow that missed it ended the
+process ("DirectArmed flow lost its initializer before activation").
+On an emulated NanoPi R4S at 200 new flows a second, a batch of 256
+flows took 2.6 s to activate one by one, its oldest request already
+3 s old; honk exited within minutes.
+
+Activate the batch's armed flows together: accept each flow's held
+originals off the backend lock, oldest first, then activate every flow
+whose originals are out under one backend acquisition and one blocking
+section; a flow whose originals arrived meanwhile accepts them and goes
+round again, as before. Arm -> originals -> Activate stays in FIFO
+order, and a failure after arming stays fatal.
+
+An armed flow that misses its hold is fatal by design, so arm a flow
+only with the time left for its activation, which comes after that of
+the flows armed before it in the batch: its deadline less a 300 ms
+margin and the activation work of those flows and its own, at a moving
+average per flow of the work without the waits for the backend (a
+stall must not inflate it), and never more than half the hold, so that
+a flow fresh from the queue is always armed and the average stays
+current rather than locking every direct flow out. A later flow expires
+unarmed, without conn mutation, as a late request already does; its
+originals are dropped and its client retries. Overload sheds new flows
+instead of ending the process.
+
+Tests: direct flows decided together, while a scanner holds the backend
+for reading 150 ms at a time, are all activated (unpatched: the later
+ones fail with ArmedInProgress); a flow without time for its activation
+expires unarmed, nothing armed and nothing fatal (unpatched: armed);
+a flow fresh from the queue is armed however long activations took;
+a batch's first armed flow reserves its own activation only and a
+later one those before it too; and the reserve follows the recorded
+work, up to its bound. The design
+document describes both.
+
+Signed-off-by: kiritantakechi <kiritantakechi@gmail.com>
+Upstream-Status: Pending
+---
+ .../honk-core/src/control/nfqueue/commit.rs   |  92 +++++--
+ crates/honk-core/src/control/nfqueue/mod.rs   |   9 +
+ .../src/control/nfqueue/tests/batching.rs     | 184 ++++++++++++++
+ .../src/control/nfqueue/transition.rs         | 227 +++++++++++++-----
+ .../honk-core/src/control/nfqueue/watchdog.rs |  29 ---
+ doc/en/design/nfqueue.md                      |   2 +-
+ doc/zh/design/nfqueue.md                      |   2 +-
+ 7 files changed, 428 insertions(+), 117 deletions(-)
+
+diff --git a/crates/honk-core/src/control/nfqueue/commit.rs b/crates/honk-core/src/control/nfqueue/commit.rs
+index 2042fef..010f72d 100644
+--- a/crates/honk-core/src/control/nfqueue/commit.rs
++++ b/crates/honk-core/src/control/nfqueue/commit.rs
+@@ -9,6 +9,10 @@ pub(super) struct CommitPump {
+     task: tokio::sync::Mutex<CommitTask>,
+     stop: watch::Sender<bool>,
+     work: AtomicUsize,
++    /// The activation work each armed flow has lately taken, off and under
++    /// the backend lock but without waiting for it: a moving average over the
++    /// batches.
++    activation_cost: Mutex<Duration>,
+     #[cfg(test)]
+     pub(super) after_lock_delay: Mutex<Option<Duration>>,
+ }
+@@ -30,6 +34,7 @@ impl CommitPump {
+             }),
+             stop,
+             work: AtomicUsize::new(0),
++            activation_cost: Mutex::new(Duration::ZERO),
+             #[cfg(test)]
+             after_lock_delay: Mutex::new(None),
+         }
+@@ -38,6 +43,24 @@ impl CommitPump {
+     pub(super) fn is_idle(&self) -> bool {
+         self.work.load(Ordering::Acquire) == 0
+     }
++
++    /// The hold that arming must leave for the activation of a batch's
++    /// `place`-th armed flow, which waits for the activation of the flows
++    /// armed before it (activation is FIFO).
++    pub(super) fn activation_reserve(&self, place: usize) -> Duration {
++        let flows = u32::try_from(place).unwrap_or(u32::MAX);
++        ACTIVATION_MARGIN
++            .saturating_add(self.activation_cost.lock().saturating_mul(flows))
++            .min(ACTIVATION_RESERVE_MAX)
++    }
++
++    pub(super) fn record_activations(&self, elapsed: Duration, flows: usize) {
++        let Some(flows) = u32::try_from(flows).ok().filter(|&flows| flows > 0) else {
++            return;
++        };
++        let mut cost = self.activation_cost.lock();
++        *cost = (*cost * 3 + elapsed / flows) / 4;
++    }
+ }
+ 
+ struct CommitRequest {
+@@ -231,9 +254,14 @@ impl PendingUdpVerdicts {
+             transition: request.transition,
+         }));
+         completed.resize_with(batch.len(), || Completion::NotRun);
++        let mut armed_before = 0;
+         let result = blocking_section(|| {
+             backend.commit_udp_batch(requests, &mut |index, apply| {
+-                completed[index] = self.apply_pending_commit(&batch[index], apply)?;
++                let reserve = self.commits.activation_reserve(armed_before + 1);
++                completed[index] = self.apply_pending_commit(&batch[index], reserve, apply)?;
++                if matches!(completed[index], Completion::Armed) {
++                    armed_before += 1;
++                }
+                 Ok(())
+             })
+         });
+@@ -254,32 +282,41 @@ impl PendingUdpVerdicts {
+             }
+             return;
+         }
+-        // Terminal verdicts must not wait behind another flow's second backend
+-        // acquisition. Each direct flow still completes Arm -> FIFO -> Activate.
+-        for (request, completion) in batch.iter_mut().zip(completed.iter_mut()) {
+-            if !matches!(completion, Completion::Armed) {
+-                let completion = std::mem::replace(completion, Completion::NotRun);
+-                self.complete_request(request, completion).await;
+-            }
+-        }
+-        for (request, completion) in batch.iter_mut().zip(completed.drain(..)) {
++        // Terminal verdicts must not wait behind the activation of the batch's
++        // direct flows. Each direct flow still completes Arm -> FIFO -> Activate.
++        let mut armed = Vec::new();
++        for (index, (request, completion)) in batch.iter_mut().zip(completed.drain(..)).enumerate()
++        {
+             if matches!(completion, Completion::Armed) {
+-                self.complete_request(request, completion).await;
++                armed.push(index);
++            } else {
++                self.complete_request(request, completion);
+             }
+         }
++        if armed.is_empty() {
++            return;
++        }
++        let flows: Vec<_> = armed
++            .iter()
++            .map(|&index| {
++                let request = &batch[index];
++                let UdpDecisionTransition::ArmDirect(mark) = request.transition else {
++                    unreachable!("only ArmDirect arms a flow")
++                };
++                (Arc::clone(&request.cell), mark)
++            })
++            .collect();
++        let results = self.finish_armed_direct(&flows).await;
++        for (index, result) in armed.into_iter().zip(results) {
++            self.settle(&mut batch[index], result);
++        }
+     }
+ 
+-    async fn complete_request(&self, request: &mut CommitRequest, completion: Completion) {
++    fn complete_request(&self, request: &mut CommitRequest, completion: Completion) {
+         let result = match completion {
+             Completion::Expired => Err(self.expire_commit(&request.cell)),
+             Completion::Refused(error) => Err(error),
+-            Completion::Armed => {
+-                let UdpDecisionTransition::ArmDirect(mark) = request.transition else {
+-                    unreachable!()
+-                };
+-                self.finish_armed_direct(&request.cell, request.cell.identity, mark)
+-                    .await
+-            }
++            Completion::Armed => unreachable!("armed flows are activated together"),
+             Completion::Terminal(verdicts, outcome) => {
+                 let mut result = Ok(());
+                 for verdict in verdicts {
+@@ -294,6 +331,11 @@ impl PendingUdpVerdicts {
+                 Err(self.fatal_error("commit batch", "backend omitted item".into()))
+             }
+         };
++        self.settle(request, result);
++    }
++
++    /// Hand a committed flow's endpoint to the kernel and answer its caller.
++    fn settle(&self, request: &mut CommitRequest, result: Result<(), PendingUdpDecisionError>) {
+         let result = result.and_then(|()| {
+             if let Some(lease) = request.lease.as_mut()
+                 && !lease.commit_kernel_handoff()
+@@ -315,10 +357,20 @@ impl PendingUdpVerdicts {
+     fn apply_pending_commit(
+         &self,
+         request: &CommitRequest,
++        reserve: Duration,
+         apply: &mut dyn FnMut() -> anyhow::Result<UdpDecisionCommitResult>,
+     ) -> anyhow::Result<Completion> {
+         let mut state = request.cell.state.lock();
+-        if Instant::now() >= request.deadline {
++        let now = Instant::now();
++        // An armed flow must be activated within its hold: a flow is armed only
++        // with the time left for that, and expires unarmed otherwise.
++        let deadline = match request.transition {
++            UdpDecisionTransition::ArmDirect(_) => {
++                request.deadline.checked_sub(reserve).unwrap_or(now)
++            }
++            _ => request.deadline,
++        };
++        if now >= deadline {
+             return Ok(Completion::Expired);
+         }
+         let CellState::Pending {
+diff --git a/crates/honk-core/src/control/nfqueue/mod.rs b/crates/honk-core/src/control/nfqueue/mod.rs
+index 590cdd5..e427dee 100644
+--- a/crates/honk-core/src/control/nfqueue/mod.rs
++++ b/crates/honk-core/src/control/nfqueue/mod.rs
+@@ -36,6 +36,15 @@ use ingest::retained_state;
+ pub(super) const TERMINAL_GRACE: Duration = Duration::from_millis(500);
+ pub(super) const WATCHDOG_INTERVAL: Duration = Duration::from_millis(100);
+ pub(super) const HARD_HOLD_TIMEOUT: Duration = Duration::from_secs(3);
++/// What arming must leave of a flow's hold beyond its share of the batch's
++/// activation work: the backend acquisition and the scheduling around it. An
++/// armed flow that misses its hold is fatal, so a flow without that much
++/// time left is not armed.
++pub(super) const ACTIVATION_MARGIN: Duration = Duration::from_millis(300);
++/// The most that arming withholds, half the hold: a flow fresh from the queue
++/// is always armed, which also keeps the measured activation work current.
++pub(super) const ACTIVATION_RESERVE_MAX: Duration =
++    Duration::from_millis((HARD_HOLD_TIMEOUT.as_millis() / 2) as u64);
+ const MAX_SCHEDULED_CLEANUPS: usize = honk_nfqueue::QUEUE_MAXLEN as usize;
+ const MAX_CORRELATOR_FLOWS: usize = honk_nfqueue::QUEUE_MAXLEN as usize;
+ const MAX_HELD_VERDICTS_PER_FLOW: usize = 64;
+diff --git a/crates/honk-core/src/control/nfqueue/tests/batching.rs b/crates/honk-core/src/control/nfqueue/tests/batching.rs
+index b9d8b05..55864b5 100644
+--- a/crates/honk-core/src/control/nfqueue/tests/batching.rs
++++ b/crates/honk-core/src/control/nfqueue/tests/batching.rs
+@@ -453,3 +453,187 @@ async fn terminal_verdicts_are_settled_before_another_batched_flow_waits_to_acti
+     proxy.unwrap();
+     fixture.pending.shutdown_commit_pump().await.unwrap();
+ }
++
++/// The fixture's flow and `count` more, each with `remaining` of its hold
++/// left and one held original; return the more flows' leases and identities.
++fn staged(
++    count: u16,
++    remaining: Duration,
++) -> (DecisionFixture, Vec<(UdpInitLease, PendingUdpIdentity)>) {
++    let mut mock = MockEbpfBackend::new();
++    let keys: Vec<_> = (1..=count)
++        .map(|port| {
++            FlowKey::new(
++                std::net::SocketAddr::from(([192, 0, 2, 10], 40000 + port)),
++                "198.51.100.20:443".parse().unwrap(),
++            )
++        })
++        .collect();
++    for (key, token) in keys.iter().zip(100..) {
++        mock.seed_staged_udp_flow(
++            &key.tuples(),
++            retained(
++                token,
++                UdpDecisionState::Pending,
++                ROUTING_META_FLAG_PUBLISHED,
++            ),
++        );
++    }
++    let fixture = pending_fixture_with(41, mock);
++    deadline(&fixture, remaining);
++    let flows = keys
++        .into_iter()
++        .zip(100..)
++        .map(|(key, token)| {
++            let lease = match fixture.pending.endpoints.reserve_owned_or_enqueue(
++                key.client,
++                key.destination,
++                bytes::Bytes::from_static(b"more"),
++                token,
++                None,
++                test_flow_slot(),
++                &fixture.stats,
++            ) {
++                EndpointReservation::Initializing(lease) => lease,
++                _ => panic!("each flow must initialize"),
++            };
++            let identity = PendingUdpVerdicts::identity_for_lease(&lease);
++            fixture.pending.cells.insert(
++                key,
++                Arc::new(FlowCell::pending(
++                    identity,
++                    Instant::now() - HARD_HOLD_TIMEOUT + remaining,
++                    HeldVerdict::test(u64::from(token), Instant::now(), Arc::clone(&fixture.sink)),
++                    Arc::clone(&fixture.pending.flow_slots)
++                        .try_acquire_owned()
++                        .unwrap(),
++                )),
++            );
++            fixture.stats.increment_udp_nfqueue_active_flows();
++            (lease, identity)
++        })
++        .collect();
++    (fixture, flows)
++}
++
++/// Direct flows decided together are activated together: one backend
++/// acquisition for the batch, not one for each flow behind whatever holds the
++/// backend meanwhile (the janitor's scans hold it for reading).
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn direct_flows_decided_together_are_activated_together() {
++    let (fixture, flows) = staged(19, Duration::from_millis(1200));
++    let scanning = Arc::new(std::sync::atomic::AtomicBool::new(true));
++    let scanner = tokio::task::spawn_blocking({
++        let backend = Arc::clone(&fixture.backend);
++        let scanning = Arc::clone(&scanning);
++        move || {
++            while scanning.load(Ordering::Acquire) {
++                let scan = backend.blocking_read();
++                std::thread::sleep(Duration::from_millis(150));
++                drop(scan);
++            }
++        }
++    });
++    let decisions = std::iter::once(fixture.pending.activate_direct(
++        fixture.identity,
++        fixture.lease,
++        0x1200,
++    ))
++    .chain(
++        flows
++            .into_iter()
++            .map(|(lease, identity)| fixture.pending.activate_direct(identity, lease, 0x1200)),
++    );
++    let results = futures::future::join_all(decisions).await;
++    scanning.store(false, Ordering::Release);
++    scanner.await.unwrap();
++    for result in results {
++        result.unwrap();
++    }
++    let mut fatal = fixture.fatal;
++    assert!(fatal.try_recv().is_err(), "no flow missed its activation");
++    fixture.pending.shutdown_commit_pump().await.unwrap();
++}
++
++/// A flow armed without time for its activation would be fatal when the
++/// activation misses its hold: such a flow expires unarmed instead, and its
++/// originals are dropped.
++#[tokio::test]
++async fn a_flow_without_time_for_its_activation_expires_unarmed() {
++    let mock = MockEbpfBackend::new();
++    let trace = Arc::clone(&mock.commit_trace);
++    let mut fixture = pending_fixture_with(45, mock);
++    deadline(&fixture, ACTIVATION_MARGIN / 2);
++    let result = fixture
++        .pending
++        .activate_direct(fixture.identity, fixture.lease, 0x1200)
++        .await;
++    assert!(result.is_err(), "{result:?}");
++    assert!(trace.lock().is_empty(), "nothing was armed");
++    assert!(fixture.fatal.try_recv().is_err());
++    assert_eq!(*fixture.sink.lock(), vec![TestVerdict::Drop { id: 1 }]);
++    fixture.pending.shutdown_commit_pump().await.unwrap();
++}
++
++#[test]
++fn the_activation_reserve_follows_the_activations() {
++    let pump = commit::CommitPump::new();
++    assert_eq!(pump.activation_reserve(10), ACTIVATION_MARGIN);
++    pump.record_activations(Duration::from_millis(40), 4);
++    assert_eq!(
++        pump.activation_reserve(10),
++        ACTIVATION_MARGIN + Duration::from_micros(2500) * 10
++    );
++    pump.record_activations(Duration::from_secs(60), 1);
++    assert_eq!(pump.activation_reserve(1), ACTIVATION_RESERVE_MAX);
++}
++
++/// However long activations have taken, a flow fresh from the queue is still
++/// armed and activated: arming never withholds the whole hold, so it cannot
++/// lock every direct flow out.
++#[tokio::test]
++async fn a_fresh_flow_is_armed_however_long_activations_took() {
++    let mut fixture = pending_fixture(46);
++    fixture
++        .pending
++        .commits
++        .record_activations(Duration::from_secs(60), 1);
++    fixture
++        .pending
++        .activate_direct(fixture.identity, fixture.lease, 0x1200)
++        .await
++        .unwrap();
++    assert!(fixture.fatal.try_recv().is_err());
++    fixture.pending.shutdown_commit_pump().await.unwrap();
++}
++
++/// Activation is FIFO, so a batch's first armed flow reserves its own
++/// activation only, and a later one its own and those before it.
++#[tokio::test]
++async fn each_flow_reserves_the_activations_before_it() {
++    let (mut fixture, second, second_id) = pair(MockEbpfBackend::new());
++    // One second of activation work a flow.
++    fixture
++        .pending
++        .commits
++        .record_activations(Duration::from_secs(4), 1);
++    let remaining = Duration::from_millis(1400);
++    deadline(&fixture, remaining);
++    {
++        let cell = fixture.pending.matching_cell(second_id).unwrap();
++        let mut state = cell.state.lock();
++        let CellState::Pending { started_at, .. } = &mut *state else {
++            panic!("pending")
++        };
++        *started_at = Instant::now() - HARD_HOLD_TIMEOUT + remaining;
++    }
++    let first = fixture
++        .pending
++        .activate_direct(fixture.identity, fixture.lease, 0x1200);
++    let second = fixture.pending.activate_direct(second_id, second, 0x1200);
++    let (first, second) = tokio::join!(biased; first, second);
++    first.unwrap();
++    assert!(second.is_err(), "{second:?}");
++    assert!(fixture.fatal.try_recv().is_err());
++    fixture.pending.shutdown_commit_pump().await.unwrap();
++}
+diff --git a/crates/honk-core/src/control/nfqueue/transition.rs b/crates/honk-core/src/control/nfqueue/transition.rs
+index 723fb3c..dcb90e8 100644
+--- a/crates/honk-core/src/control/nfqueue/transition.rs
++++ b/crates/honk-core/src/control/nfqueue/transition.rs
+@@ -22,85 +22,168 @@ impl PendingUdpVerdicts {
+         .await
+     }
+ 
++    /// Activate armed direct flows, oldest first: each flow's held originals
++    /// are accepted off the backend lock, then one backend acquisition
++    /// activates every flow whose originals are out. A flow whose originals
++    /// arrived meanwhile accepts them and goes round again.
+     pub(super) async fn finish_armed_direct(
+         &self,
+-        cell: &Arc<FlowCell>,
+-        identity: PendingUdpIdentity,
+-        direct_rule_mark: u32,
+-    ) -> Result<(), PendingUdpDecisionError> {
+-        let final_mark = direct_rule_mark | CLASSIFIED_MARK;
+-        loop {
+-            if matches!(&*cell.state.lock(), CellState::Pending { started_at, .. } if started_at.elapsed() >= HARD_HOLD_TIMEOUT)
+-            {
+-                self.fail_armed(cell, identity);
+-                return Err(PendingUdpDecisionError::ArmedInProgress);
++        flows: &[(Arc<FlowCell>, u32)],
++    ) -> Vec<Result<(), PendingUdpDecisionError>> {
++        let mut results: Vec<Option<Result<(), PendingUdpDecisionError>>> =
++            flows.iter().map(|_| None).collect();
++        let mut round: Vec<usize> = (0..flows.len()).collect();
++        // The work alone, without the waits for the backend: it sets how much
++        // of a later flow's hold arming must leave.
++        let mut work = Duration::ZERO;
++        while !round.is_empty() {
++            let mut ready = Vec::with_capacity(round.len());
++            let releasing = Instant::now();
++            for index in round.drain(..) {
++                let (cell, mark) = &flows[index];
++                match self.release_armed_originals(cell, *mark) {
++                    Ok(()) => ready.push(index),
++                    Err(error) => results[index] = Some(Err(error)),
++                }
+             }
+-            let batch = {
+-                let mut state = cell.state.lock();
+-                match &mut *state {
+-                    CellState::Pending {
++            work += releasing.elapsed();
++            let Some(deadline) = ready
++                .iter()
++                .filter_map(|&index| armed_deadline(&flows[index].0))
++                .min()
++            else {
++                break;
++            };
++            let mut backend = match tokio::time::timeout_at(
++                tokio::time::Instant::from_std(deadline),
++                self.ebpf.write(),
++            )
++            .await
++            {
++                Ok(backend) => backend,
++                Err(_) => {
++                    // The oldest hold ran out while waiting; the others go round again.
++                    for index in ready {
++                        let cell = &flows[index].0;
++                        if armed_deadline(cell).is_none_or(|deadline| Instant::now() >= deadline) {
++                            self.fail_armed(cell, cell.identity);
++                            results[index] = Some(Err(PendingUdpDecisionError::ArmedInProgress));
++                        } else {
++                            round.push(index);
++                        }
++                    }
++                    continue;
++                }
++            };
++            let mut late = Vec::new();
++            let mut activated = Vec::new();
++            let activating = Instant::now();
++            let failure = blocking_section(|| {
++                for &index in &ready {
++                    let (cell, mark) = &flows[index];
++                    let mut state = cell.state.lock();
++                    let CellState::Pending {
+                         armed: true,
++                        started_at,
+                         verdicts,
+                         ..
+-                    } => std::mem::take(verdicts),
+-                    _ => {
+-                        return Err(self.fatal_error(
+-                            "direct verdict",
+-                            "armed correlator changed phase before activation".into(),
+-                        ));
++                    } = &mut *state
++                    else {
++                        return Some(
++                            "armed correlator changed phase before backend activation".to_owned(),
++                        );
++                    };
++                    if started_at.elapsed() >= HARD_HOLD_TIMEOUT {
++                        late.push(index);
++                        continue;
++                    }
++                    if !verdicts.is_empty() {
++                        round.push(index);
++                        continue;
++                    }
++                    match backend.commit_udp_decision(
++                        &cell.identity.tuples(),
++                        cell.identity.owner.token,
++                        UdpDecisionTransition::ActivateDirect(*mark),
++                    ) {
++                        Ok(UdpDecisionCommitResult::Applied) => {
++                            *state = CellState::ActiveDirect {
++                                expires_at: Instant::now() + TERMINAL_GRACE,
++                                final_mark: *mark | CLASSIFIED_MARK,
++                            };
++                            activated.push(index);
++                        }
++                        Ok(result) => {
++                            self.record_commit_mismatch(result);
++                            return Some(format!("backend rejected armed transition: {result:?}"));
++                        }
++                        Err(error) => return Some(format!("{error:#}")),
+                     }
+                 }
+-            };
+-            for verdict in batch {
+-                self.accept_one_fatal(verdict, final_mark)?;
++                None
++            });
++            work += activating.elapsed();
++            drop(backend);
++            for index in late {
++                let cell = &flows[index].0;
++                self.fail_armed(cell, cell.identity);
++                results[index] = Some(Err(PendingUdpDecisionError::ArmedInProgress));
+             }
+-            let mut backend = self.armed_backend_before_deadline(cell, identity).await?;
+-            let mut state = cell.state.lock();
+-            let CellState::Pending {
+-                armed: true,
+-                started_at,
+-                verdicts,
+-                ..
+-            } = &mut *state
+-            else {
+-                return Err(self.fatal_error(
+-                    "activate direct",
+-                    "armed correlator changed phase before backend activation".into(),
+-                ));
+-            };
+-            if started_at.elapsed() >= HARD_HOLD_TIMEOUT {
+-                drop(state);
+-                drop(backend);
+-                self.fail_armed(cell, identity);
+-                return Err(PendingUdpDecisionError::ArmedInProgress);
++            for index in activated {
++                flows[index].0.changed.notify_waiters();
++                results[index] = Some(Ok(()));
+             }
+-            if !verdicts.is_empty() {
+-                drop(state);
+-                drop(backend);
+-                continue;
++            if let Some(detail) = failure {
++                let fatal = PendingUdpFatal::new("activate direct", detail);
++                self.signal_fatal(fatal.clone());
++                for result in results.iter_mut().filter(|result| result.is_none()) {
++                    *result = Some(Err(fatal.clone().into()));
++                }
++                break;
+             }
+-            let result = blocking_section(|| {
+-                backend.commit_udp_decision(
+-                    &identity.tuples(),
+-                    identity.owner.token,
+-                    UdpDecisionTransition::ActivateDirect(direct_rule_mark),
+-                )
+-            })
+-            .map_err(|error| self.fatal_error("activate direct", format!("{error:#}")))?;
+-            if result != UdpDecisionCommitResult::Applied {
+-                self.record_commit_mismatch(result);
+-                return Err(self.fatal_error(
+-                    "activate direct",
+-                    format!("backend rejected armed transition: {result:?}"),
+-                ));
++        }
++        self.commits.record_activations(work, flows.len());
++        results
++            .into_iter()
++            .map(|result| result.expect("every armed flow is activated or failed"))
++            .collect()
++    }
++
++    /// Accept an armed flow's held originals with its final mark, off the
++    /// backend lock; an armed flow whose hold has run out fails.
++    fn release_armed_originals(
++        &self,
++        cell: &Arc<FlowCell>,
++        direct_rule_mark: u32,
++    ) -> Result<(), PendingUdpDecisionError> {
++        let verdicts = {
++            let mut state = cell.state.lock();
++            match &mut *state {
++                CellState::Pending {
++                    armed: true,
++                    started_at,
++                    ..
++                } if started_at.elapsed() >= HARD_HOLD_TIMEOUT => None,
++                CellState::Pending {
++                    armed: true,
++                    verdicts,
++                    ..
++                } => Some(std::mem::take(verdicts)),
++                _ => {
++                    return Err(self.fatal_error(
++                        "direct verdict",
++                        "armed correlator changed phase before activation".into(),
++                    ));
++                }
+             }
+-            *state = CellState::ActiveDirect {
+-                expires_at: Instant::now() + TERMINAL_GRACE,
+-                final_mark,
+-            };
+-            break;
++        };
++        let Some(verdicts) = verdicts else {
++            self.fail_armed(cell, cell.identity);
++            return Err(PendingUdpDecisionError::ArmedInProgress);
++        };
++        for verdict in verdicts {
++            self.accept_one_fatal(verdict, direct_rule_mark | CLASSIFIED_MARK)?;
+         }
+-        cell.changed.notify_waiters();
+         Ok(())
+     }
+ 
+@@ -285,3 +368,15 @@ impl PendingUdpVerdicts {
+         ));
+     }
+ }
++
++/// When an armed flow's hold runs out, if the flow is still armed.
++fn armed_deadline(cell: &FlowCell) -> Option<Instant> {
++    match &*cell.state.lock() {
++        CellState::Pending {
++            armed: true,
++            started_at,
++            ..
++        } => Some(*started_at + HARD_HOLD_TIMEOUT),
++        _ => None,
++    }
++}
+diff --git a/crates/honk-core/src/control/nfqueue/watchdog.rs b/crates/honk-core/src/control/nfqueue/watchdog.rs
+index df224c0..dbd6099 100644
+--- a/crates/honk-core/src/control/nfqueue/watchdog.rs
++++ b/crates/honk-core/src/control/nfqueue/watchdog.rs
+@@ -119,35 +119,6 @@ impl PendingUdpVerdicts {
+         }
+     }
+ 
+-    pub(super) async fn armed_backend_before_deadline<'a>(
+-        &'a self,
+-        cell: &Arc<FlowCell>,
+-        identity: PendingUdpIdentity,
+-    ) -> Result<tokio::sync::RwLockWriteGuard<'a, Box<dyn EbpfBackend>>, PendingUdpDecisionError>
+-    {
+-        let deadline = {
+-            let state = cell.state.lock();
+-            let CellState::Pending {
+-                started_at,
+-                armed: true,
+-                ..
+-            } = &*state
+-            else {
+-                return Err(PendingUdpDecisionError::StaleIdentity);
+-            };
+-            *started_at + HARD_HOLD_TIMEOUT
+-        };
+-        match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), self.ebpf.write())
+-            .await
+-        {
+-            Ok(backend) => Ok(backend),
+-            Err(_) => {
+-                self.fail_armed(cell, identity);
+-                Err(PendingUdpDecisionError::ArmedInProgress)
+-            }
+-        }
+-    }
+-
+     pub(super) async fn backend_before_deadline<'a>(
+         &'a self,
+         cell: &Arc<FlowCell>,
+diff --git a/doc/en/design/nfqueue.md b/doc/en/design/nfqueue.md
+index 42c4e0b..1aae47d 100644
+--- a/doc/en/design/nfqueue.md
++++ b/doc/en/design/nfqueue.md
+@@ -102,7 +102,7 @@ Proxy does not create a second routing path. It reuses the same `UdpInitLease` a
+ 
+ Every packet has one absolute three-second receipt-to-verdict deadline measured from raw-netlink listener receipt. Actor delay, commit-queue wait and every backend-lock wait consume that same budget, including the second lock acquisition between Direct Arm and Activate. Queue, correlator, slow-path, or deadline saturation drops fail closed rather than extending ownership or memory growth.
+ 
+-`PendingUdpVerdicts` owns a joined pump that batches up to 1,024 terminal requests, locks backend write → correlator cell, and releases the backend lock before endpoint kernel handoff. Synchronous backend work uses `block_in_place` on multi-thread runtimes and runs inline on current-thread runtimes. The pump retains direct/block leases across caller cancellation; it rechecks original deadlines at dequeue, after backend locking, after grace and before each item, expiring late requests without conn mutation. Cancellation waits for armed Direct completion under that same deadline.
++`PendingUdpVerdicts` owns a joined pump that batches up to 1,024 terminal requests, locks backend write → correlator cell, and releases the backend lock before endpoint kernel handoff. Synchronous backend work uses `block_in_place` on multi-thread runtimes and runs inline on current-thread runtimes. The pump retains direct/block leases across caller cancellation; it rechecks original deadlines at dequeue, after backend locking, after grace and before each item, expiring late requests without conn mutation. A Direct request is late, and expires unarmed, once its deadline leaves less than its activation needs, which comes after that of the Direct flows armed before it in the batch: a 300 ms margin plus the activation work of those flows and its own, at a moving average per flow of the work without the waits for the backend, and never more than half the hold, so that a flow fresh from the queue is always armed and the average stays current. The batch's armed flows then accept their held originals off the backend lock, oldest first, and one backend acquisition activates every flow whose originals are out; a flow whose originals arrived meanwhile goes round again. Cancellation waits for armed Direct completion under that same deadline.
+ 
+ A watchdog checks held cells independently and enforces the hard hold bound. Stale token, endpoint-generation, or backend-state mismatches drop without mutating a newer incarnation. A verdict failure or any failure after Direct has armed is process-fatal because userspace can no longer safely infer which originals the kernel accepted.
+ 
+diff --git a/doc/zh/design/nfqueue.md b/doc/zh/design/nfqueue.md
+index c1a2eaf..89f857c 100644
+--- a/doc/zh/design/nfqueue.md
++++ b/doc/zh/design/nfqueue.md
+@@ -98,7 +98,7 @@ Proxy 不会创建第二条路由路径。它复用普通透明 UDP 使用的同
+ 
+ 每个包只有一个从 raw-netlink listener 收包到 verdict 的绝对 3 秒截止时间。Actor 延迟、commit 队列等待和每一次后端锁等待都消耗同一预算，包括 Direct Arm 与 Activate 之间的第二次取锁。队列、correlator 或 slow path 饱和，或截止时间到期时，均按 fail-closed 丢包，不延长所有权，也不继续增加内存占用。
+ 
+-`PendingUdpVerdicts` 持有 joined pump，每批最多处理 1,024 个终态请求，按后端写锁 → correlator cell 取锁，并在释放后端锁后交接 endpoint 给内核。同步后端工作在多线程 runtime 上用 `block_in_place`，在 current-thread runtime 上内联执行。Pump 在调用方取消后仍持有 direct/block lease；在出队、取得后端锁后、grace 后及每项执行前复验原始 deadline，过期请求不修改 conn。取消等待已 Arm Direct 在同一期限内完成。
++`PendingUdpVerdicts` 持有 joined pump，每批最多处理 1,024 个终态请求，按后端写锁 → correlator cell 取锁，并在释放后端锁后交接 endpoint 给内核。同步后端工作在多线程 runtime 上用 `block_in_place`，在 current-thread runtime 上内联执行。Pump 在调用方取消后仍持有 direct/block lease；在出队、取得后端锁后、grace 后及每项执行前复验原始 deadline，过期请求不修改 conn。Direct 请求的剩余时间一旦不足以完成它自己的激活（激活按先后进行，排在本批先前已 Arm 的 Direct 流之后：300 ms 余量，加上这些流与它自身的激活工作，按批次实测、不含等待后端锁的每流平均耗时计，且至多为保持期限的一半，使刚出队的流总能 Arm，平均值也随之持续更新），即视为过期，不 Arm 而直接到期。本批已 Arm 的流先在后端锁外、按先后放行各自持有的原始包，再取一次后端锁激活所有原始包已放行的流；其间又有原始包到达的流放行后进入下一轮。取消等待已 Arm Direct 在同一期限内完成。
+ 
+ Watchdog 独立检查持有的 cell，并强制执行硬持有上限。Token、endpoint generation 或后端状态不匹配时会丢包，且不会修改更新的 incarnation。Verdict 失败或 Direct 已 Arm 后的任何失败都会使进程 fatal，因为用户空间已无法安全判断内核接受了哪些原始包。
+ 
