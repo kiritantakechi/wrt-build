@@ -23,7 +23,7 @@
 
 ## 3. The honk package (design D1, D3, D5, D6, D8, D10)
 
-- [ ] 3.1 `feed/net/honk/Makefile`: honk's tag archive and doona's source archive, hash-verified; doona built with pnpm (frozen lockfile) and vite; the eBPF object from 2.1's recipe; honk-core with features `ebpf`, `native-ui`, `jemalloc`, `rprx` and the object through the `build.rs` patch (D2), meant for upstream, with its write-up.
+- [x] 3.1 `feed/net/honk/Makefile`: honk's tag archive and doona's source archive, hash-verified; doona built with pnpm (frozen lockfile) and vite; the eBPF object from 2.1's recipe; honk-core with features `ebpf`, `native-ui`, `jemalloc`, `rprx` and the object through the `build.rs` patch (D2), meant for upstream, with its write-up.
 
   Verify: the package builds for both boards from a clean build directory; the image's `honk-core --version` names the pinned release; the reviewed-warnings register check passes on both boards' `warnings.json`.
 - [x] 3.2 The init script with the entry of D4 (the configuration's directory copied as the entry's, root-only; the firmware's settings included last, so they win), procd with respawn and `term_timeout` 30 s, CPU pinning, reload after honk's check (D5); uci `honk` with `config_file` and `cpu_pinning`; the template `/etc/honk/config.dae` with the native API off; the health check (D6); `keep.d` for `/etc/honk`; the service disabled in the image. Remove `feed/net/dae`.
@@ -62,11 +62,11 @@
 - [x] 6.1 Make the LuCI-save test require the same honk process after the reload, and reproduce #476 on the emulator; pin the mechanism. The transparent-proxy test of firewall reloads while flows wait for honk's decision (D7: the kernel drops the queued packets, and honk took its answer to their verdicts for a protocol failure).
 
   Verify: the test fails on the unpatched honk, with the mechanism recorded in the patch's write-up; honk-nfqueue's unit test and root-only kernel test of a verdict for a dropped packet fail without the fix.
-- [ ] 6.2 Fix it in honk, a patch meant for upstream with its write-up.
+- [x] 6.2 Fix it in honk, a patch meant for upstream with its write-up.
 
   Verify: the LuCI-save test and the test of firewall reloads while flows wait pass on both boards, ten reloads in a row keeping the process; honk-nfqueue's tests pass.
 
-- [ ] 6.3 honk withstands a stream of new flows waiting for its decision: a batch's armed direct flows activated under one backend acquisition, and a flow armed only with the time left for its activation; a patch meant for upstream with its write-up (D7).
+- [x] 6.3 honk withstands a stream of new flows waiting for its decision: a batch's armed direct flows activated under one backend acquisition, and a flow armed only with the time left for its activation; a patch meant for upstream with its write-up (D7).
 
   Verify: honk's unit tests of batched activation and of a flow without time for its activation fail on the unpatched pump and pass with the patch; the transparent-proxy test of a stream of new flows passes on both boards.
 

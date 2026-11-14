@@ -17,9 +17,10 @@ back through a stateful NAT.
 
 Every other command is a client and prints one JSON object: ``tcp``, ``udp`` and
 ``esp`` what the server saw; ``connect`` whether any TCP server accepted a
-connection, refused it or never answered; ``listen`` the first datagram it
-receives; ``send``
-the port it sent one from; ``resolve`` the answers of a DNS server;
+connection, refused it or never answered; ``greeting`` the first line a TCP
+server that speaks first sends (SSH's banner); ``listen`` the first datagram it
+receives; ``send`` the port it sent one from; ``resolve`` the answers of a DNS
+server;
 ``solicit-prefix`` what a DHCPv6 server offers for prefix delegation;
 ``solicit-router`` that it asked the routers on a link for an advertisement, as a
 host does when it attaches; ``inject`` the size of the Ethernet frame it put on
@@ -265,6 +266,13 @@ def connect(host: str, port: int) -> Seen:
         return {"connection": "unanswered"}
 
 
+def greeting(host: str, port: int) -> Seen:
+    """Connect and return the first line the server sends, as one that speaks first (SSH) does."""
+    with socket.create_connection((host, port), timeout=TIMEOUT) as sock:
+        line = sock.makefile(encoding="utf-8", errors="replace").readline()
+        return {"greeting": line.rstrip("\r\n")}
+
+
 def udp(host: str, port: int, *, source_port: int = 0, big: bool = False) -> Seen:
     """Send one datagram (from ``source_port``) and return what the server saw.
 
@@ -475,6 +483,12 @@ def main() -> None:
     command(
         "connect",
         lambda a: connect(a.host, a.port),
+        host,
+        ("--port", {"type": int, "required": True}),
+    )
+    command(
+        "greeting",
+        lambda a: greeting(a.host, a.port),
         host,
         ("--port", {"type": int, "required": True}),
     )

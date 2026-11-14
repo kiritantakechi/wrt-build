@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from wrt_tests import spec
+from wrt_tests.device.router import SSH_PORT
 from wrt_tests.model.poll import until
 from wrt_tests.sandbox.net import DIRECT_TARGET, PROXIED_TARGET, PROXY
 from wrt_tests.sandbox.netprobe import HTTP_PORT
@@ -28,6 +29,7 @@ from wrt_tests.services.datapath import (
     PROXY_CONFIG,
     PROXY_HOOKS_L2,
     PROXY_NFQUEUE_TABLE,
+    PROXY_RELEASE,
     PROXY_TIMEOUT,
     hooks,
     native_api,
@@ -47,9 +49,11 @@ if TYPE_CHECKING:
 CAPABILITY = "network/transparent-proxy"
 HEALTHCHECK = "/etc/healthcheck.d/50-honk"
 BIND_TIMEOUT = 60
-# The LAN connections to the router that must all be accepted: one a second for
-# a minute (honk #456 refused some of them).
+# The LAN connections to the router that must all be answered: one a second to
+# each service at each address, for a minute (honk #456 refused some of them).
 ROUTER_CONNECTIONS = 60
+# What the router's SSH server (dropbear) says first: its protocol version.
+SSH_BANNER = "SSH-2.0-"
 # A domain the rules send through the proxy: it keeps every new direct UDP
 # flow's route open until honk has seen the flow's first packet, which waits in
 # honk's queue meanwhile, as with any configuration that routes by domain.
@@ -209,25 +213,27 @@ def test_router_traffic_goes_direct(proxy: Online) -> None:
     "The router stays reachable from bound interfaces",
     "Connect to the router from the LAN",
 )
-def test_the_router_answers_the_lan(proxy: Online) -> None:
-    client = proxy.client()
+@pytest.mark.parametrize("domains", [(), (PROXIED_DOMAIN,)], ids=["by-address", "by-domain"])
+def test_the_router_answers_the_lan(proxy_restored: Online, domains: tuple[str, ...]) -> None:
+    # Each second a connection to the router's web server (LuCI) and one to its
+    # SSH server, at each of its LAN addresses. Routed by address alone, honk's
+    # programs leave them to the kernel; with a domain rule honk takes each into
+    # its own socket (TPROXY) to sniff it and dials the router's service itself,
+    # the path where honk #456 rejected some IPv4 connections.
+    online = proxy_restored
+    proxy_start(online.router, proxy_config(domains=domains))
+    client = online.client()
+    addresses = online.router_addresses()
     answers = []
     for _ in range(ROUTER_CONNECTIONS):
-        answers.append(
-            client.run(
-                "curl",
-                "-s",
-                "-o",
-                "/dev/null",
-                "-m",
-                "5",
-                "-w",
-                "%{http_code}",
-                f"http://{proxy.router.address}/",
-            )
-        )
+        for address in addresses:
+            url = f"http://[{address}]/" if ":" in address else f"http://{address}/"
+            web = client.run("curl", "-gso", "/dev/null", "-m", "5", "-w", "%{http_code}", url)
+            ssh = client.probe("greeting", address, "--port", str(SSH_PORT))["greeting"]
+            answers.append((address, web, cast("str", ssh).startswith(SSH_BANNER)))
         time.sleep(1)
-    assert set(answers) == {"200"}, answers
+    unanswered = [answer for answer in answers if answer[1:] != ("200", True)]
+    assert not unanswered, unanswered
 
 
 @spec(CAPABILITY, "Configuration management", "Save config in LuCI")
@@ -274,7 +280,7 @@ def test_luci_save_hot_reloads(proxy_restored: Online) -> None:
 @spec(CAPABILITY, "Configuration management", "Inspect the image")
 def test_image_carries_only_a_template(proxy: Online) -> None:
     router = proxy.router
-    assert "0.1.0-beta.6" in router.run("honk-core --version")
+    assert PROXY_RELEASE in router.run("honk-core --version")
     template = router.run("cat /rom/etc/honk/config.dae")
     sections = set(re.findall(r"^(\w+)\s*\{", template, re.MULTILINE))
     assert sections <= {"global", "routing"}, sections

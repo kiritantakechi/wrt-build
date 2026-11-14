@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Self, cast
 
 from wrt_tests.device.router import REACHABLE_TIMEOUT
 from wrt_tests.model.poll import until
+from wrt_tests.model.repository import REPO_DIR
 from wrt_tests.sandbox.internet import RELEASES
 from wrt_tests.sandbox.isp import DELEGATED_PREFIX, LOGIN
 from wrt_tests.sandbox.net import DIRECT_TARGET, PROXIED_TARGET, PROXY, PROXY_PORT
@@ -91,6 +92,23 @@ RENEW_INTERVAL = 30.0
 # internet's HTTP server through the node rather than a public URL it does not
 # serve.
 PROXIED = (*PROXIED_TARGET, RELEASES[1])
+
+
+def _pinned_release() -> str:
+    """Return the honk release the package pins, as honk names it: its tag without the v.
+
+    The package's version spells it as apk does, which honk does not.
+    """
+    makefile = (REPO_DIR / "feed/net/honk/Makefile").read_text(encoding="utf-8")
+    for line in makefile.splitlines():
+        name, _, value = line.partition(":=")
+        if name == "HONK_TAG":
+            return value.removeprefix("v")
+    msg = "feed/net/honk/Makefile pins no HONK_TAG"
+    raise LookupError(msg)
+
+
+PROXY_RELEASE = _pinned_release()
 
 
 def proxy_config(proxied: Sequence[str] = PROXIED, domains: Sequence[str] = ()) -> str:
@@ -204,17 +222,22 @@ def interface(router: Router, name: str) -> dict[str, Any]:
     return cast("dict[str, Any]", json.loads(router.run(f"ifstatus {name}")))
 
 
-def lan_addresses(client: Netns) -> tuple[str, str] | None:
-    """Return a LAN client's IPv4 address and global IPv6 address, once it can use both.
+def _usable_addresses(shown: str) -> tuple[str, str] | None:
+    """Return the IPv4 address and global IPv6 address ``ip -o addr`` shows, once both are usable.
 
     An IPv6 address is usable once duplicate address detection is done with it
     (no longer tentative); before, no connection can take it as its source.
     """
-    lines = client.run("ip", "-o", "addr", "show", "dev", "eth0").splitlines()
+    lines = shown.splitlines()
     addresses = [line.split()[3].split("/")[0] for line in lines if " tentative " not in line]
     ipv4 = [a for a in addresses if ":" not in a]
     ipv6 = [a for a in addresses if ":" in a and ipaddress.IPv6Address(a) in DELEGATED_PREFIX]
     return (ipv4[0], ipv6[0]) if ipv4 and ipv6 else None
+
+
+def lan_addresses(client: Netns) -> tuple[str, str] | None:
+    """Return a LAN client's IPv4 address and global IPv6 address, once it can use both."""
+    return _usable_addresses(client.run("ip", "-o", "addr", "show", "dev", "eth0"))
 
 
 def dhcp_leases(router: Router) -> dict[str, int]:
@@ -307,6 +330,12 @@ class Online:
         """Return a LAN client's IPv4 and global IPv6 addresses."""
         found = lan_addresses(self.client(name))
         assert found is not None, f"{name} has no addresses"  # noqa: S101
+        return found
+
+    def router_addresses(self) -> tuple[str, str]:
+        """Return the router's IPv4 and global IPv6 addresses on the LAN."""
+        found = _usable_addresses(self.router.run("ip -o addr show dev br-lan"))
+        assert found is not None, "the router has no usable LAN addresses"  # noqa: S101
         return found
 
     def reboot(self, *, while_off: Callable[[], object] | None = None) -> None:

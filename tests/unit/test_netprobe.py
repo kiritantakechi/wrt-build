@@ -7,7 +7,7 @@ router; test_isp and the network tests cover them.
 import json
 import subprocess
 import sys
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 import pytest
 
@@ -101,6 +101,13 @@ def test_connect_tells_accepted_from_refused(client: Netns, family: int) -> None
         "connection": "accepted"
     }
     assert client.probe("connect", SERVER[family], "--port", "9") == {"connection": "refused"}
+
+
+@pytest.mark.parametrize("family", [0, 1], ids=["ipv4", "ipv6"])
+def test_greeting_returns_what_the_server_says_first(client: Netns, family: int) -> None:
+    # netprobe's TCP server speaks first: it sends what it saw of the client.
+    seen = client.probe("greeting", SERVER[family], "--port", str(PORT))
+    assert json.loads(cast("str", seen["greeting"]))["address"] == CLIENT[family]
 
 
 @pytest.mark.parametrize("family", [0, 1], ids=["ipv4", "ipv6"])

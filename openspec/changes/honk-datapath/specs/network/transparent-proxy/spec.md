@@ -89,7 +89,7 @@ honk SHALL register a check with the health check: the check passes only when ho
 While honk runs, connections from a bound interface to the router's own addresses SHALL reach the router's services, over IPv4 and IPv6.
 
 #### Scenario: Connect to the router from the LAN
-- **WHEN** honk runs and a LAN client opens TCP connections to the router's LAN address, one every second for a minute
+- **WHEN** honk runs, routing by address alone or with a domain rule, and a LAN client opens TCP connections to the router's web and SSH servers at each of its LAN addresses, IPv4 and IPv6, one to each every second for a minute
 - **THEN** every connection is accepted and answered by the router's service
 
 ### Requirement: Web UI through the native API in token mode
