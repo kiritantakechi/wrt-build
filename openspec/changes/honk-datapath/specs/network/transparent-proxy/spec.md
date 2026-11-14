@@ -46,6 +46,10 @@ honk SHALL be placed by the scheduler by default. An option SHALL pin it to the 
 - **WHEN** the pinning option is enabled and honk restarts
 - **THEN** honk runs only on the CPUs with the highest capacity, and its programs are on the bound interfaces again
 
+#### Scenario: Disable CPU pinning
+- **WHEN** the pinning option is disabled again and honk reloads
+- **THEN** honk runs on every CPU again
+
 #### Scenario: Restart a pinned honk
 - **WHEN** the pinning option is enabled and honk restarts again and again
 - **THEN** every new honk runs only on the CPUs with the highest capacity

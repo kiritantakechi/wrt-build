@@ -430,12 +430,23 @@ def proxy_pid(router: Router) -> str:
     return router.run("pidof honk-core || true")
 
 
+# Whether honk's queue (NFQUEUE 320) is bound by a socket of process $pid: the
+# queue's peer port names a netfilter netlink socket (/proc/net/netlink: protocol
+# 12), whose inode the process holds among its descriptors.
+QUEUE_OWNED = (
+    "port=$(awk '$1 == 320 { print $2 }' /proc/net/netfilter/nfnetlink_queue)"
+    " && inode=$(awk -v port=\"$port\" '$2 == 12 && $3 == port { print $10 }' /proc/net/netlink)"
+    ' && [ -n "$inode" ] && ls -l /proc/$pid/fd | grep -q "socket:\\[$inode\\]"'
+)
+
+
 def wait_proxy(router: Router, *, replacing: str = "") -> None:
     """Wait until one honk, not the process ``replacing``, has set up its datapath.
 
-    That is its programs on br-lan and, the last of its start, its NFQUEUE table:
-    a honk that is stopping keeps its programs on br-lan for a while, and a new
-    one installs its table a moment after its programs.
+    That is its programs on br-lan, its NFQUEUE table and its own binding of the
+    queue: a honk that is stopping keeps its programs on br-lan for a while, a new
+    one installs its table a moment after its programs, and a honk that was killed
+    leaves its table behind (fail-closed) without a queue.
     """
 
     def up() -> bool:
@@ -445,6 +456,7 @@ def wait_proxy(router: Router, *, replacing: str = "") -> None:
             and " " not in pid
             and hooks(router, "br-lan") == PROXY_HOOKS_L2
             and router.returncode(f"nft list table {PROXY_NFQUEUE_TABLE} >/dev/null") == 0
+            and router.returncode(f"pid={pid}; {QUEUE_OWNED}") == 0
         )
 
     until(up, timeout=PROXY_TIMEOUT, what="honk's datapath on br-lan")

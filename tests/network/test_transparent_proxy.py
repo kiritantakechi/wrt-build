@@ -453,6 +453,25 @@ def test_cpu_pinning_takes_the_big_cores(proxy_restored: Online, board: Board) -
         router.run("uci set honk.config.cpu_pinning=0 && uci commit honk")
 
 
+@spec(CAPABILITY, "Optional CPU pinning", "Disable CPU pinning")
+def test_disabling_cpu_pinning_frees_honk(proxy_restored: Online, board: Board) -> None:
+    router = proxy_restored.router
+    cpus = router.run("ls -d /sys/devices/system/cpu/cpu[0-9]*").split()
+    every = sum(1 << int(cpu.rsplit("cpu", 1)[1]) for cpu in cpus)
+    running = proxy_pid(router)
+    router.run("uci set honk.config.cpu_pinning=1 && uci commit honk && /etc/init.d/honk restart")
+    try:
+        wait_proxy(router, replacing=running)
+        pinned = proxy_pid(router)
+        assert _affinity(router) == sum(1 << cpu for cpu in board.big_cores)
+    finally:
+        router.run("uci set honk.config.cpu_pinning=0 && uci commit honk")
+    # A reload sets the cpuset of the running honk.
+    router.run("/etc/init.d/honk reload")
+    assert proxy_pid(router) == pinned
+    assert _affinity(router) == every
+
+
 @spec(CAPABILITY, "Optional CPU pinning", "Restart a pinned honk")
 def test_every_restart_keeps_honk_pinned(proxy_restored: Online, board: Board) -> None:
     router = proxy_restored.router

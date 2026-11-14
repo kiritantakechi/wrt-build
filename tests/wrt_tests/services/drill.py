@@ -33,8 +33,13 @@ PUBLISH = REPO_DIR / "scripts" / "release-publish.sh"
 # The candidate's repository at the Releases stand-in.
 REPOSITORY = "wrt-build/drill"
 FAILING_CHECK = "/etc/healthcheck.d/99-drill-fails"
-# A health check quick enough for a drill that fails (r4s-ab-rollback D4).
-HEALTH_LIMITS = {"total": 20, "interval": 5, "timeout": 5}
+# A health check quick enough for a drill that fails (r4s-ab-rollback D4). A drill
+# that is to pass keeps the image's own limits, as a router upgrades with them:
+# shortened, honk's start on CI's runners outlasted them, and the trial rolled
+# back although nothing was wrong (the false rollback D5 warns of).
+FAILING_HEALTH_LIMITS = {"total": 20, "interval": 5, "timeout": 5}
+# A limit as the image sets it.
+IMAGE_HEALTH_LIMIT = "$(uci -c /rom/etc/config get wrt-ab.healthcheck.{name})"
 BOOT_LIMIT = 3
 SYNC_TIMEOUT = 600
 DRILL_TIMEOUT = 3600
@@ -87,6 +92,7 @@ class Drill:
     keys: Keys | None
     pushed: dict[str, str] = field(default_factory=dict)
     published: str | None = None
+    failing: bool = False
 
     def publish(self, workdir: Path) -> str:
         """Assemble the candidate and put it at the Releases stand-in; return its tag."""
@@ -127,6 +133,7 @@ class Drill:
             f"printf '#!/bin/sh\\nexit 1\\n' >{FAILING_CHECK} && chmod +x {FAILING_CHECK}"
             f" && echo {FAILING_CHECK} >>/etc/sysupgrade.conf"
         )
+        self.failing = True
 
     def run(self, workdir: Path | None = None) -> Outcome:
         """Sync the candidate, upgrade to it and wait for the confirmation or the rollback."""
@@ -142,7 +149,9 @@ class Drill:
             # release image trusts the release keys.
             trust_keys(router, self.keys)
         limits = " && ".join(
-            f"uci set wrt-ab.healthcheck.{name}={value}" for name, value in HEALTH_LIMITS.items()
+            f"uci set wrt-ab.healthcheck.{name}="
+            + (str(value) if self.failing else IMAGE_HEALTH_LIMIT.format(name=name))
+            for name, value in FAILING_HEALTH_LIMITS.items()
         )
         router.run(
             f"{limits} && uci set wrt-sync.main.api=https://{RELEASES[0]}"

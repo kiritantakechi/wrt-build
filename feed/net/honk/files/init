@@ -177,6 +177,9 @@ pin() {
 		[ -z "${cores}" ] || logger -t honk "no cpuset controller: honk is not pinned"
 		return 0
 	fi
+	# Unpinned, honk has every CPU its parent has: the kernel keeps a cgroup
+	# with tasks from going back to an empty cpuset (ENOSPC).
+	[ -n "${cores}" ] || cores=$(cat "${CGROUP%/*}/cpuset.cpus.effective")
 	echo "${cores}" >"${CGROUP}/cpuset.cpus"
 }
 
